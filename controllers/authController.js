@@ -392,3 +392,72 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid Code.", 401));
   }
 });
+
+// new helper: create & send OTP (hash before storing)
+const createAndSendOtp = async (user, res, next) => {
+  // Delete any old OTPs for the user first (cleanup)
+  await Otp.deleteMany({ user: user._id });
+
+  // generate 6-digit numeric code (string)
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+
+  // hash the code before saving (confirmUserByOtp uses bcrypt.compare)
+  const hashedCode = await bcrypt.hash(code, 10);
+
+  const otpExpireMs = 10 * 60 * 1000; // 10 minutes
+  const otpDoc = await Otp.create({
+    code: hashedCode,
+    user: user._id,
+    expire: Date.now() + otpExpireMs,
+  });
+
+  if (!otpDoc) {
+    return next(new ErrorResponse("Otp Creation Failed", 500));
+  }
+
+  const subject = "Confirmation Token";
+  const message = `You need to confirm your account through the <strong>OTP</strong>: \n\n ${code}`;
+
+  // use your existing optSend which sends the HTTP response
+  return optSend(user, message, subject, res, next);
+};
+// New endpoint: resend OTP
+// @route  POST /api/v1/auth/resend-otp
+// @access Public (or require auth if you prefer)
+exports.resendOtp = asyncHandler(async (req, res, next) => {
+  // Accept email in body (or whichever identifier you prefer)
+  const { email } = req.body;
+  if (!email) {
+    return next(new ErrorResponse("Please provide an email.", 400));
+  }
+
+  const user = await User.findOne({ email });
+  if (!user) {
+    return next(new ErrorResponse("No user found with that email.", 404));
+  }
+
+  if (user.isActive) {
+    return next(new ErrorResponse("User already confirmed.", 400));
+  }
+
+  // Rate limit: check latest OTP for this user
+  const latest = await Otp.findOne({ user: user._id }).sort({ createdAt: -1 });
+
+  // If there's a recent OTP created < 60s ago, block
+  const resendThrottleMs = 60 * 1000; // 60 seconds
+  if (
+    latest &&
+    latest.createdAt &&
+    Date.now() - latest.createdAt.getTime() < resendThrottleMs
+  ) {
+    return next(
+      new ErrorResponse("Please wait a bit before requesting a new OTP.", 429),
+    );
+  }
+
+  // If there's a still-valid OTP (not expired), you can either:
+  // - refuse to create a new one (encourage using existing), or
+  // - create a new OTP and delete old ones.
+  // Here we just create a fresh one (we already deleted old ones inside helper).
+  await createAndSendOtp(user, res, next);
+});
