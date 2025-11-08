@@ -399,14 +399,13 @@ const createAndSendOtp = async (user, res, next) => {
   await Otp.deleteMany({ user: user._id });
 
   // generate 6-digit numeric code (string)
-  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const code = Math.floor(100000 + Math.random() * 900000);
 
   // hash the code before saving (confirmUserByOtp uses bcrypt.compare)
-  const hashedCode = await bcrypt.hash(code, 10);
 
   const otpExpireMs = 10 * 60 * 1000; // 10 minutes
   const otpDoc = await Otp.create({
-    code: hashedCode,
+    code: code,
     user: user._id,
     expire: Date.now() + otpExpireMs,
   });
