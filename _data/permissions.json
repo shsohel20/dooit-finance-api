@@ -1,0 +1,14 @@
+[
+    {
+        "name":  "BLOG.ADD"
+    },
+    {
+        "name":  "BLOG.EDIT"
+    },
+    {
+        "name":  "BLOG.DELETE"
+    },
+    {
+        "name":  "BLOG.GET"
+    }
+]

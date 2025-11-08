@@ -1,0 +1,46 @@
+npm install -g win-node-env
+
+
+npm install express-mongo-sanitize
+
+
+
+// const resetUrl = `${req.body.clientUrl}/auth/reset-password/${resetToken}`;
+
+  // const message = `You are receiving this email because you has requested the reset
+  // of a password, Please make a PUT request to: \n\n ${resetUrl}`;
+
+  // try {
+  //   await sendEmail({
+  //     email: user.email,
+  //     subject: 'Confirmation Token token',
+  //     message,
+  //   });
+  //   res.status(200).json({
+  //     success: true,
+  //     message: 'Email Send Successfully',
+  //   });
+  // } catch (error) {
+  //   user.resetPasswordToken = undefined;
+  //   user.resetPasswordExpire = undefined;
+
+  //   return next(new ErrorResponse('Email could not be sent', 500));
+  // }
+
+  // sendTokenResponse(user, 200, res);
+
+  npm install web-push -g
+ web-push generate-vapid-keys
+
+ /// For Creating App password
+
+ 1. go to Gmail 
+ 2. Go to Settings 
+ 3. Search APP password and Create
+
+
+
+
+ During sending Invitation for customer 
+
+ 

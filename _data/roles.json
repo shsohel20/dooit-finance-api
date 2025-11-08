@@ -1,0 +1,9 @@
+[
+	{
+		"name": "Admin",
+		"permissions": [
+			"USER.ADD",
+			"USER.DELETE"
+		]
+	}
+]
