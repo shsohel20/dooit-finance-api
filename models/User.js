@@ -31,7 +31,7 @@ const UserSchema = new mongoose.Schema(
       type: String,
       trim: true,
       unique: true,
-      required: [true, "Please add a  phone"],
+      //required: [true, "Please add a  phone"],
     },
     userType: {
       type: String,
@@ -84,7 +84,7 @@ const UserSchema = new mongoose.Schema(
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
     timestamps: true,
-  }
+  },
 );
 
 // UserSchema.virtual("photoUrl").get(function (req) {
@@ -137,7 +137,7 @@ UserSchema.methods.getSignedJwtToken = function () {
     process.env.JWT_SECRET,
     {
       expiresIn: process.env.JWT_EXPIRE,
-    }
+    },
   );
 };
 
