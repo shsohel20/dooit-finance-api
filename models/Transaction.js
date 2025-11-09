@@ -171,11 +171,10 @@ TransactionSchema.post("save", async function (doc, next) {
  * Unique where needed, sparse for optional fields.
  */
 
-TransactionSchema.index({ uid: 1 }, { unique: true });
 TransactionSchema.index({ customer: 1, timestamp: -1 });
-TransactionSchema.index({ "crypto.txHash": 1 }, { sparse: true });
-TransactionSchema.index({ "crypto.walletAddress": 1 }, { sparse: true });
-TransactionSchema.index({ "travelRule.travelMessageId": 1 }, { sparse: true });
+
+// TransactionSchema.index({ "crypto.walletAddress": 1 }, { sparse: true });
+// TransactionSchema.index({ "travelRule.travelMessageId": 1 }, { sparse: true });
 TransactionSchema.index({ reference: "text", narrative: "text" }); // text index for search
 
 /**
