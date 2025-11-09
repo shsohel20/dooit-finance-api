@@ -3,6 +3,7 @@ const { Schema } = mongoose;
 
 const CompanyKycSchema = new Schema(
   {
+    uid: String,
     client: {
       type: Schema.Types.ObjectId,
       ref: "Client",

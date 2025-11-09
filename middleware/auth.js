@@ -23,9 +23,16 @@ exports.protect = asyncHandler(async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = await User.findById(decoded.id);
+    req.user = await User.findById(decoded.id).populate({
+      path: "customers", // virtual on User
+      populate: [
+        { path: "relations.client", select: "name _id" },
+        { path: "relations.branch", select: "name _id branchCode" },
+      ],
+    });
     next();
   } catch (error) {
+    console.log(error);
     return next(new ErrorResponse("Not authorize to access this route", 401));
   }
 });
@@ -38,8 +45,8 @@ exports.verifyUser = asyncHandler(async (req, res, next) => {
       return next(
         new ErrorResponse(
           "Your account not verify yet! Please verify by OTP.",
-          401,
-        ),
+          401
+        )
       );
     }
 
@@ -57,8 +64,8 @@ exports.authorize = (...roles) => {
       return next(
         new ErrorResponse(
           `User role ${req.user.role} is not authorized to access`,
-          403,
-        ),
+          403
+        )
       );
     }
     next();

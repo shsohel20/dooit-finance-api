@@ -100,6 +100,7 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
 // @route GET /api/v1/transactions/:id
 // @access Protected
 exports.getTransaction = asyncHandler(async (req, res, next) => {
+  const loggedInUser = req.user;
   const tx = await Transaction.findById(req.params.id).populate(
     "customer client branch createdBy"
   );

@@ -40,7 +40,7 @@ const PersonalFormSchema = new Schema(
       country: String,
     },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const Authorization = new Schema(
@@ -52,7 +52,7 @@ const Authorization = new Schema(
     agent_date: Date,
     documents_attested: { type: Boolean, default: false },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const PersonalKycSchema = new Schema(
@@ -80,7 +80,7 @@ const PersonalKycSchema = new Schema(
       },
     },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const DocumentMetaSchema = new Schema(
@@ -91,11 +91,12 @@ const DocumentMetaSchema = new Schema(
     type: String,
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const CustomerSchema = new Schema(
   {
+    uid: String,
     user: {
       type: Schema.Types.ObjectId,
       ref: "Users",
@@ -188,14 +189,14 @@ const CustomerSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
+  }
 );
 
 /**
  * Generate and assign an invite token.
  */
 CustomerSchema.methods.generateInviteToken = function (
-  expiresInMinutes = 60 * 24 * 7,
+  expiresInMinutes = 60 * 24 * 7
 ) {
   const plain = crypto.randomBytes(20).toString("hex");
   const hashed = crypto.createHash("sha256").update(plain).digest("hex");
@@ -211,7 +212,7 @@ CustomerSchema.methods.generateInviteToken = function (
 
 CustomerSchema.index(
   { _id: 1, "relations.client": 1, "relations.branch": 1 },
-  { unique: true, sparse: true, name: "customer_relation_unique" },
+  { unique: true, sparse: true, name: "customer_relation_unique" }
 );
 
 CustomerSchema.methods.clearInviteToken = function () {

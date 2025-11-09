@@ -5,6 +5,7 @@ const { Schema } = mongoose;
 
 const DeviceSchema = new Schema(
   {
+    uid: String,
     user: {
       type: Schema.Types.ObjectId,
       ref: "Users",

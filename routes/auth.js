@@ -14,6 +14,7 @@ const {
   confirmUser,
   confirmUserByOtp,
   resendOtp,
+  getMeCustomer,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/auth");
 
@@ -24,6 +25,7 @@ router.route("/register").post(register);
 router.route("/login").post(login);
 router.route("/logout").get(logout);
 router.route("/me").get(protect, getMe);
+router.route("/me/customer").get(protect, getMeCustomer);
 router.route("/forgot-password").post(forgotPassword);
 router.route("/reset-password/:resettoken").put(resetPassword);
 router.route("/confirm-user/:resettoken").put(confirmUser);

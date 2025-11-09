@@ -84,7 +84,7 @@ const UserSchema = new mongoose.Schema(
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
     timestamps: true,
-  },
+  }
 );
 
 // UserSchema.virtual("photoUrl").get(function (req) {
@@ -100,12 +100,12 @@ const UserSchema = new mongoose.Schema(
 //   justOne: false,
 // });
 
-// UserSchema.virtual("jobs", {
-//   ref: "Jobs",
-//   localField: "_id",
-//   foreignField: "author",
-//   justOne: false,
-// });
+// 🔥 Virtual populate for customers linked to this user
+UserSchema.virtual("customers", {
+  ref: "Customer", // model name
+  localField: "_id", // field on User
+  foreignField: "user", // field on Customer
+});
 
 UserSchema.pre("save", function (next) {
   this.slug = slugify(this.name, { lower: true });
@@ -137,7 +137,7 @@ UserSchema.methods.getSignedJwtToken = function () {
     process.env.JWT_SECRET,
     {
       expiresIn: process.env.JWT_EXPIRE,
-    },
+    }
   );
 };
 

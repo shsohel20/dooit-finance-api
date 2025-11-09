@@ -20,7 +20,7 @@ const ContactSchema = new Schema(
     phone: { type: String, trim: true },
     primary: { type: Boolean, default: false },
   },
-  { _id: false },
+  { _id: false }
 );
 
 // Address subdocument (with geo for 2dsphere queries)
@@ -43,7 +43,7 @@ const AddressSchema = new Schema(
       },
     },
   },
-  { _id: false },
+  { _id: false }
 );
 
 // Document / file metadata subdocument
@@ -55,7 +55,7 @@ const DocumentSchema = new Schema(
     type: { type: String, trim: true }, // e.g., 'license', 'agreement'
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: false },
+  { _id: false }
 );
 
 /**
@@ -63,6 +63,7 @@ const DocumentSchema = new Schema(
  */
 const ClientSchema = new Schema(
   {
+    uid: String,
     user: {
       type: mongoose.Schema.ObjectId,
       ref: "Users",
@@ -120,7 +121,7 @@ const ClientSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
+  }
 );
 
 /**
@@ -132,6 +133,7 @@ ClientSchema.index({ user: 1 });
 /**
  * Virtuals
  */
+
 ClientSchema.virtual("fullAddress").get(function () {
   const a = this.address || {};
   return [a.street, a.city, a.state, a.zipcode, a.country]

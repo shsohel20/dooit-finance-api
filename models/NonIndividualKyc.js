@@ -142,6 +142,7 @@ const AssociationCooperativeSchema = new Schema(
 );
 const NonIndividualKycSchema = new Schema(
   {
+    uid: String,
     client: {
       type: Schema.Types.ObjectId,
       ref: "Client",

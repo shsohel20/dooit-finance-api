@@ -61,7 +61,7 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
   // - explicit userName or userEmail provided
   // - or a flag autoCreateUserForBranch true AND an email exists (branch email)
   const shouldCreateUser = Boolean(
-    userName || (autoCreateUserForBranch && email),
+    userName || (autoCreateUserForBranch && email)
   );
 
   let createdUser = null;
@@ -153,7 +153,7 @@ exports.getBranch = asyncHandler(async (req, res, next) => {
 
   if (!branch) {
     return next(
-      new ErrorResponse(`Branch not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Branch not found with id of ${req.params.id}`, 404)
     );
   }
 
@@ -168,15 +168,12 @@ exports.getBranch = asyncHandler(async (req, res, next) => {
 // @access Public (or Private based on your route)
 exports.getBranchBySlug = asyncHandler(async (req, res, next) => {
   const branch = await Branch.findOne({ slug: req.params.slug }).populate(
-    "client",
+    "client"
   );
 
   if (!branch) {
     return next(
-      new ErrorResponse(
-        `Branch not found with slug of ${req.params.slug}`,
-        404,
-      ),
+      new ErrorResponse(`Branch not found with slug of ${req.params.slug}`, 404)
     );
   }
 
@@ -194,7 +191,7 @@ exports.updateBranch = asyncHandler(async (req, res, next) => {
   const branch = await Branch.findById(branchId);
   if (!branch)
     return next(
-      new ErrorResponse(`Branch not found with id of ${branchId}`, 404),
+      new ErrorResponse(`Branch not found with id of ${branchId}`, 404)
     );
 
   // validate update payload
@@ -261,7 +258,7 @@ exports.deleteBranch = asyncHandler(async (req, res, next) => {
   const branch = await Branch.findById(req.params.id);
   if (!branch) {
     return next(
-      new ErrorResponse(`Branch not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Branch not found with id of ${req.params.id}`, 404)
     );
   }
 

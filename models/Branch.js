@@ -17,7 +17,7 @@ const ContactSchema = new Schema(
     phone: { type: String, trim: true },
     primary: { type: Boolean, default: false },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const AddressSchema = new Schema(
@@ -39,7 +39,7 @@ const AddressSchema = new Schema(
       },
     },
   },
-  { _id: false },
+  { _id: false }
 );
 
 const DocumentSchema = new Schema(
@@ -50,7 +50,7 @@ const DocumentSchema = new Schema(
     type: { type: String, trim: true }, // e.g., 'license', 'agreement'
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: false },
+  { _id: false }
 );
 
 /**
@@ -58,6 +58,7 @@ const DocumentSchema = new Schema(
  */
 const BranchSchema = new Schema(
   {
+    uid: String,
     client: {
       type: mongoose.Schema.ObjectId,
       ref: "Client",
@@ -144,7 +145,7 @@ const BranchSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  },
+  }
 );
 
 /**
@@ -184,7 +185,7 @@ BranchSchema.pre("save", function (next) {
 // compound unique: branchCode must be unique per client
 BranchSchema.index(
   { client: 1, branchCode: 1, user: 1 },
-  { unique: true, sparse: true },
+  { unique: true, sparse: true }
 );
 
 /**
@@ -207,7 +208,15 @@ BranchSchema.pre("save", function (next) {
   }
   next();
 });
+BranchSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.branchSequence) {
+    const padded = String(doc.branchSequence).padStart(3, "0");
+    doc.uid = `BRN_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
 
+  next();
+});
 /**
  * Plugins
  */

@@ -1,5 +1,6 @@
 const asyncHandler = require("../middleware/async");
 const User = require("../models/User");
+const Customer = require("../models/Customer");
 const bcrypt = require("bcryptjs");
 const Otp = require("../models/Otp");
 const ErrorResponse = require("../utils/errorResponse");
@@ -189,6 +190,104 @@ exports.getMe = asyncHandler(async (req, res, next) => {
     data: user,
   });
 });
+exports.getMeCustomer = asyncHandler(async (req, res, next) => {
+  // req.user must exist (protect middleware)
+  const userId = req.user && req.user.id ? req.user.id : null;
+  if (!userId) return next(new ErrorResponse("Authentication required", 401));
+
+  // load user (exclude password)
+  const user = await User.findById(userId).select("-password").lean();
+  if (!user) return next(new ErrorResponse("User not found", 404));
+
+  // try: 1) customer linked to this user, 2) fallback: customer by email/phone
+  let customer = await Customer.findOne({ user: user._id })
+    .populate("relations.client relations.branch")
+    .lean();
+
+  let linkedToCustomer = false;
+  let email = user.email ?? null;
+  let phone = user.phone ?? null;
+  const userExists = true; // since we found the user above
+
+  if (customer) {
+    linkedToCustomer = true;
+    // prefer contact info from customer metadata/personalKyc if present
+    email = customer.metadata?.email;
+
+    phone = customer.metadata?.phone;
+  } else {
+    // attempt to find a customer by email/phone if not directly linked
+    const or = [];
+    if (email) {
+      or.push({ "metadata.email": email });
+      or.push({ "personalKyc.personal_form.contact_details.email": email });
+    }
+    if (phone) {
+      or.push({ "metadata.phone": phone });
+      or.push({ "personalKyc.personal_form.contact_details.phone": phone });
+    }
+
+    if (or.length) {
+      customer = await Customer.findOne({ $or: or })
+        // .populate("relations.client relations.branch")
+        .lean();
+
+      if (customer) {
+        // if customer.user matches this user, it's effectively linked
+        linkedToCustomer =
+          !!customer.user && customer.user.toString() === user._id.toString();
+
+        email =
+          customer.metadata?.email ??
+          customer.personalKyc?.personal_form?.contact_details?.email ??
+          email;
+        phone =
+          customer.metadata?.phone ??
+          customer.personalKyc?.personal_form?.contact_details?.phone ??
+          phone;
+      }
+    }
+  }
+
+  // compute invite active flag (if a customer exists)
+  const isInviteActive = !!(
+    customer &&
+    customer.inviteToken &&
+    customer.inviteTokenExpire &&
+    new Date(customer.inviteTokenExpire).getTime() > Date.now()
+  );
+  let latestCustomer = null;
+  if (customer) {
+    latestCustomer = {
+      id: customer?._id,
+      personalKyc: customer?.personalKyc ?? null,
+      country: customer?.country,
+      kycStatus: customer?.kycStatus,
+      kycNotes: customer?.kycNotes,
+      metadata: customer?.metadata,
+      consentToScreen: customer?.consentToScreen,
+      declaration: customer?.declaration,
+      authorized: customer?.authorized,
+      documents: customer?.documents,
+    };
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      customer: latestCustomer,
+      // relations: customer ? customer.relations : [], // optional if you want
+      email,
+      phone,
+      userExists,
+      userId: user._id,
+      linkedToCustomer,
+      isInviteActive,
+      user,
+    },
+  });
+});
+
 // @desc   logout an clear the cookie
 // @route   /api/v1/auth/logout
 // @access   Private

@@ -1,9 +1,6 @@
-// models/Transaction.js
-"use strict";
-
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
-
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 /**
  * Small reusable sub-schemas
  */
@@ -49,8 +46,10 @@ const TravelRuleSchema = new Schema(
  */
 const TransactionSchema = new Schema(
   {
+    transactionSequence: { type: Number, index: true },
+
     // TX_001
-    transactionId: { type: String, required: true, unique: true, index: true },
+    uid: { type: String, unique: true, index: true },
 
     // relations
     customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true },
@@ -141,12 +140,38 @@ const TransactionSchema = new Schema(
     toObject: { virtuals: true },
   }
 );
+/**
+ * Auto-increment plugin for transactionSequence
+ */
+TransactionSchema.plugin(AutoIncrement, {
+  inc_field: "transactionSequence",
+  start_seq: 1,
+});
+/**
+ * Pre-save: basic checks / normalization
+ */
+TransactionSchema.pre("save", function (next) {
+  // Normalize channel/currency to uppercase where appropriate
+  if (this.currency) this.currency = this.currency.toUpperCase();
+  if (this.channel) this.channel = this.channel.trim();
+  next();
+});
 
+TransactionSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.transactionSequence) {
+    const padded = String(doc.transactionSequence).padStart(3, "0");
+    doc.uid = `TXN_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+
+  next();
+});
 /**
  * Indexes - avoid duplicate/index: true inside sub-docs for the same path.
  * Unique where needed, sparse for optional fields.
  */
-TransactionSchema.index({ transactionId: 1 }, { unique: true });
+
+TransactionSchema.index({ uid: 1 }, { unique: true });
 TransactionSchema.index({ customer: 1, timestamp: -1 });
 TransactionSchema.index({ "crypto.txHash": 1 }, { sparse: true });
 TransactionSchema.index({ "crypto.walletAddress": 1 }, { sparse: true });
@@ -158,20 +183,6 @@ TransactionSchema.index({ reference: "text", narrative: "text" }); // text index
  */
 TransactionSchema.virtual("displayAmount").get(function () {
   return `${this.amount} ${this.currency}`;
-});
-
-/**
- * Pre-save: basic checks / normalization
- */
-TransactionSchema.pre("save", function (next) {
-  if (!this.transactionId) {
-    // fallback auto-generate if you want (not recommended if external TX id exists)
-    this.transactionId = `txn_${new mongoose.Types.ObjectId().toHexString()}`;
-  }
-  // Normalize channel/currency to uppercase where appropriate
-  if (this.currency) this.currency = this.currency.toUpperCase();
-  if (this.channel) this.channel = this.channel.trim();
-  next();
 });
 
 module.exports = mongoose.model("Transaction", TransactionSchema);

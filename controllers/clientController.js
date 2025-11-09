@@ -61,6 +61,7 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     user = await User.create({
       name,
       email,
+      userType: "client",
       password: "123456", // TODO: replace with random password
       role: "admin",
       isActive: true,
@@ -103,12 +104,12 @@ exports.createClient = asyncHandler(async (req, res, next) => {
 exports.getClient = asyncHandler(async (req, res, next) => {
   const client = await Client.findById(req.params.id).populate(
     "user",
-    "userName -_id",
+    "userName -_id"
   );
 
   if (!client) {
     return next(
-      new ErrorResponse(`Client not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Client not found with id of ${req.params.id}`, 404)
     );
   }
   res.status(200).json({
@@ -124,10 +125,7 @@ exports.getClientBySlug = asyncHandler(async (req, res, next) => {
   const client = await Client.findOne({ slug: req.params.slug });
   if (!client) {
     return next(
-      new ErrorResponse(
-        `Client not found with slug of ${req.params.slug}`,
-        404,
-      ),
+      new ErrorResponse(`Client not found with slug of ${req.params.slug}`, 404)
     );
   }
   res.status(200).json({
@@ -157,7 +155,7 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
   const client = await Client.findById(clientId);
   if (!client) {
     return next(
-      new ErrorResponse(`Client not found with id of ${clientId}`, 404),
+      new ErrorResponse(`Client not found with id of ${clientId}`, 404)
     );
   }
 
@@ -204,8 +202,8 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
       return next(
         new ErrorResponse(
           `Another client already uses the same ${fieldsMsg}.`,
-          409,
-        ),
+          409
+        )
       );
     }
   }
@@ -251,8 +249,8 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
         return next(
           new ErrorResponse(
             `Another user already uses the same ${fieldsMsg}.`,
-            409,
-          ),
+            409
+          )
         );
       }
     }
@@ -266,7 +264,7 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
 
   if (!updatedClient) {
     return next(
-      new ErrorResponse(`Failed to update client with id ${clientId}`, 500),
+      new ErrorResponse(`Failed to update client with id ${clientId}`, 500)
     );
   }
 
@@ -316,7 +314,7 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
     // However, depending on your needs, you could revert the client update or return an error.
     console.error(
       "Warning: failed to update linked user after client update:",
-      err,
+      err
     );
   }
 
@@ -343,7 +341,7 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
   const client = await Client.findById(clientId).exec();
   if (!client) {
     return next(
-      new ErrorResponse(`Client not found with id of ${clientId}`, 404),
+      new ErrorResponse(`Client not found with id of ${clientId}`, 404)
     );
   }
 
@@ -381,12 +379,12 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
         if (usedSession) {
           await User.updateOne(
             { _id: linkedUserId },
-            { $unset: { client: "" } },
+            { $unset: { client: "" } }
           ).session(session);
         } else {
           await User.updateOne(
             { _id: linkedUserId },
-            { $unset: { client: "" } },
+            { $unset: { client: "" } }
           );
         }
       }
@@ -420,7 +418,7 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
       }
       console.error(err);
       return next(
-        new ErrorResponse("Failed to delete client. " + err.message, 500),
+        new ErrorResponse("Failed to delete client. " + err.message, 500)
       );
     }
   }
@@ -453,7 +451,7 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
   } catch (err) {
     console.error(err);
     return next(
-      new ErrorResponse("Failed to soft-delete client. " + err.message, 500),
+      new ErrorResponse("Failed to soft-delete client. " + err.message, 500)
     );
   }
 });
@@ -467,7 +465,7 @@ exports.updateClientStatus = asyncHandler(async (req, res, next) => {
   const client = await Client.findById(req.params.id);
   if (!client) {
     return next(
-      new ErrorResponse(`Client not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Client not found with id of ${req.params.id}`, 404)
     );
   }
 
