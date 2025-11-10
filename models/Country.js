@@ -1,13 +1,16 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const CountrySchema = new mongoose.Schema({
+  uid: String,
+  sequence: { type: Number, index: true }, // auto incremented
   name: {
     type: String,
-    required: [true, 'Please add country name'],
+    required: [true, "Please add country name"],
   },
   code: {
     type: String,
-    required: [true, 'Please add country code'],
+    required: [true, "Please add country code"],
   },
   state: [
     {
@@ -29,5 +32,19 @@ const CountrySchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+CountrySchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "country_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
 
-module.exports = mongoose.model('Country', CountrySchema);
+CountrySchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `CT_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+
+  next();
+});
+module.exports = mongoose.model("Country", CountrySchema);

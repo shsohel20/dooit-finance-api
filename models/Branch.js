@@ -59,6 +59,8 @@ const DocumentSchema = new Schema(
 const BranchSchema = new Schema(
   {
     uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
+
     client: {
       type: mongoose.Schema.ObjectId,
       ref: "Client",
@@ -72,8 +74,6 @@ const BranchSchema = new Schema(
       index: true,
       sparse: true,
     },
-
-    branchSequence: { type: Number, index: true }, // auto incremented
 
     name: { type: String, required: true, trim: true },
     slug: { type: String, unique: false, sparse: true, index: true },
@@ -209,8 +209,8 @@ BranchSchema.pre("save", function (next) {
   next();
 });
 BranchSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.branchSequence) {
-    const padded = String(doc.branchSequence).padStart(3, "0");
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
     doc.uid = `BRN_${padded}`;
     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
   }
@@ -222,7 +222,11 @@ BranchSchema.post("save", async function (doc, next) {
  */
 BranchSchema.plugin(uniqueValidator, { message: "{PATH} must be unique." });
 BranchSchema.plugin(mongoosePaginate);
-BranchSchema.plugin(AutoIncrement, { inc_field: "branchSequence" });
+BranchSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "branch_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
 
 /**
  * Export model

@@ -1,8 +1,6 @@
-// models/Customer.js
-"use strict";
-
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
 
@@ -97,6 +95,7 @@ const DocumentMetaSchema = new Schema(
 const CustomerSchema = new Schema(
   {
     uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
     user: {
       type: Schema.Types.ObjectId,
       ref: "Users",
@@ -215,6 +214,14 @@ CustomerSchema.index(
   { unique: true, sparse: true, name: "customer_relation_unique" }
 );
 
+CustomerSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `CR_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+  next();
+});
 CustomerSchema.methods.clearInviteToken = function () {
   this.inviteToken = undefined;
   this.inviteTokenExpire = undefined;
@@ -230,4 +237,9 @@ CustomerSchema.virtual("isInviteActive").get(function () {
   );
 });
 
+CustomerSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "customer_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
 module.exports = mongoose.model("Customer", CustomerSchema);

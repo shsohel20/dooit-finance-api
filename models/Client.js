@@ -68,7 +68,7 @@ const ClientSchema = new Schema(
       type: mongoose.Schema.ObjectId,
       ref: "Users",
     },
-    clientSequence: { type: Number, index: true }, // auto incremented
+    sequence: { type: Number, index: true }, // auto incremented
     name: { type: String, required: true, trim: true },
     slug: { type: String, unique: true, sparse: true, index: true },
     clientType: {
@@ -153,12 +153,26 @@ ClientSchema.pre("save", function (next) {
   next();
 });
 
+ClientSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `GRP_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+  next();
+});
+
 /**
  * Plugins
  */
 ClientSchema.plugin(uniqueValidator, { message: "{PATH} must be unique." });
 ClientSchema.plugin(mongoosePaginate);
-ClientSchema.plugin(AutoIncrement, { inc_field: "clientSequence" });
+
+ClientSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "client_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
 
 const Client = mongoose.model("Client", ClientSchema);
 

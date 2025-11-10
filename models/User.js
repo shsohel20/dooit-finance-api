@@ -3,8 +3,13 @@ const { default: slugify } = require("slugify");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
+const AutoIncrement = require("mongoose-sequence")(mongoose);
+
 const UserSchema = new mongoose.Schema(
   {
+    uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
+
     name: {
       type: String,
       trim: true,
@@ -164,5 +169,18 @@ UserSchema.methods.getResetPasswordToken = function () {
 UserSchema.methods.mathPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
+UserSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `U_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
 
+  next();
+});
+UserSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "user_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
 module.exports = mongoose.model("Users", UserSchema);

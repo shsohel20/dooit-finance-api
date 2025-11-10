@@ -46,7 +46,7 @@ const TravelRuleSchema = new Schema(
  */
 const TransactionSchema = new Schema(
   {
-    transactionSequence: { type: Number, index: true },
+    sequence: { type: Number, index: true },
 
     // TX_001
     uid: { type: String, unique: true, index: true },
@@ -141,10 +141,11 @@ const TransactionSchema = new Schema(
   }
 );
 /**
- * Auto-increment plugin for transactionSequence
+ * Auto-increment plugin for sequence
  */
 TransactionSchema.plugin(AutoIncrement, {
-  inc_field: "transactionSequence",
+  inc_field: "sequence",
+  id: "transaction_sequence",
   start_seq: 1,
 });
 /**
@@ -158,8 +159,8 @@ TransactionSchema.pre("save", function (next) {
 });
 
 TransactionSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.transactionSequence) {
-    const padded = String(doc.transactionSequence).padStart(3, "0");
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
     doc.uid = `TXN_${padded}`;
     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
   }

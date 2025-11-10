@@ -2,10 +2,12 @@
 
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const DeviceSchema = new Schema(
   {
     uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
     user: {
       type: Schema.Types.ObjectId,
       ref: "Users",
@@ -106,6 +108,20 @@ DeviceSchema.pre("save", function (next) {
   if (this.ipAddress) this.ipAddress = this.ipAddress.trim();
   if (this.country) this.country = this.country.toUpperCase();
   next();
+});
+
+DeviceSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `DE_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+  next();
+});
+DeviceSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "device_info_sequence", // unique counter id for this schema
+  start_seq: 1,
 });
 
 module.exports = mongoose.model("Device", DeviceSchema);

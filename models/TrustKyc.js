@@ -1,8 +1,12 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const TrustKycSchema = new Schema(
   {
+    uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
+
     client: {
       type: Schema.Types.ObjectId,
       ref: "Client",
@@ -148,4 +152,21 @@ TrustKycSchema.pre("save", function (next) {
     this.trust_details.contact_information = {};
   next();
 });
+
+TrustKycSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `TRKYC_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+
+  next();
+});
+
+TrustKycSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "trust_kyc_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
+
 module.exports = mongoose.model("TrustKyc", TrustKycSchema);

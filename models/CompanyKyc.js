@@ -1,9 +1,11 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const CompanyKycSchema = new Schema(
   {
     uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
     client: {
       type: Schema.Types.ObjectId,
       ref: "Client",
@@ -142,6 +144,21 @@ CompanyKycSchema.pre("save", function (next) {
       : 0;
   }
   next();
+});
+
+CompanyKycSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `COMKYC_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+  next();
+});
+
+CompanyKycSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "customer_kyc_sequence", // unique counter id for this schema
+  start_seq: 1,
 });
 
 module.exports = mongoose.model("CompanyKyc", CompanyKycSchema);

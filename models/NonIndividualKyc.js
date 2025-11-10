@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const AutoIncrement = require("mongoose-sequence")(mongoose);
+
 // Common Address Schema (reusable)
 const AddressSchema = new Schema(
   {
@@ -143,6 +145,8 @@ const AssociationCooperativeSchema = new Schema(
 const NonIndividualKycSchema = new Schema(
   {
     uid: String,
+    sequence: { type: Number, index: true }, // auto incremented
+
     client: {
       type: Schema.Types.ObjectId,
       ref: "Client",
@@ -185,6 +189,8 @@ NonIndividualKycSchema.index(
   { sparse: true }
 );
 
+// NonIndividualKycSchema.plugin(AutoIncrement, { inc_field: "sequence" });
+
 NonIndividualKycSchema.virtual("displayName").get(function () {
   return (
     (this.general_information && this.general_information.entity_name) ||
@@ -201,6 +207,31 @@ NonIndividualKycSchema.pre("save", function (next) {
   if (!this.general_information) this.general_information = {};
   if (!this.general_information.contact_information)
     this.general_information.contact_information = {};
+  next();
+});
+
+// NonIndividualKycSchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `COM_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
+//   next();
+// });
+
+NonIndividualKycSchema.plugin(AutoIncrement, {
+  inc_field: "sequence",
+  id: "non_individual_kyc_sequence", // unique counter id for this schema
+  start_seq: 1,
+});
+
+NonIndividualKycSchema.post("save", async function (doc, next) {
+  if (!doc.uid && doc.sequence) {
+    const padded = String(doc.sequence).padStart(3, "0");
+    doc.uid = `NIKYC_${padded}`;
+    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+  }
+
   next();
 });
 
