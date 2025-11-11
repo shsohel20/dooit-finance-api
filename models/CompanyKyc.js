@@ -2,6 +2,18 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
+const DocumentMetaSchema = new Schema(
+  {
+    name: String,
+    url: String,
+    mimeType: String,
+    type: String,
+    docType:String,
+    uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false }
+);
+
 const CompanyKycSchema = new Schema(
   {
     uid: String,
@@ -80,6 +92,8 @@ const CompanyKycSchema = new Schema(
         },
       ],
     },
+    documents: { type: [DocumentMetaSchema], default: [] },
+
   },
   {
     timestamps: true,
