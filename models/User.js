@@ -110,6 +110,20 @@ UserSchema.virtual("customers", {
   ref: "Customer", // model name
   localField: "_id", // field on User
   foreignField: "user", // field on Customer
+  justOne: true, // field on Customer
+});
+
+UserSchema.virtual("clients", {
+  ref: "Client", // model name
+  localField: "_id", // field on User
+  foreignField: "user",
+  justOne: true, // field on Customer
+});
+UserSchema.virtual("branches", {
+  ref: "Branch", // model name
+  localField: "_id", // field on User
+  foreignField: "user",
+  justOne: true, // field on Customer
 });
 
 UserSchema.pre("save", function (next) {

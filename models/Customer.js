@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
+const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
@@ -87,6 +88,7 @@ const DocumentMetaSchema = new Schema(
     url: String,
     mimeType: String,
     type: String,
+    docType:String,
     uploadedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -242,4 +244,49 @@ CustomerSchema.plugin(AutoIncrement, {
   id: "customer_sequence", // unique counter id for this schema
   start_seq: 1,
 });
+
+
+
+// simple per-document memoized computation to avoid running the function multiple times
+CustomerSchema.methods._computeRiskCached = function (opts = {}) {
+  if (this.__riskAssessmentCache) return this.__riskAssessmentCache;
+  // buildRiskAssessmentFromCustomer expects a plain object or mongoose doc
+  this.__riskAssessmentCache = buildRiskAssessmentFromCustomer(this, opts);
+  return this.__riskAssessmentCache;
+};
+
+/**
+ * Virtuals (on-the-fly)
+ * - riskAssessment => object of factors
+ * - riskScore      => numeric total
+ * - riskLabel      => textual label
+ *
+ * These are not persisted to DB. They will show in JSON / Object because
+ * CustomerSchema already has toJSON/toObject virtuals enabled.
+ */
+CustomerSchema.virtual("riskAssessment").get(function () {
+  const computed = this._computeRiskCached();
+  return computed.riskAssessment || {};
+});
+
+CustomerSchema.virtual("riskScore").get(function () {
+  const computed = this._computeRiskCached();
+  return computed.riskScore || 0;
+});
+
+CustomerSchema.virtual("riskLabel").get(function () {
+  const computed = this._computeRiskCached();
+  return computed.riskLabel || "Low";
+});
+
+/**
+ * Convenience method to recompute (or compute with overrides)
+ * e.g. await customer.computeRisk({ /* opts *\/ })
+ * Returns the same object returned by buildRiskAssessmentFromCustomer
+ */
+CustomerSchema.methods.computeRisk = function (opts = {}) {
+  // clear cache if opts.force is true
+  if (opts.force) this.__riskAssessmentCache = undefined;
+  return this._computeRiskCached(opts);
+};
 module.exports = mongoose.model("Customer", CustomerSchema);

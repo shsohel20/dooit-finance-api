@@ -23,13 +23,20 @@ exports.protect = asyncHandler(async (req, res, next) => {
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = await User.findById(decoded.id).populate({
-      path: "customers", // virtual on User
-      populate: [
-        { path: "relations.client", select: "name _id" },
-        { path: "relations.branch", select: "name _id branchCode" },
-      ],
-    });
+    req.user = await User.findById(decoded.id).populate([
+      {
+        path: "clients", // virtual on User
+        select: "name _id",
+      },
+      {
+        path: "customers", // virtual on User
+        select: "name _id",
+      },
+      {
+        path: "branches", // virtual on User
+        select: "name _id",
+      },
+    ]);
     next();
   } catch (error) {
     console.log(error);
