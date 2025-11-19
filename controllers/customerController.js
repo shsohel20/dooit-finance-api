@@ -1278,36 +1278,76 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
 
       //If customer already existing here:
 
+      const relationCandidate =
+        clientDoc || branchDoc
+          ? {
+              client: clientDoc ? clientDoc._id : undefined,
+              branch: branchDoc ? branchDoc._id : undefined,
+              type:
+                requestedType === "individual" ? "individual" : requestedType,
+              onboardingChannel: body.onboardingChannel || "API",
+              registeredAt: body.registeredAt
+                ? new Date(body.registeredAt)
+                : new Date(),
+              source: body.source || "api",
+              notes: body.notes || "",
+              active: true,
+            }
+          : null;
+
       let customerDoc;
 
-      customerDoc = await Customer.findOne({ user: createdUser });
+      customerDoc = await Customer.findOne({ user: createdUser }).session(
+        session
+      );
       let relations = [];
       if (customerDoc) {
-        relations = customerDoc.relations;
-        if (clientDoc || branchDoc) {
-          const rel = {
-            client: clientDoc ? clientDoc._id : undefined,
-            branch: branchDoc ? branchDoc._id : undefined,
-            type: requestedType === "individual" ? "individual" : requestedType,
-            onboardingChannel: body.onboardingChannel || "API",
-            registeredAt: body.registeredAt
-              ? new Date(body.registeredAt)
-              : new Date(),
-            source: body.source || "api",
-            notes: body.notes || "",
-            active: true,
-          };
-          relations.push(rel);
-          res.status(201).json({
-            success: true,
-            message: "Customer (and user/kyc where applicable) created",
-            data: relations,
-            // clientDoc,
+        // ensure relations array exists
+        customerDoc.relations = customerDoc.relations || [];
+
+        // if relationCandidate exists, check if same client+branch relation already present
+        if (relationCandidate) {
+          const exists = customerDoc.relations.some((r) => {
+            const sameClient = relationCandidate.client
+              ? String(r.client) === String(relationCandidate.client)
+              : true;
+            const sameBranch = relationCandidate.branch
+              ? String(r.branch) === String(relationCandidate.branch)
+              : true;
+            return sameClient && sameBranch;
           });
+          if (!exists) {
+            customerDoc.relations.push(relationCandidate);
+          } else {
+            // update existing relation fields if needed (merge)
+            customerDoc.relations = customerDoc.relations.map((r) => {
+              const matchClient =
+                relationCandidate.client &&
+                String(r.client) === String(relationCandidate.client);
+              const matchBranch =
+                relationCandidate.branch &&
+                String(r.branch) === String(relationCandidate.branch);
+              if (matchClient || matchBranch) {
+                return Object.assign(r, relationCandidate);
+              }
+              return r;
+            });
+          }
         }
 
+        // update some other fields from payload if provided
+        if (body.personalKyc) customerDoc.personalKyc = body.personalKyc;
+        if (body.documents) customerDoc.documents = body.documents;
+        if (body.declaration) customerDoc.declaration = body.declaration;
+        if (body.country) customerDoc.country = body.country;
+        if (typeof body.isActive !== "undefined")
+          customerDoc.isActive = body.isActive;
+
+        // save updated customer
+        createdCustomer = await customerDoc.save({ session });
         ///
       } else {
+        // create new customer
         const customerPayload = {
           user: createdUser ? createdUser._id : null,
           personalKyc: body.personalKyc || {},
@@ -1317,16 +1357,22 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           consentToScreen: body.consentToScreen || false,
           isActive: true,
           metadata: body.metadata || {},
-          relations: relations,
+          relations: relationCandidate ? [relationCandidate] : [],
         };
-
-        customerDoc = new Customer(customerPayload);
+        const newCustomer = new Customer(customerPayload);
+        createdCustomer = await newCustomer.save({ session });
       }
 
       // createdCustomer = await customerDoc.save({ session });
 
       // 5) If requestedType is not individual, create corresponding KYC record(s)
       if (requestedType !== "individual") {
+        if (!createdCustomer || !createdCustomer._id) {
+          throw new ErrorResponse(
+            "Customer creation failed before KYC creation",
+            500
+          );
+        }
         // choose which KYC model to create
         // company -> CompanyKyc, trust -> TrustKyc, else -> NonIndividualKyc
         if (requestedType === "company") {
