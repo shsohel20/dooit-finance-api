@@ -47,7 +47,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
 exports.verifyUser = asyncHandler(async (req, res, next) => {
   try {
     const user = req?.user?.isActive ?? null;
-    console.log(user);
+    // console.log(user);
     if (!user) {
       return next(
         new ErrorResponse(

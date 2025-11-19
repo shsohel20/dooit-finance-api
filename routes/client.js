@@ -9,6 +9,7 @@ const {
   filterClientSection,
   updateClientStatus,
   getClientBySlug,
+  createDummyClient,
 } = require("../controllers/clientController");
 
 const Client = require("../models/Client");
@@ -16,6 +17,8 @@ const advancedResults = require("../middleware/advancedResults");
 const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
+
+router.route("/dummy/create").post(createDummyClient);
 
 // protect all client routes and allow only admin by default
 router.use(protect);

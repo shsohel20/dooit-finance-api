@@ -8,6 +8,7 @@ const {
   filterCustomerSection,
   getCustomers,
   getCustomer,
+  createCustomerDummy,
 } = require("../controllers/customerController");
 
 const { protect, authorize } = require("../middleware/auth");
@@ -28,7 +29,7 @@ router.post(
   "/invite",
   protect,
   authorize("admin", "client", "branch", "user"),
-  createInvite,
+  createInvite
 );
 
 router
@@ -44,7 +45,12 @@ router.post(
   "/register/onboarding",
   protect,
   authorize("customer"),
-  acceptInvite,
+  acceptInvite
+);
+router.post(
+  "/dummy-create",
+
+  createCustomerDummy
 );
 
 module.exports = router;

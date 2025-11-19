@@ -269,23 +269,15 @@ const advancedResults =
       let baseQuery = model.find(JSON.parse(queryStr));
 
       // Title-specific quick search (keeps compatibility with your existing logic)
-      if (req.query.title && req.query.title.trim() !== "") {
-        const regexPattern = req.query.title
+      if (req.query.name && req.query.name.trim() !== "") {
+        const regexPattern = req.query.name
           .replace(/-/g, " ")
           .split(" ")
           .map((term) => `(?=.*${term})`)
           .join("");
         baseQuery = baseQuery.find({
-          title: { $regex: new RegExp(regexPattern, "i") },
+          name: { $regex: new RegExp(regexPattern, "i") },
         });
-      }
-
-      //  quick filters
-      if (req.query.blogId && req.query.blogId.trim() !== "") {
-        baseQuery = baseQuery.find({ blog: req.query.blogId });
-      }
-      if (req.query.jobId && req.query.jobId.trim() !== "") {
-        baseQuery = baseQuery.find({ job: req.query.jobId });
       }
 
       // Select fields

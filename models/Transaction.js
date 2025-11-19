@@ -93,6 +93,8 @@ const TransactionSchema = new Schema(
     beneficiary: { type: PartySchema, default: {} }, // TX_015 .. TX_018
     intermediary: { type: PartySchema, default: {} }, // TX_019
 
+    receiver: { type: PartySchema, default: {} }, // TX_011 .. TX_014
+
     // TX_020 purpose / TX_021 remittance code
     purpose: { type: String, trim: true },
     remittancePurposeCode: { type: String, trim: true },

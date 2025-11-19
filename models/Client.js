@@ -144,13 +144,31 @@ ClientSchema.virtual("fullAddress").get(function () {
 /**
  * Pre-save hooks
  */
-ClientSchema.pre("save", function (next) {
-  // generate slug automatically from name if not provided
-  if (!this.slug && this.name) {
-    // use strict to remove special chars
-    this.slug = slugify(this.name, { lower: true, strict: true });
+ClientSchema.pre("save", async function (next) {
+  try {
+    // Only generate/modify slug if name is new or slug is missing
+    if (this.isModified("name") || !this.slug) {
+      // Basic slug
+      let baseSlug = slugify(this.name, { lower: true, strict: true });
+      let slug = baseSlug;
+
+      // Check duplicates
+      let counter = 1;
+      const Client = this.constructor;
+
+      // Keep looping until slug is unique
+      while (await Client.exists({ slug })) {
+        slug = `${baseSlug}-${counter}`;
+        counter++;
+      }
+
+      this.slug = slug;
+    }
+
+    next();
+  } catch (error) {
+    next(error);
   }
-  next();
 });
 
 ClientSchema.post("save", async function (doc, next) {

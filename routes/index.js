@@ -14,6 +14,7 @@ const client = require("./client");
 const branch = require("./branch");
 const customer = require("./customer");
 const transaction = require("./transaction");
+const demo = require("./demoData");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -27,5 +28,6 @@ router.use("/client", client);
 router.use("/branch", branch);
 router.use("/customer", customer);
 router.use("/transaction", transaction);
+router.use("/demo", demo);
 
 module.exports = router;

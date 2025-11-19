@@ -479,3 +479,76 @@ exports.updateClientStatus = asyncHandler(async (req, res, next) => {
     data: client,
   });
 });
+
+// @desc   Create a single client
+// @route  /api/v1/clients
+// @access Public (or restrict as needed)
+exports.createDummyClient = asyncHandler(async (req, res, next) => {
+  // Validate request
+  const isValid = await validateClientCreation(req.body, next);
+  if (!isValid) return;
+
+  const {
+    name,
+    clientType,
+    registrationNumber,
+    taxId,
+    email,
+    phone,
+    website,
+    contacts,
+    address,
+    legalRepresentative,
+    documents,
+    status,
+    settings,
+    metadata,
+    userName,
+  } = req.body;
+
+  let user = null;
+
+  user = await User.findOne({
+    email,
+    userName,
+  });
+  if (!user) {
+    user = await User.create({
+      name,
+      email,
+      userType: "client",
+      password: "123456", // TODO: replace with random password
+      role: "admin",
+      isActive: true,
+      userName,
+    });
+  }
+  // Create new user
+
+  if (!user) return next(new ErrorResponse("Please try again!", 400));
+
+  // Create client record
+  const client = await Client.create({
+    user: user._id,
+    name,
+    clientType,
+    registrationNumber,
+    taxId,
+    email,
+    phone,
+    website,
+    contacts,
+    address,
+    legalRepresentative,
+    documents,
+    status,
+    settings,
+    metadata,
+  });
+
+  res.status(201).json({
+    succeed: true,
+    data: client,
+    id: client._id,
+  });
+});

@@ -14,17 +14,19 @@ const Client = require("../models/Client");
  * Basic filter helper for client-side searching by name
  * (used similarly to filterUserSection)
  */
-exports.filterBranchSection = (s, requestBody, req) => {
-  console.log(req.user?.clients);
-  const client = req.user?.clients;
-  const clientId = client.client;
-  console.log(clientId);
+exports.filterBranchSection = (doc, requestBody, req) => {
 
-  if (clientId && !doc.client === String(clientId)) {
-    return false;
-  }
-  if (!s.name || !requestBody.name) return false;
-  return s.name
+  console.log('first');
+  console.log(req.user);
+  // const client = req.user?.clients;
+  // const clientId = client;
+  // // console.log(client);
+
+  // if (clientId && !doc.client === String(clientId)) {
+  //   return false;
+  // }
+  if (!doc.name || !requestBody.name) return false;
+  return doc.name
     .toLowerCase()
     .trim()
     .includes(requestBody.name.toLowerCase().trim());

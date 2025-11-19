@@ -1,6 +1,9 @@
 const mongoose = require("mongoose");
 const crypto = require("crypto");
-const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
+const {
+  buildRiskAssessmentFromCustomer,
+  buildRiskAssessmentPerRelation,
+} = require("../utils/riskAssessment");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
@@ -88,7 +91,7 @@ const DocumentMetaSchema = new Schema(
     url: String,
     mimeType: String,
     type: String,
-    docType:String,
+    docType: String,
     uploadedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -132,12 +135,20 @@ const CustomerSchema = new Schema(
           ],
           required: true,
         },
-        onboardingChannel: { type: String, default: "" }, //Mobile App, Website, In-Branch, Agent.
+        onboardingChannel: { type: String, default: "Mobile App" }, //Mobile App, Website, In-Branch, Agent.
 
         registeredAt: { type: Date, default: Date.now },
-        source: { type: String, default: "" }, // e.g. "in-branch", "web", "api", "agent"
+        source: { type: String, default: "api" }, // e.g. "in-branch", "web", "api", "agent"
         notes: { type: String, default: "" },
         active: { type: Boolean, default: true },
+
+        // --- INVITE: relation-scoped invite fields ---
+        invitedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
+        inviteToken: { type: String, default: null }, // hashed
+        inviteTokenExpire: { type: Date, default: null },
+        inviteTokenPlain: { type: String, select: false, default: null }, // optional plain token (dev/testing)
+        // optional: track invite createdAt
+        inviteCreatedAt: { type: Date, default: null },
       },
     ],
 
@@ -211,6 +222,57 @@ CustomerSchema.methods.generateInviteToken = function (
   return plain;
 };
 
+/**
+ * Relation-level invite helpers
+ * - setRelationInvite(relationIndex, expiresInMinutes) => returns plain token
+ * - clearRelationInvite(relationIndex)
+ * - findRelationByTokenHashed(hashed) => returns { relation, index } or null
+ */
+
+CustomerSchema.methods.setRelationInvite = function (
+  relIndex,
+  expiresInMinutes = 60 * 24 * 7
+) {
+  const plain = crypto.randomBytes(20).toString("hex");
+  const hashed = crypto.createHash("sha256").update(plain).digest("hex");
+
+  // ensure relations exists
+  if (!this.relations || !this.relations[relIndex]) {
+    throw new Error("relation index not found");
+  }
+
+  const rel = this.relations[relIndex];
+  rel.inviteToken = hashed;
+  rel.inviteTokenExpire = Date.now() + expiresInMinutes * 60 * 1000;
+  rel.inviteTokenPlain = plain;
+  rel.inviteCreatedAt = new Date();
+
+  // also set invitedBy if not present
+  if (!rel.invitedBy && this._invitedByAtSet) {
+    // noop (internal), otherwise caller should set rel.invitedBy
+  }
+
+  return plain;
+};
+
+CustomerSchema.methods.clearRelationInvite = function (relIndex) {
+  if (!this.relations || !this.relations[relIndex]) return;
+  const rel = this.relations[relIndex];
+  rel.inviteToken = undefined;
+  rel.inviteTokenExpire = undefined;
+  rel.inviteTokenPlain = undefined;
+  rel.inviteCreatedAt = undefined;
+};
+
+CustomerSchema.methods.findRelationByHashedToken = function (hashed) {
+  if (!hashed || !this.relations) return null;
+  for (let i = 0; i < this.relations.length; i++) {
+    const r = this.relations[i];
+    if (r.inviteToken === hashed) return { relation: r, index: i };
+  }
+  return null;
+};
+
 CustomerSchema.index(
   { _id: 1, "relations.client": 1, "relations.branch": 1 },
   { unique: true, sparse: true, name: "customer_relation_unique" }
@@ -245,48 +307,28 @@ CustomerSchema.plugin(AutoIncrement, {
   start_seq: 1,
 });
 
+CustomerSchema.virtual("relationRisks").get(function () {
+  const plain = this.toObject({ virtuals: false, getters: false });
+  const { relationRisks } = buildRiskAssessmentPerRelation(plain);
+  return relationRisks;
+});
 
+CustomerSchema.virtual("riskSummary").get(function () {
+  const plain = this.toObject({ virtuals: false, getters: false });
+  const { summary } = buildRiskAssessmentPerRelation(plain);
+  return summary;
+});
 
-// simple per-document memoized computation to avoid running the function multiple times
-CustomerSchema.methods._computeRiskCached = function (opts = {}) {
-  if (this.__riskAssessmentCache) return this.__riskAssessmentCache;
-  // buildRiskAssessmentFromCustomer expects a plain object or mongoose doc
-  this.__riskAssessmentCache = buildRiskAssessmentFromCustomer(this, opts);
-  return this.__riskAssessmentCache;
-};
-
-/**
- * Virtuals (on-the-fly)
- * - riskAssessment => object of factors
- * - riskScore      => numeric total
- * - riskLabel      => textual label
- *
- * These are not persisted to DB. They will show in JSON / Object because
- * CustomerSchema already has toJSON/toObject virtuals enabled.
- */
 CustomerSchema.virtual("riskAssessment").get(function () {
-  const computed = this._computeRiskCached();
-  return computed.riskAssessment || {};
+  const plain = this.toObject({ virtuals: false, getters: false });
+  return buildRiskAssessmentFromCustomer(plain).riskAssessment;
 });
-
 CustomerSchema.virtual("riskScore").get(function () {
-  const computed = this._computeRiskCached();
-  return computed.riskScore || 0;
+  const plain = this.toObject({ virtuals: false, getters: false });
+  return buildRiskAssessmentFromCustomer(plain).riskScore;
 });
-
 CustomerSchema.virtual("riskLabel").get(function () {
-  const computed = this._computeRiskCached();
-  return computed.riskLabel || "Low";
+  const plain = this.toObject({ virtuals: false, getters: false });
+  return buildRiskAssessmentFromCustomer(plain).riskLabel;
 });
-
-/**
- * Convenience method to recompute (or compute with overrides)
- * e.g. await customer.computeRisk({ /* opts *\/ })
- * Returns the same object returned by buildRiskAssessmentFromCustomer
- */
-CustomerSchema.methods.computeRisk = function (opts = {}) {
-  // clear cache if opts.force is true
-  if (opts.force) this.__riskAssessmentCache = undefined;
-  return this._computeRiskCached(opts);
-};
 module.exports = mongoose.model("Customer", CustomerSchema);
