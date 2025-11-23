@@ -30,6 +30,6 @@ router.use("/branch", branch);
 router.use("/customer", customer);
 router.use("/transaction", transaction);
 router.use("/demo", demo);
-router.use("/ecdd", ecddRoutes);
+router.use("/ecdd-report", ecddRoutes);
 
 module.exports = router;
