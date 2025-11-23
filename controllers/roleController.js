@@ -13,6 +13,11 @@ exports.filterRoleSection = (s, requestBody) => {
 // @route   /api/v1/role
 // @access   Public
 exports.getRoles = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Role']
+  #swagger.summary = 'Get all Rolle reports'
+  #swagger.responses[200] = { description: 'Success' }
+*/
   res.status(200).json(res.advancedResults);
 });
 
@@ -38,7 +43,7 @@ exports.getRole = asyncHandler(async (req, res, next) => {
 
   if (!role) {
     return next(
-      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404)
     );
   }
   res.status(200).json({
@@ -66,14 +71,14 @@ exports.updateRole = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(
         `The name ( ${duplicateItem.name}) used another Role`,
-        409,
-      ),
+        409
+      )
     );
   }
 
   if (!role) {
     return next(
-      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404)
     );
   }
   res.status(200).json({
@@ -89,7 +94,7 @@ exports.deleteRole = asyncHandler(async (req, res, next) => {
   const role = await Role.findById(req.params.id);
   if (!role) {
     return next(
-      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404),
+      new ErrorResponse(`Role not found with id of ${req.params.id}`, 404)
     );
   }
 

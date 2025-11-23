@@ -12,7 +12,7 @@ const sendTokenResponse = (user, statusCode, res) => {
 
   let options = {
     expires: new Date(
-      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000,
+      Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
     ),
     httpOnly: true,
     secure: true,
@@ -71,6 +71,15 @@ const optSend = async (user, message, subject, res, next) => {
 // @access   Public
 
 exports.register = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Customer register'
+  #swagger.description = 'Create a new customer user'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/AuthRegisterBody' } }
+  #swagger.responses[200] = { description: 'Registered + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[400] = { description: 'Validation error', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
   const { name, email, password, role, userName } = req.body;
   let clientUrl;
   if (req.body.clientUrl) {
@@ -152,11 +161,20 @@ exports.register = asyncHandler(async (req, res, next) => {
 // @access   Public
 
 exports.login = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Login user'
+  #swagger.description = 'Authenticate user and return a JWT token'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/AuthLoginBody' } }
+  #swagger.responses[200] = { description: 'User logged in', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[400] = { description: 'Invalid credentials', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
   const { email, password } = req.body;
 
   if (!email || !password) {
     return next(
-      new ErrorResponse("Please provide a valid email and password.", 400),
+      new ErrorResponse("Please provide a valid email and password.", 400)
     );
   }
 
@@ -183,6 +201,13 @@ exports.login = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/me
 // @access   Private
 exports.getMe = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Get current user'
+  #swagger.description = 'Returns currently authenticated user'
+  #swagger.responses[200] = { description: 'Current user', schema: { success: true, data: {  } } }
+  #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
+*/
   const user = await User.findById(req.user.id);
 
   res.status(200).json({
@@ -191,6 +216,25 @@ exports.getMe = asyncHandler(async (req, res, next) => {
   });
 });
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Get current user (customer view)'
+  #swagger.description = 'Returns user + linked customer record and metadata'
+  #swagger.responses[200] = { description: 'User+customer data', schema: {
+      success: true,
+      data: {
+        customer: {},
+        email: 'shsohel20@gmail.com',
+        phone: null,
+        userExists: true,
+        userId: '673d9as91sad81',
+        linkedToCustomer: false,
+        isInviteActive: false,
+        user: {}
+      }
+  } }
+  #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
+*/
   // req.user must exist (protect middleware)
   const userId = req.user && req.user.id ? req.user.id : null;
   if (!userId) return next(new ErrorResponse("Authentication required", 401));
@@ -292,6 +336,12 @@ exports.getMeCustomer = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/logout
 // @access   Private
 exports.logout = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Logout user (clear cookie)'
+  #swagger.description = 'Clears cookie token'
+  #swagger.responses[200] = { description: 'Logged out', schema: { $ref: '#/definitions/GenericSuccess' } }
+*/
   res.cookie("token", "none", {
     expires: new Date(Date.now() + 0),
     httpOnly: true,
@@ -306,6 +356,15 @@ exports.logout = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/forgot-password
 // @access   public
 exports.forgotPassword = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Request password reset'
+  #swagger.description = 'Sends a reset link to the email'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ForgotPasswordBody' } }
+  #swagger.responses[200] = { description: 'Reset email sent', schema: { success: true, message: 'Email Send Successfully' } }
+  #swagger.responses[404] = { description: 'Email not found', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
   const user = await User.findOne({ email: req.body.email });
 
   if (!user) {
@@ -352,6 +411,17 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/reset-password/:resettoken
 // @access   Private
 exports.resetPassword = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Reset password'
+  #swagger.description = 'Reset user password using reset token'
+  #swagger.parameters['resettoken'] = { in: 'path', required: true, type: 'string', description: 'Reset token' }
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResetPasswordBody' } }
+  #swagger.responses[200] = { description: 'Password reset + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[401] = { description: 'Invalid or expired token', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // usually public (token in URL)
+*/
+
   //Get Hashed token
   const resetPasswordToken = crypto
     .createHash("sha256")
@@ -379,6 +449,15 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/update-me
 // @access   Private
 exports.updateMe = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Update user profile'
+  #swagger.description = 'Update name/email/photo'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/UpdateMeBody' } }
+  #swagger.responses[200] = { description: 'Profile updated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
+*/
+
   const updateField = {
     name: req.body.name,
     email: req.body.email,
@@ -396,6 +475,15 @@ exports.updateMe = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/update-password
 // @access   Private
 exports.updatePassword = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Update password'
+  #swagger.description = 'Change password by providing current and new password'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/UpdatePasswordBody' } }
+  #swagger.responses[200] = { description: 'Password updated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[401] = { description: 'Current password mismatch', schema: { $ref: '#/definitions/ErrorResponse' } }
+*/
+
   const user = await User.findById(req.user.id).select("+password");
 
   //Check current password
@@ -431,6 +519,16 @@ exports.customerRegister = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/confirm-user/:resettoken
 // @access   Private
 exports.confirmUser = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Confirm user (email token)'
+  #swagger.description = 'Activate user account using token'
+  #swagger.parameters['resettoken'] = { in: 'path', required: true, type: 'string', description: 'Confirmation token' }
+  #swagger.responses[200] = { description: 'User activated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[401] = { description: 'Invalid token', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public via URL token
+*/
+
   //Get Hashed token
   const resetPasswordToken = crypto
     .createHash("sha256")
@@ -458,6 +556,16 @@ exports.confirmUser = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/auth/confirm-user/:resettoken
 // @access   Private
 exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Confirm user by OTP'
+  #swagger.description = 'Activate user account by OTP code'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ConfirmOtpBody' } }
+  #swagger.responses[200] = { description: 'User activated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[400] = { description: 'OTP expired or invalid', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
+
   const otp = await Otp.find({
     expire: { $gt: Date.now() },
   });
@@ -494,6 +602,16 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
 
 // new helper: create & send OTP (hash before storing)
 const createAndSendOtp = async (user, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Resend OTP'
+  #swagger.description = 'Create & send a new OTP to user'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResendOtpBody' } }
+  #swagger.responses[200] = { description: 'OTP sent', schema: { success: true, message: 'OTP Sent' } }
+  #swagger.responses[429] = { description: 'Too many requests', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
+
   // Delete any old OTPs for the user first (cleanup)
   await Otp.deleteMany({ user: user._id });
 
@@ -523,6 +641,16 @@ const createAndSendOtp = async (user, res, next) => {
 // @route  POST /api/v1/auth/resend-otp
 // @access Public (or require auth if you prefer)
 exports.resendOtp = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Resend OTP'
+  #swagger.description = 'Create & send a new OTP to user'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResendOtpBody' } }
+  #swagger.responses[200] = { description: 'OTP sent', schema: { success: true, message: 'OTP Sent' } }
+  #swagger.responses[429] = { description: 'Too many requests', schema: { $ref: '#/definitions/ErrorResponse' } }
+  #swagger.security = [] // public
+*/
+
   // Accept email in body (or whichever identifier you prefer)
   const { email } = req.body;
   if (!email) {
@@ -549,7 +677,7 @@ exports.resendOtp = asyncHandler(async (req, res, next) => {
     Date.now() - latest.createdAt.getTime() < resendThrottleMs
   ) {
     return next(
-      new ErrorResponse("Please wait a bit before requesting a new OTP.", 429),
+      new ErrorResponse("Please wait a bit before requesting a new OTP.", 429)
     );
   }
 

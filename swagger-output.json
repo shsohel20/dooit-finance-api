@@ -1,0 +1,3009 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "My API",
+    "description": "Description",
+    "version": "1.0.0"
+  },
+  "host": "localhost:6830/api/v1",
+  "basePath": "/",
+  "schemes": [
+    "http",
+    "https"
+  ],
+  "securityDefinitions": {
+    "BearerAuth": {
+      "type": "apiKey",
+      "name": "Authorization",
+      "in": "header",
+      "description": "Enter your token as: Bearer <JWT>"
+    }
+  },
+  "paths": {
+    "/fileupload/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/fileupload/photo": {
+      "post": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/fileupload/photo/client": {
+      "post": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/fileupload/{fileName}": {
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "fileName",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/fileupload/cloud-file/{id}": {
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/fileupload/cloud-file": {
+      "post": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+    "/auth/re-send-opt": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Resend OTP",
+        "description": "Create & send a new OTP to user",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ResendOtpBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OTP sent",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "message": {
+                  "type": "string",
+                  "example": "OTP Sent"
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/register": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Customer register",
+        "description": "Create a new customer user",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AuthRegisterBody"
+            }
+          },
+          {
+            "name": "Referer",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Registered + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Login user",
+        "description": "Authenticate user and return a JWT token",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/AuthLoginBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User logged in",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "400": {
+            "description": "Invalid credentials",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/logout": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Logout user (clear cookie)",
+        "description": "Clears cookie token",
+        "responses": {
+          "200": {
+            "description": "Logged out",
+            "schema": {
+              "$ref": "#/definitions/GenericSuccess"
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get current user",
+        "description": "Returns currently authenticated user",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current user",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {}
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/auth/me/customer": {
+      "get": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Get current user (customer view)",
+        "description": "Returns user + linked customer record and metadata",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User+customer data",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "customer": {
+                      "type": "object",
+                      "properties": {}
+                    },
+                    "email": {
+                      "type": "string",
+                      "example": "shsohel20@gmail.com"
+                    },
+                    "phone": {},
+                    "userExists": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "userId": {
+                      "type": "string",
+                      "example": "673d9as91sad81"
+                    },
+                    "linkedToCustomer": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "isInviteActive": {
+                      "type": "boolean",
+                      "example": false
+                    },
+                    "user": {
+                      "type": "object",
+                      "properties": {}
+                    }
+                  }
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/auth/forgot-password": {
+      "post": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Request password reset",
+        "description": "Sends a reset link to the email",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ForgotPasswordBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reset email sent",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "message": {
+                  "type": "string",
+                  "example": "Email Send Successfully"
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "404": {
+            "description": "Email not found",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/reset-password/{resettoken}": {
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Reset password",
+        "description": "Reset user password using reset token",
+        "parameters": [
+          {
+            "name": "resettoken",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "Reset token"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ResetPasswordBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Password reset + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "401": {
+            "description": "Invalid or expired token",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/confirm-user/{resettoken}": {
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Confirm user (email token)",
+        "description": "Activate user account using token",
+        "parameters": [
+          {
+            "name": "resettoken",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "Confirmation token"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User activated + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "401": {
+            "description": "Invalid token",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/confirm-user-by-otp": {
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Confirm user by OTP",
+        "description": "Activate user account by OTP code",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/ConfirmOtpBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User activated + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "400": {
+            "description": "OTP expired or invalid",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/auth/update-me": {
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Update user profile",
+        "description": "Update name/email/photo",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdateMeBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile updated + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/auth/update-password": {
+      "put": {
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Update password",
+        "description": "Change password by providing current and new password",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdatePasswordBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Password updated + token",
+            "schema": {
+              "$ref": "#/definitions/AuthSuccessResponse"
+            }
+          },
+          "401": {
+            "description": "Current password mismatch",
+            "schema": {
+              "$ref": "#/definitions/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "/user/": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Get all users",
+        "description": "Retrieve paginated / filtered users. Uses advancedResults middleware output.",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "description": "Page number (optional)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "description": "Items per page (optional)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users list (from advancedResults middleware)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "count": {
+                  "type": "number",
+                  "example": 10
+                },
+                "pagination": {
+                  "type": "object",
+                  "properties": {}
+                },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/UserResponse"
+                  }
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Get all users",
+        "description": "Retrieve paginated / filtered users. Uses advancedResults middleware output.",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "integer",
+            "description": "Page number (optional)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "integer",
+            "description": "Items per page (optional)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Users list (from advancedResults middleware)",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "count": {
+                  "type": "number",
+                  "example": 10
+                },
+                "pagination": {
+                  "type": "object",
+                  "properties": {}
+                },
+                "data": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/UserResponse"
+                  }
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/user/new": {
+      "post": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Create a new user",
+        "description": "Create a single user record",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UserCreateBody"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "User created",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "succeed": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "data": {
+                  "$ref": "#/definitions/UserResponse"
+                },
+                "id": {
+                  "type": "string",
+                  "example": "64f1a8b2a1f2c3d4e5f6a7b8"
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        },
+        "security": []
+      }
+    },
+    "/user/update-user-password/{id}": {
+      "put": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Update user password",
+        "description": "Change a user password by admin or authorized caller",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "User ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UpdatePasswordBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Password updated",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "data": {
+                  "type": "string",
+                  "example": "64f1a8b2a1f2c3d4e5f6a7b8"
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/user/{id}": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Get user by ID",
+        "description": "Fetch a single user by MongoDB _id",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "User ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User found",
+            "schema": {
+              "$ref": "#/definitions/UserResponse"
+            }
+          },
+          "404": {
+            "description": "User not found"
+          }
+        },
+        "security": []
+      },
+      "put": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Update user",
+        "description": "Update a user by ID (runValidators applied)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "User ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/UserUpdateBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated user",
+            "schema": {
+              "$ref": "#/definitions/UserResponse"
+            }
+          },
+          "404": {
+            "description": "User not found"
+          },
+          "409": {
+            "description": "Conflict - duplicate name"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Delete user",
+        "description": "Delete a user by ID",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "User ID"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User deleted",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "success": {
+                  "type": "boolean",
+                  "example": true
+                },
+                "data": {
+                  "type": "string",
+                  "example": "64f1a8b2a1f2c3d4e5f6a7b8"
+                }
+              },
+              "xml": {
+                "name": "main"
+              }
+            }
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      }
+    },
+    "/user/slug/{slug}": {
+      "get": {
+        "tags": [
+          "User"
+        ],
+        "summary": "Get user by slug",
+        "description": "Fetch a single user by slug",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "type": "string",
+            "description": "User slug"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User found",
+            "schema": {
+              "$ref": "#/definitions/UserResponse"
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/role/": {
+      "get": {
+        "tags": [
+          "Role"
+        ],
+        "summary": "Get all Rolle reports",
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Role"
+        ],
+        "summary": "Get all Rolle reports",
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          }
+        }
+      }
+    },
+    "/role/new": {
+      "post": {
+        "description": "",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/role/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/location/": {
+      "get": {
+        "tags": [
+          "Location"
+        ],
+        "summary": "Get All Location",
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/notify/subscribe-notification": {
+      "post": {
+        "description": "",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/notify/send-notification": {
+      "post": {
+        "description": "",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/otp/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/client/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/client/new": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/client/update-status/{id}": {
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/client/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/client/slug/{slug}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/client/dummy/create": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/branch/": {
+      "get": {
+        "tags": [
+          "Branch"
+        ],
+        "summary": "Get All Branch",
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Branch"
+        ],
+        "summary": "Get All Branch",
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "type": "object",
+              "properties": {}
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/branch/new": {
+      "post": {
+        "tags": [
+          "Branch"
+        ],
+        "summary": "Create Branch",
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BranchBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "201": {
+            "description": "Created"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/branch/{id}": {
+      "get": {
+        "tags": [
+          "Branch"
+        ],
+        "summary": "Get By Branch",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "Branch"
+        ],
+        "summary": "Update Branch",
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/BranchBody"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/branch/slug/{slug}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/customer/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/customer/invite": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/customer/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/customer/invite/validate": {
+      "get": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/customer/register/onboarding": {
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/customer/dummy-create": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/transaction/": {
+      "get": {
+        "tags": [
+          "Transaction"
+        ],
+        "summary": "Get All Transaction",
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "customer",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "currency",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "convertedAmountAUD": {
+                  "example": "any"
+                },
+                "transactionId": {
+                  "example": "any"
+                },
+                "customer": {
+                  "example": "any"
+                },
+                "client": {
+                  "example": "any"
+                },
+                "branch": {
+                  "example": "any"
+                },
+                "type": {
+                  "example": "any"
+                },
+                "subtype": {
+                  "example": "any"
+                },
+                "amount": {
+                  "example": "any"
+                },
+                "currency": {
+                  "example": "any"
+                },
+                "reference": {
+                  "example": "any"
+                },
+                "narrative": {
+                  "example": "any"
+                },
+                "status": {
+                  "example": "any"
+                },
+                "channel": {
+                  "example": "any"
+                },
+                "sender": {
+                  "example": "any"
+                },
+                "beneficiary": {
+                  "example": "any"
+                },
+                "intermediary": {
+                  "example": "any"
+                },
+                "purpose": {
+                  "example": "any"
+                },
+                "remittancePurposeCode": {
+                  "example": "any"
+                },
+                "crypto": {
+                  "example": "any"
+                },
+                "bullion": {
+                  "example": "any"
+                },
+                "metadata": {
+                  "example": "any"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/transaction/stats": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          },
+          {
+            "name": "client",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "date_from",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "date_to",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/transaction/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "authorization",
+            "in": "header",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/demo/": {
+      "get": {
+        "tags": [
+          "Demo"
+        ],
+        "summary": "Get Demo Data",
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "Demo"
+        ],
+        "summary": "Get Demo Data",
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/demo/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/demo/create": {
+      "post": {
+        "description": "",
+        "responses": {
+          "201": {
+            "description": "Created"
+          }
+        }
+      }
+    },
+    "/ecdd/": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "type": "string"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/ecdd/import": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/ecdd/import-csv": {
+      "post": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/ecdd/export-csv": {
+      "get": {
+        "description": "",
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/ecdd/{id}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "put": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      },
+      "delete": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    },
+    "/ecdd/case/{caseNumber}": {
+      "get": {
+        "description": "",
+        "parameters": [
+          {
+            "name": "caseNumber",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": ""
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "AuthRegisterBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "example": "Sh Milon"
+        },
+        "userName": {
+          "type": "string",
+          "example": "shsohel20"
+        },
+        "userType": {
+          "type": "string",
+          "example": "customer"
+        },
+        "email": {
+          "type": "string",
+          "example": "shsohel20@gmail.com"
+        },
+        "role": {
+          "type": "string",
+          "example": "customer"
+        },
+        "password": {
+          "type": "string",
+          "example": "123456"
+        },
+        "isActive": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "AuthLoginBody": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "example": "shsohel20@gmail.com"
+        },
+        "password": {
+          "type": "string",
+          "example": "123456"
+        }
+      }
+    },
+    "ForgotPasswordBody": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "example": "shsohel20@gmail.com"
+        },
+        "clientUrl": {
+          "type": "string",
+          "example": "https://your-client.app"
+        }
+      }
+    },
+    "ResetPasswordBody": {
+      "type": "object",
+      "properties": {
+        "password": {
+          "type": "string",
+          "example": "newPassword123"
+        }
+      }
+    },
+    "UpdateMeBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "example": "New Name"
+        },
+        "email": {
+          "type": "string",
+          "example": "new@example.com"
+        },
+        "photoUrl": {
+          "type": "string",
+          "example": "https://cdn.example.com/photo.jpg"
+        }
+      }
+    },
+    "UpdatePasswordBody": {
+      "type": "object",
+      "properties": {
+        "currentPassword": {
+          "type": "string",
+          "example": "123456"
+        },
+        "newPassword": {
+          "type": "string",
+          "example": "newPassword123"
+        }
+      }
+    },
+    "ResendOtpBody": {
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "example": "shsohel20@gmail.com"
+        }
+      }
+    },
+    "ConfirmOtpBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "example": "123456"
+        }
+      }
+    },
+    "UserCreateBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "example": "John Doe"
+        },
+        "userName": {
+          "type": "string",
+          "example": "johndoe"
+        },
+        "email": {
+          "type": "string",
+          "example": "john@example.com"
+        },
+        "role": {
+          "type": "string",
+          "example": "user"
+        },
+        "phone": {
+          "type": "string",
+          "example": "+8801XXXXXXXXX"
+        },
+        "password": {
+          "type": "string",
+          "example": "password123"
+        },
+        "isActive": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "UserUpdateBody": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "example": "John Doe"
+        },
+        "userName": {
+          "type": "string",
+          "example": "johndoe"
+        },
+        "email": {
+          "type": "string",
+          "example": "john@example.com"
+        },
+        "role": {
+          "type": "string",
+          "example": "user"
+        },
+        "phone": {
+          "type": "string",
+          "example": "+8801XXXXXXXXX"
+        },
+        "photoUrl": {
+          "type": "string",
+          "example": "https://cdn.example.com/avatar.jpg"
+        },
+        "isActive": {
+          "type": "boolean",
+          "example": true
+        }
+      }
+    },
+    "UserResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "_id": {
+              "type": "string",
+              "example": "64f1a8b2a1f2c3d4e5f6a7b8"
+            },
+            "name": {
+              "type": "string",
+              "example": "John Doe"
+            },
+            "userName": {
+              "type": "string",
+              "example": "johndoe"
+            },
+            "email": {
+              "type": "string",
+              "example": "john@example.com"
+            },
+            "role": {
+              "type": "string",
+              "example": "user"
+            },
+            "phone": {
+              "type": "string",
+              "example": "+8801XXXXXXXXX"
+            },
+            "photoUrl": {
+              "type": "string",
+              "example": "https://cdn.example.com/avatar.jpg"
+            },
+            "isActive": {
+              "type": "boolean",
+              "example": true
+            },
+            "createdAt": {
+              "type": "string",
+              "example": "2025-10-01T12:00:00.000Z"
+            }
+          }
+        }
+      }
+    },
+    "BranchBody": {
+      "type": "object",
+      "properties": {
+        "userName": {
+          "type": "string",
+          "example": "gulshanbranch"
+        },
+        "client": {
+          "type": "string",
+          "example": "68fe70605a026bb521a8ae28"
+        },
+        "name": {
+          "type": "string",
+          "example": "Gulshan Corporate Branch"
+        },
+        "branchCode": {
+          "type": "string",
+          "example": "BR002"
+        },
+        "branchType": {
+          "type": "string",
+          "example": "Corporate"
+        },
+        "email": {
+          "type": "string",
+          "example": "gulshan.branch@company.com"
+        },
+        "phone": {
+          "type": "string",
+          "example": "+8801711223344"
+        },
+        "website": {
+          "type": "string",
+          "example": "https://company.com/gulshan"
+        },
+        "address": {
+          "type": "object",
+          "properties": {
+            "street": {
+              "type": "string",
+              "example": "House 24, Road 35, Gulshan-2"
+            },
+            "city": {
+              "type": "string",
+              "example": "Dhaka"
+            },
+            "state": {
+              "type": "string",
+              "example": "Dhaka Division"
+            },
+            "country": {
+              "type": "string",
+              "example": "Bangladesh"
+            },
+            "zipcode": {
+              "type": "string",
+              "example": "1212"
+            }
+          }
+        },
+        "contacts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "example": "Rafiul Hasan"
+              },
+              "title": {
+                "type": "string",
+                "example": "Branch Manager"
+              },
+              "email": {
+                "type": "string",
+                "example": "rafiul.hasan@company.com"
+              },
+              "phone": {
+                "type": "string",
+                "example": "+8801711998877"
+              },
+              "primary": {
+                "type": "boolean",
+                "example": true
+              }
+            }
+          }
+        },
+        "manager": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "example": "Rafiul Hasan"
+            },
+            "email": {
+              "type": "string",
+              "example": "rafiul.hasan@company.com"
+            },
+            "phone": {
+              "type": "string",
+              "example": "+8801711998877"
+            },
+            "employeeId": {
+              "type": "string",
+              "example": "EMP-BR002"
+            }
+          }
+        },
+        "services": {
+          "type": "array",
+          "example": [
+            "Corporate Banking",
+            "Loans",
+            "Account Opening"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "hasATM": {
+          "type": "boolean",
+          "example": true
+        },
+        "atmDetails": {
+          "type": "object",
+          "properties": {
+            "locationDescription": {
+              "type": "string",
+              "example": "Inside the branch building, ground floor"
+            },
+            "cashAvailability": {
+              "type": "boolean",
+              "example": true
+            }
+          }
+        },
+        "workingHours": {
+          "type": "object",
+          "properties": {
+            "monday": {
+              "type": "object",
+              "properties": {
+                "open": {
+                  "type": "string",
+                  "example": "09:00"
+                },
+                "close": {
+                  "type": "string",
+                  "example": "17:00"
+                },
+                "closed": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            },
+            "tuesday": {
+              "type": "object",
+              "properties": {
+                "open": {
+                  "type": "string",
+                  "example": "09:00"
+                },
+                "close": {
+                  "type": "string",
+                  "example": "17:00"
+                },
+                "closed": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            },
+            "wednesday": {
+              "type": "object",
+              "properties": {
+                "open": {
+                  "type": "string",
+                  "example": "09:00"
+                },
+                "close": {
+                  "type": "string",
+                  "example": "17:00"
+                },
+                "closed": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            },
+            "thursday": {
+              "type": "object",
+              "properties": {
+                "open": {
+                  "type": "string",
+                  "example": "09:00"
+                },
+                "close": {
+                  "type": "string",
+                  "example": "17:00"
+                },
+                "closed": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            },
+            "friday": {
+              "type": "object",
+              "properties": {
+                "open": {
+                  "type": "string",
+                  "example": "09:00"
+                },
+                "close": {
+                  "type": "string",
+                  "example": "13:00"
+                },
+                "closed": {
+                  "type": "boolean",
+                  "example": false
+                }
+              }
+            },
+            "saturday": {
+              "type": "object",
+              "properties": {
+                "closed": {
+                  "type": "boolean",
+                  "example": true
+                }
+              }
+            },
+            "sunday": {
+              "type": "object",
+              "properties": {
+                "closed": {
+                  "type": "boolean",
+                  "example": true
+                }
+              }
+            }
+          }
+        },
+        "documents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "example": "Trade License"
+              },
+              "url": {
+                "type": "string",
+                "example": "https://cdn.company.com/docs/gulshan-trade-license.pdf"
+              },
+              "mimeType": {
+                "type": "string",
+                "example": "application/pdf"
+              },
+              "type": {
+                "type": "string",
+                "example": "license"
+              }
+            }
+          }
+        },
+        "status": {
+          "type": "string",
+          "example": "Active"
+        },
+        "settings": {
+          "type": "object",
+          "properties": {
+            "currency": {
+              "type": "string",
+              "example": "BDT"
+            },
+            "timezone": {
+              "type": "string",
+              "example": "Asia/Dhaka"
+            }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    "EcddReport": {
+      "type": "object",
+      "properties": {
+        "analystName": {
+          "type": "string",
+          "example": "John Smith"
+        },
+        "position": {
+          "type": "string",
+          "example": "Analyst"
+        },
+        "date": {
+          "type": "string",
+          "example": "2025-11-22"
+        },
+        "caseNumber": {
+          "type": "string",
+          "example": "CASE-001"
+        },
+        "userId": {
+          "type": "string",
+          "example": "64f1a8b2a1f2c3d4e5f6a7b8"
+        },
+        "fullName": {
+          "type": "string",
+          "example": "Jane Doe"
+        },
+        "customerName": {
+          "type": "string",
+          "example": "Acme Corp"
+        },
+        "totalDepositsAUD": {
+          "type": "number",
+          "example": 10000
+        },
+        "isPEP": {
+          "type": "string",
+          "example": "No"
+        },
+        "recommendation": {
+          "type": "string",
+          "example": "Approved"
+        }
+      }
+    },
+    "AuthSuccessResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "message": {
+          "type": "string",
+          "example": "Login successful"
+        },
+        "token": {
+          "type": "string",
+          "example": "Bearer <JWT>"
+        }
+      }
+    },
+    "GenericSuccess": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": true
+        },
+        "data": {
+          "type": "object",
+          "properties": {}
+        }
+      }
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "example": false
+        },
+        "message": {
+          "type": "string",
+          "example": "Error message here"
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "BearerAuth": []
+    }
+  ]
+}

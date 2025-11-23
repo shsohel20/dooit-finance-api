@@ -19,6 +19,13 @@ exports.filterDemoDataSection = (doc, requestBody, req) => {
 // @route  GET /api/v1/demoDataes
 // @access Public
 exports.getDemoDataes = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Demo']
+  #swagger.summary = 'Get Demo Data'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // assumes advancedResults middleware populates res.advancedResults
   res.status(200).json(res.advancedResults);
 });

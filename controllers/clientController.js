@@ -21,7 +21,14 @@ exports.filterClientSection = (c, requestBody) => {
 // @route  /api/v1/clients
 // @access Public (or restrict as needed)
 exports.getClients = asyncHandler(async (req, res, next) => {
-  // expects advancedResults middleware to populate res.advancedResults
+  /*
+  #swagger.tags = ['Client']
+  #swagger.summary = 'Get All Client'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+
   res.status(200).json(res.advancedResults);
 });
 

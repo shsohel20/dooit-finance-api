@@ -15,9 +15,6 @@ const Client = require("../models/Client");
  * (used similarly to filterUserSection)
  */
 exports.filterBranchSection = (doc, requestBody, req) => {
-
-  console.log('first');
-  console.log(req.user);
   // const client = req.user?.clients;
   // const clientId = client;
   // // console.log(client);
@@ -36,6 +33,25 @@ exports.filterBranchSection = (doc, requestBody, req) => {
 // @route  GET /api/v1/branches
 // @access Public
 exports.getBranches = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Get All Branch'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+  // assumes advancedResults middleware populates res.advancedResults
+  res.status(200).json(res.advancedResults);
+});
+exports.getBranchesPost = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Get All Branch'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // assumes advancedResults middleware populates res.advancedResults
   res.status(200).json(res.advancedResults);
 });
@@ -44,6 +60,15 @@ exports.getBranches = asyncHandler(async (req, res, next) => {
 // @route  POST /api/v1/branches
 // @access Public
 exports.createBranch = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Create Branch'
+  #swagger.security = [{ "BearerAuth": [] }]
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/BranchBody' } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // validate payload (includes User uniqueness checks when userName/email present)
   const ok = await validateBranchCreation(req, next);
   if (!ok) return;
@@ -67,6 +92,12 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
     autoCreateUserForBranch = false, // optional flag
   } = req.body;
 
+  console.log({ client });
+  if (!client) {
+    return next(
+      new ErrorResponse("Un Authorized Person , please check login info", 500)
+    );
+  }
   // Decide whether to create a user:
   // - explicit userName or userEmail provided
   // - or a flag autoCreateUserForBranch true AND an email exists (branch email)
@@ -159,6 +190,13 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/branches/:id
 // @access Public
 exports.getBranch = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Get By Branch'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const branch = await Branch.findById(req.params.id).populate("client");
 
   if (!branch) {
@@ -197,6 +235,15 @@ exports.getBranchBySlug = asyncHandler(async (req, res, next) => {
 // @route  PUT /api/v1/branches/:id
 // @access Public
 exports.updateBranch = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Update Branch'
+  #swagger.security = [{ "BearerAuth": [] }]
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/BranchBody' } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const branchId = req.params.id;
   const branch = await Branch.findById(branchId);
   if (!branch)

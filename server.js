@@ -7,6 +7,8 @@ const errorHandler = require("./middleware/error");
 const morgan = require("morgan");
 const cloudinary = require("cloudinary").v2;
 // const webPush = require("web-push");
+const swaggerUi = require("swagger-ui-express");
+const swaggerDocument = require("./swagger-output.json");
 
 dotenv.config({ path: "./config/config.env" });
 const bodyParser = require("body-parser");
@@ -70,6 +72,9 @@ app.use("/api/v1", routes);
 ///Handle Error
 app.use(errorHandler);
 
+//SwaggerUI Docs
+
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 ///Server Port
 const PORT = process.env.PORT || 5000;
 

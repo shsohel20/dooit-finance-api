@@ -115,6 +115,13 @@ exports.getTransaction = asyncHandler(async (req, res, next) => {
 // @route GET /api/v1/transactions
 // @access Protected
 exports.getTransactions = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transaction']
+  #swagger.summary = 'Get All Transaction'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const {
     page = 1,
     limit = 25,

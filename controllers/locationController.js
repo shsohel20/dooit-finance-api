@@ -1,7 +1,7 @@
-const asyncHandler = require('../middleware/async');
-const ErrorResponse = require('../utils/errorResponse');
+const asyncHandler = require("../middleware/async");
+const ErrorResponse = require("../utils/errorResponse");
 
-const addressData = require('../_data/countries+states+cities.json');
+const addressData = require("../_data/countries+states+cities.json");
 
 const locationJson = addressData.map((country) => ({
   countryName: country.name,
@@ -38,6 +38,13 @@ const locationJson = addressData.map((country) => ({
 // @route   /api/v1/location
 // @access   Public
 exports.getLocations = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Location']
+  #swagger.summary = 'Get All Location'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   ///see the route
   res.status(200).json({
     success: true,

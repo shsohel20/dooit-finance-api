@@ -1172,14 +1172,22 @@ exports.acceptInvite = asyncHandler(async (req, res, next) => {
  * Body: the JSON you provided
  */
 exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Onboarding']
+  #swagger.summary = 'Dummy Customer Insert'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/DummyCustomer' } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const body = req.body || {};
+  const { kyc } = body;
 
   // sensible defaults
   const DEFAULT_PASSWORD = "123456";
   const saltRounds = 10;
 
   // map possible incoming requestedType values to canonical ones
-  // (fix typos like "indivisual")
   const mapRequestedType = (t) => {
     if (!t) return "individual";
     const s = String(t).toLowerCase();
@@ -1232,10 +1240,6 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           new ErrorResponse(`Branch Not found, please check client name`, 404)
         );
       }
-      // NOTE: if neither found, we will still proceed — relation will be omitted.
-      // If you want to force existence, uncomment the following:
-      // if (body.clientName && !clientDoc) throw new Error('Client not found by name');
-      // if (body.branchName && !branchDoc) throw new Error('Branch not found by name');
 
       // 2) Find or create user by email or userName
       const userPayload = {
@@ -1273,18 +1277,12 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       }
 
       // 3) Build relation object (if we have client or branch info)
-
-      // 4) Create Customer
-
-      //If customer already existing here:
-
       const relationCandidate =
         clientDoc || branchDoc
           ? {
               client: clientDoc ? clientDoc._id : undefined,
               branch: branchDoc ? branchDoc._id : undefined,
-              type:
-                requestedType === "individual" ? "individual" : requestedType,
+              type: requestedType,
               onboardingChannel: body.onboardingChannel || "API",
               registeredAt: body.registeredAt
                 ? new Date(body.registeredAt)
@@ -1295,12 +1293,11 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
             }
           : null;
 
-      let customerDoc;
+      // 4) Create or update Customer
+      let customerDoc = await Customer.findOne({
+        user: createdUser._id,
+      }).session(session);
 
-      customerDoc = await Customer.findOne({ user: createdUser }).session(
-        session
-      );
-      let relations = [];
       if (customerDoc) {
         // ensure relations array exists
         customerDoc.relations = customerDoc.relations || [];
@@ -1340,12 +1337,10 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
         if (body.documents) customerDoc.documents = body.documents;
         if (body.declaration) customerDoc.declaration = body.declaration;
         if (body.country) customerDoc.country = body.country;
-        if (typeof body.isActive !== "undefined")
-          customerDoc.isActive = body.isActive;
+        customerDoc.isActive = true;
 
         // save updated customer
         createdCustomer = await customerDoc.save({ session });
-        ///
       } else {
         // create new customer
         const customerPayload = {
@@ -1363,9 +1358,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
         createdCustomer = await newCustomer.save({ session });
       }
 
-      // createdCustomer = await customerDoc.save({ session });
-
-      // 5) If requestedType is not individual, create corresponding KYC record(s)
+      // 5) If requestedType is not individual, FIND-AND-UPDATE (or create) KYC
       if (requestedType !== "individual") {
         if (!createdCustomer || !createdCustomer._id) {
           throw new ErrorResponse(
@@ -1373,43 +1366,179 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
             500
           );
         }
-        // choose which KYC model to create
-        // company -> CompanyKyc, trust -> TrustKyc, else -> NonIndividualKyc
+
+        /**
+         * Helper: try find existing kyc record using typical unique fields,
+         * update if found, otherwise create new.
+         *
+         * `model` - mongoose model (CompanyKyc / TrustKyc / NonIndividualKyc)
+         * `findQuery` - object to locate existing record (should include client/branch/customer if applicable)
+         * `payload` - data to set/create
+         * Returns { action: 'created'|'updated', doc }
+         */
+        async function findOrUpdateKyc(model, findQuery, payload) {
+          // try find existing
+          const existing = await model.findOne(findQuery).session(session);
+          if (existing) {
+            // merge payload into existing doc (shallow merge)
+            Object.assign(existing, payload);
+            await existing.save({ session });
+            return { action: "updated", doc: existing };
+          } else {
+            const created = await model.create([payload], { session });
+            return { action: "created", doc: created[0] };
+          }
+        }
+
+        // Build reasonable queries for each KYC type using common unique fields
         if (requestedType === "company") {
+          // Prefer registration number, then legal name / registered business name
+          const possibleReg =
+            (kyc &&
+              (kyc.general_information?.registration_number ||
+                kyc.registration_number)) ||
+            (kyc && (kyc.registrationNumber || kyc.registration_number));
+          const possibleName =
+            (kyc && (kyc.general_information?.legal_name || kyc.legal_name)) ||
+            (kyc &&
+              (kyc.general_information?.registered_business_name ||
+                kyc.registered_business_name));
+
+          let findQuery = { customer: createdCustomer._id };
+          if (possibleReg) {
+            findQuery["general_information.registration_number"] = possibleReg;
+          } else if (possibleName) {
+            findQuery["general_information.legal_name"] = possibleName;
+          } else {
+            // fallback to searching by customer + client/branch
+            findQuery = {
+              customer: createdCustomer._id,
+              client: clientDoc ? clientDoc._id : undefined,
+              branch: branchDoc ? branchDoc._id : undefined,
+            };
+          }
+
           const compPayload = {
             client: clientDoc ? clientDoc._id : undefined,
             branch: branchDoc ? branchDoc._id : undefined,
             customer: createdCustomer._id,
-            general_information: body.general_information || {},
-            documents: body.documents || [],
+            general_information: (kyc && kyc.general_information) || {},
+            documents: (kyc && kyc.documents) || body.documents || [],
+            ...kyc, // include other KYC fields if present (careful with collisions)
           };
-          const created = await CompanyKyc.create([compPayload], { session });
-          createdKyc.push({ type: "CompanyKyc", doc: created[0] });
+
+          const result = await findOrUpdateKyc(
+            CompanyKyc,
+            findQuery,
+            compPayload
+          );
+          createdKyc.push({
+            type: "CompanyKyc",
+            action: result.action,
+            id: result.doc._id,
+            message:
+              result.action === "updated"
+                ? `CompanyKyc updated (id: ${result.doc._id})`
+                : `CompanyKyc created (id: ${result.doc._id})`,
+          });
         } else if (requestedType === "trust") {
+          // Prefer trust name or registration numbers when available
+          const possibleTrustName =
+            (kyc &&
+              (kyc.trust_details?.full_trust_name || kyc.full_trust_name)) ||
+            (kyc && kyc.trustName);
+
+          const possibleReg =
+            (kyc &&
+              (kyc.trust_details?.trust_type?.unregulated_trust
+                ?.registration_number ||
+                kyc.trust_details?.trust_type?.self_managed_super_fund?.abn)) ||
+            (kyc && kyc.registrationNumber);
+
+          let findQuery = { customer: createdCustomer._id };
+          if (possibleTrustName) {
+            findQuery["trust_details.full_trust_name"] = possibleTrustName;
+          } else if (possibleReg) {
+            // try the registration number in common nested paths
+            findQuery[
+              "trust_details.trust_type.unregulated_trust.registration_number"
+            ] = possibleReg;
+          } else {
+            findQuery = {
+              customer: createdCustomer._id,
+              client: clientDoc ? clientDoc._id : undefined,
+              branch: branchDoc ? branchDoc._id : undefined,
+            };
+          }
+
           const trustPayload = {
             client: clientDoc ? clientDoc._id : undefined,
             branch: branchDoc ? branchDoc._id : undefined,
             customer: createdCustomer._id,
-            trust_details: body.trust_details || {},
-            documents: body.documents || [],
+            trust_details: (kyc && kyc.trust_details) || {},
+            documents: (kyc && kyc.documents) || body.documents || [],
+            ...kyc,
           };
-          const created = await TrustKyc.create([trustPayload], { session });
-          createdKyc.push({ type: "TrustKyc", doc: created[0] });
+
+          const result = await findOrUpdateKyc(
+            TrustKyc,
+            findQuery,
+            trustPayload
+          );
+          createdKyc.push({
+            type: "TrustKyc",
+            action: result.action,
+            id: result.doc._id,
+            message:
+              result.action === "updated"
+                ? `TrustKyc updated (id: ${result.doc._id})`
+                : `TrustKyc created (id: ${result.doc._id})`,
+          });
         } else {
-          // fallback: create NonIndividualKyc
+          // NonIndividualKyc: try registered_business_name or entity_name
+          const possibleName =
+            (kyc &&
+              (kyc.general_information?.registered_business_name ||
+                kyc.registered_business_name)) ||
+            (kyc && (kyc.general_information?.entity_name || kyc.entity_name));
+
+          let findQuery = { customer: createdCustomer._id };
+          if (possibleName) {
+            findQuery["general_information.registered_business_name"] =
+              possibleName;
+          } else {
+            findQuery = {
+              customer: createdCustomer._id,
+              client: clientDoc ? clientDoc._id : undefined,
+              branch: branchDoc ? branchDoc._id : undefined,
+            };
+          }
+
           const nonIndPayload = {
             client: clientDoc ? clientDoc._id : undefined,
             branch: branchDoc ? branchDoc._id : undefined,
             customer: createdCustomer._id,
-            general_information: body.general_information || {},
-            documents: body.documents || [],
+            general_information: (kyc && kyc.general_information) || {},
+            documents: (kyc && kyc.documents) || body.documents || [],
+            ...kyc,
           };
-          const created = await NonIndividualKyc.create([nonIndPayload], {
-            session,
+
+          const result = await findOrUpdateKyc(
+            NonIndividualKyc,
+            findQuery,
+            nonIndPayload
+          );
+          createdKyc.push({
+            type: "NonIndividualKyc",
+            action: result.action,
+            id: result.doc._id,
+            message:
+              result.action === "updated"
+                ? `NonIndividualKyc updated (id: ${result.doc._id})`
+                : `NonIndividualKyc created (id: ${result.doc._id})`,
           });
-          createdKyc.push({ type: "NonIndividualKyc", doc: created[0] });
         }
-      }
+      } // end KYC block
     }); // end transaction
 
     // return created items (refresh customer to include generated uid)
@@ -1433,7 +1562,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           defaultPasswordSet: existingWas(createdUser) ? false : true,
         },
         customer: resultCustomer,
-        kyc: createdKyc.map((k) => ({ type: k.type, id: k.doc._id })),
+        kyc: createdKyc,
       },
     });
 
@@ -1450,6 +1579,11 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
     session.endSession();
   }
 });
+
+// small helper to safely escape regex chars for name search
+function escapeRegExp(string) {
+  return String(string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 // small helper to safely escape regex chars for name search
 function escapeRegExp(string) {

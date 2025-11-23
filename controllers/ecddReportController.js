@@ -103,6 +103,13 @@ exports.filterEcddSection = (s, requestBody) => {
 // @route  GET /api/v1/ecdd
 // @access Public (or protect with auth middleware in routes)
 exports.getEcddReports = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['ECDD']
+  #swagger.summary = 'Get All Reports'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // expected to be populated by advancedResults middleware
   res.status(200).json(res.advancedResults);
 });

@@ -8,6 +8,7 @@ const {
   deleteBranch,
   filterBranchSection,
   getBranchBySlug,
+  getBranchesPost,
 } = require("../controllers/branchController");
 
 const Branch = require("../models/Branch");
@@ -23,7 +24,7 @@ router.use(authorize("admin"));
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router
   .route("/")
-  .post(advancedResults(Branch, null, filterBranchSection), getBranches)
+  .post(advancedResults(Branch, null, filterBranchSection), getBranchesPost)
   .get(advancedResults(Branch), getBranches);
 
 // create new branch

@@ -8,6 +8,7 @@ const {
   filterUserSection,
   updateUserPassword,
   getUserBySlug,
+  getUsersPost,
 } = require("../controllers/userController");
 
 const User = require("../models/User");
@@ -22,7 +23,7 @@ router.use(authorize("admin"));
 
 router
   .route("/")
-  .post(advancedResults(User, null, filterUserSection), getUsers)
+  .post(advancedResults(User, null, filterUserSection), getUsersPost)
   .get(advancedResults(User), getUsers);
 
 router.route("/new").post(createUser);

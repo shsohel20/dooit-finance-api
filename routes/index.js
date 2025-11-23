@@ -15,7 +15,7 @@ const branch = require("./branch");
 const customer = require("./customer");
 const transaction = require("./transaction");
 const demo = require("./demoData");
-const ecddRoutes = require("./ecddReport");
+const ecddRoutes = require("./ecdd-report");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -30,6 +30,6 @@ router.use("/branch", branch);
 router.use("/customer", customer);
 router.use("/transaction", transaction);
 router.use("/demo", demo);
-router.use("/ecdd-report", ecddRoutes);
+router.use("/ecdd", ecddRoutes);
 
 module.exports = router;

@@ -18,11 +18,9 @@ const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
 
-router.route("/dummy/create").post(createDummyClient);
-
 // protect all client routes and allow only admin by default
-router.use(protect);
-router.use(authorize("admin", "client"));
+// router.use(protect);
+// router.use(authorize("admin", "client"));
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router
@@ -41,5 +39,7 @@ router.route("/:id").get(getClient).put(updateClient).delete(deleteClient);
 
 // get by slug
 router.route("/slug/:slug").get(getClientBySlug);
+
+router.route("/dummy/create").post(createDummyClient);
 
 module.exports = router;
