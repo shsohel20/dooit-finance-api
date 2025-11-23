@@ -183,15 +183,23 @@ UserSchema.methods.getResetPasswordToken = function () {
 UserSchema.methods.mathPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };
-UserSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `U_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
-  }
+// UserSchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `U_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
 
+//   next();
+// });
+
+UserSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `U_${Date.now()}`;
+  }
   next();
 });
+
 UserSchema.plugin(AutoIncrement, {
   inc_field: "sequence",
   id: "user_sequence", // unique counter id for this schema

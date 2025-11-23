@@ -170,12 +170,9 @@ ClientSchema.pre("save", async function (next) {
     next(error);
   }
 });
-
-ClientSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `GRP_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+ClientSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `GRP_${Date.now()}`;
   }
   next();
 });

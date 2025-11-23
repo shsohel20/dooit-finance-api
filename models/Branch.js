@@ -75,7 +75,12 @@ const BranchSchema = new Schema(
       sparse: true,
     },
 
-    name: { type: String, required: true, trim: true },
+    name: {
+      type: String,
+      required: true,
+      trim: true,
+      unique: [true, "Please add a  name"],
+    },
     slug: { type: String, unique: false, sparse: true, index: true },
 
     // Branch identifier/code (unique per client)
@@ -208,13 +213,10 @@ BranchSchema.pre("save", function (next) {
   }
   next();
 });
-BranchSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `BRN_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+BranchSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `BR_${Date.now()}`;
   }
-
   next();
 });
 /**

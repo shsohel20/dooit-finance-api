@@ -76,11 +76,17 @@ AlertSchema.index({ user: 1 });
  * Virtuals
  */
 
-AlertSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `#CA_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+// AlertSchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `#CA_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
+//   next();
+// });
+AlertSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `CA_${Date.now()}`;
   }
   next();
 });

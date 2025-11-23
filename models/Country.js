@@ -38,13 +38,20 @@ CountrySchema.plugin(AutoIncrement, {
   start_seq: 1,
 });
 
-CountrySchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `CT_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
-  }
+// CountrySchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `CT_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
 
+//   next();
+// });
+
+CountrySchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `CT_${Date.now()}`;
+  }
   next();
 });
 module.exports = mongoose.model("Country", CountrySchema);

@@ -281,11 +281,18 @@ CustomerSchema.index(
   { unique: true, sparse: true, name: "customer_relation_unique" }
 );
 
-CustomerSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `CR_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+// CustomerSchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `CR_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
+//   next();
+// });
+
+CustomerSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `CR_${Date.now()}`;
   }
   next();
 });

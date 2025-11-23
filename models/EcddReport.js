@@ -95,24 +95,31 @@ const EcddReportSchema = new Schema(
 // EcddReportSchema.index({ user: 1 }); // removed — no `user` field
 
 // Post-save UID generation — generate padded uid like #CA_001
-EcddReportSchema.post("save", async function (doc, next) {
-  try {
-    if (!doc.uid && doc.sequence) {
-      const padded = String(doc.sequence).padStart(3, "0");
-      const newUid = `ECDD_${padded}`;
-      // Use updateOne to avoid triggering middleware recursively
-      await doc.constructor.updateOne(
-        { _id: doc._id },
-        { $set: { uid: newUid } }
-      );
-    }
-  } catch (err) {
-    // log and continue
-    /* eslint-disable no-console */
-    console.error("EcddReport post-save UID generation error:", err);
-  } finally {
-    next();
+// EcddReportSchema.post("save", async function (doc, next) {
+//   try {
+//     if (!doc.uid && doc.sequence) {
+//       const padded = String(doc.sequence).padStart(3, "0");
+//       const newUid = `ECDD_${padded}`;
+//       // Use updateOne to avoid triggering middleware recursively
+//       await doc.constructor.updateOne(
+//         { _id: doc._id },
+//         { $set: { uid: newUid } }
+//       );
+//     }
+//   } catch (err) {
+//     // log and continue
+//     /* eslint-disable no-console */
+//     console.error("EcddReport post-save UID generation error:", err);
+//   } finally {
+//     next();
+//   }
+// });
+
+EcddReportSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `ECDD_${Date.now()}`;
   }
+  next();
 });
 
 // Plugins

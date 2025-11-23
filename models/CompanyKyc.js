@@ -8,7 +8,7 @@ const DocumentMetaSchema = new Schema(
     url: String,
     mimeType: String,
     type: String,
-    docType:String,
+    docType: String,
     uploadedAt: { type: Date, default: Date.now },
   },
   { _id: false }
@@ -93,7 +93,6 @@ const CompanyKycSchema = new Schema(
       ],
     },
     documents: { type: [DocumentMetaSchema], default: [] },
-
   },
   {
     timestamps: true,
@@ -160,11 +159,18 @@ CompanyKycSchema.pre("save", function (next) {
   next();
 });
 
-CompanyKycSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `COMKYC_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+// CompanyKycSchema.post("save", async function (doc, next) {
+//   if (!doc.uid && doc.sequence) {
+//     const padded = String(doc.sequence).padStart(3, "0");
+//     doc.uid = `COMKYC_${padded}`;
+//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
+//   }
+//   next();
+// });
+
+CompanyKycSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `COMKYC_${Date.now()}`;
   }
   next();
 });

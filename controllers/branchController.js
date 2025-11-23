@@ -222,7 +222,6 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
 
   const client = await Client.findOne({ name: clientName });
 
-  console.log({ client });
   if (!client) {
     return next(new ErrorResponse("Client not available by Client Name", 500));
   }
@@ -240,7 +239,6 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
     const userName1 =
       userName || (email ? email.split("@")[0] : `${branchCode}`);
 
-    console.log(userName1);
     createdUser = await User.findOne({
       email,
       userName: userName1,
@@ -295,6 +293,10 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
   if (createdUser) {
     createdUser.branch = branch._id; // requires User schema to have branch field (optional)
     await createdUser.save();
+  }
+
+  if (!branch) {
+    return next(new ErrorResponse(`Branch Not Create`, 500));
   }
 
   res.status(201).json({

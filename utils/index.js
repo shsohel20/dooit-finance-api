@@ -212,6 +212,13 @@ const validateBranchCreation = async (req, next) => {
         )
       );
   }
+  if (name) {
+    const branch = await Branch.findOne({ name });
+    if (branch)
+      return next(
+        new ErrorResponse(`A branch with name "${name}" already exists.`, 409)
+      );
+  }
 
   // existing branch-level checks...
   if (slug) {
