@@ -34,6 +34,7 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
     purpose,
     remittancePurposeCode,
     crypto,
+    receiver,
     bullion,
     metadata,
   } = req.body;
@@ -77,6 +78,7 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
     status,
     channel,
     sender,
+    receiver,
     beneficiary,
     intermediary,
     purpose,

@@ -185,6 +185,134 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
       : {}),
   });
 });
+// @desc   Create single branch
+// @route  POST /api/v1/branches
+// @access Public
+exports.createDummyBranch = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Dummy  Branch'
+  #swagger.security = [{ "BearerAuth": [] }]
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/BranchBody' } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+  // validate payload (includes User uniqueness checks when userName/email present)
+  const ok = await validateBranchCreation(req, next);
+  if (!ok) return;
+
+  const {
+    name,
+    branchCode,
+    email,
+    phone,
+    slug,
+    manager,
+    services,
+    address,
+    documents,
+    settings,
+    metadata,
+    // user-related props (optional)
+    userName,
+    clientName,
+    autoCreateUserForBranch = false, // optional flag
+  } = req.body;
+
+  const client = await Client.findOne({ name: clientName });
+
+  console.log({ client });
+  if (!client) {
+    return next(new ErrorResponse("Client not available by Client Name", 500));
+  }
+  // Decide whether to create a user:
+  // - explicit userName or userEmail provided
+  // - or a flag autoCreateUserForBranch true AND an email exists (branch email)
+  const shouldCreateUser = Boolean(
+    userName || (autoCreateUserForBranch && email)
+  );
+
+  let createdUser = null;
+  let initialPassword = null;
+
+  if (shouldCreateUser) {
+    const userName1 =
+      userName || (email ? email.split("@")[0] : `${branchCode}`);
+
+    console.log(userName1);
+    createdUser = await User.findOne({
+      email,
+      userName: userName1,
+    });
+
+    if (!createdUser) {
+      // build user payload
+      // initialPassword = generateRandomPassword(10);
+      initialPassword = "123456";
+      const uPayload = {
+        name: name,
+        email: email.toLowerCase(),
+        userName: userName1,
+        phone,
+        password: initialPassword, // assume User model handles hashing in pre-save
+        // role: "branch", // role for branch login
+        userType: "branch", // custom field if you use it
+        role: "admin", // custom field if you use it
+        isActive: true,
+      };
+
+      // create user
+      createdUser = await User.create(uPayload);
+    }
+  }
+
+  if (!createdUser) {
+    return next(new ErrorResponse("Failed to create branch user account", 500));
+  }
+
+  // create branch object; include reference to createdUser if available
+  const branchPayload = {
+    client,
+    name,
+    branchCode,
+    email: email && email.toLowerCase(),
+    phone,
+    slug,
+    manager,
+    services,
+    address,
+    documents,
+    settings,
+    metadata,
+  };
+
+  if (createdUser) branchPayload.user = createdUser._id;
+
+  const branch = await Branch.create(branchPayload);
+
+  // Optionally: set branch reference on user (if you want reverse link)
+  if (createdUser) {
+    createdUser.branch = branch._id; // requires User schema to have branch field (optional)
+    await createdUser.save();
+  }
+
+  res.status(201).json({
+    succeed: true,
+    data: branch,
+    id: branch._id,
+    ...(createdUser
+      ? {
+          branchUser: {
+            id: createdUser._id,
+            userName: createdUser.userName,
+            email: createdUser.email,
+            password: initialPassword,
+          },
+        }
+      : {}),
+  });
+});
 
 // @desc   Get single branch by id
 // @route  GET /api/v1/branches/:id

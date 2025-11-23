@@ -182,6 +182,9 @@ const CustomerSchema = new Schema(
       },
     ],
 
+    isPep: { type: Boolean, default: false },
+    sanction: { type: Boolean, default: false },
+
     // soft delete / archived
     consentToScreen: { type: Boolean, default: false }, //Agreement for ongoing screening.
     isActive: { type: Boolean, default: false },

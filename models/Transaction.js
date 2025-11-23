@@ -1,6 +1,8 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const Counter = require("./Counter");
+
 /**
  * Small reusable sub-schemas
  */
@@ -46,7 +48,7 @@ const TravelRuleSchema = new Schema(
  */
 const TransactionSchema = new Schema(
   {
-    sequence: { type: Number, index: true },
+    sequence: { type: Number, index: true, default: 1 },
 
     // TX_001
     uid: { type: String, unique: true, index: true },
@@ -142,6 +144,7 @@ const TransactionSchema = new Schema(
     toObject: { virtuals: true },
   }
 );
+
 /**
  * Auto-increment plugin for sequence
  */
@@ -150,24 +153,35 @@ TransactionSchema.plugin(AutoIncrement, {
   id: "transaction_sequence",
   start_seq: 1,
 });
+
 /**
  * Pre-save: basic checks / normalization
  */
-TransactionSchema.pre("save", function (next) {
-  // Normalize channel/currency to uppercase where appropriate
+// Then, our save hook for generating uid
+TransactionSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `TXN_${Date.now()}`;
+  }
+
+  // Normalization
   if (this.currency) this.currency = this.currency.toUpperCase();
-  if (this.channel) this.channel = this.channel.trim();
+  if (this.channel && this.channel.trim) this.channel = this.channel.trim();
+
+  next();
+});
+// Then, our pre-save hook for normalization
+// TransactionSchema.pre("save", function (next) {
+//   if (this.currency) this.currency = this.currency.toUpperCase();
+//   if (this.channel && this.channel.trim) this.channel = this.channel.trim();
+//   next();
+// });
+TransactionSchema.pre("save", function (next) {
+  console.log("pre-save sequence:", this.sequence, "isNew:", this.isNew);
   next();
 });
 
-TransactionSchema.post("save", async function (doc, next) {
-  if (!doc.uid && doc.sequence) {
-    const padded = String(doc.sequence).padStart(3, "0");
-    doc.uid = `TXN_${padded}`;
-    await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
-  }
-
-  next();
+TransactionSchema.post("save", function (doc) {
+  console.log("post-save sequence:", doc.sequence, "uid:", doc.uid);
 });
 /**
  * Indexes - avoid duplicate/index: true inside sub-docs for the same path.

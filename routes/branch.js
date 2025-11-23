@@ -9,6 +9,7 @@ const {
   filterBranchSection,
   getBranchBySlug,
   getBranchesPost,
+  createDummyBranch,
 } = require("../controllers/branchController");
 
 const Branch = require("../models/Branch");
@@ -29,6 +30,10 @@ router
 
 // create new branch
 router.route("/new").post(createBranch);
+
+// create dummy branch
+
+router.route("/dummy").post(createDummyBranch);
 
 // optional: update branch status (if you implement updateBranchStatus in controller)
 // router.route("/update-status/:id").put(updateBranchStatus);

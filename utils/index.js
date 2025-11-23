@@ -58,8 +58,8 @@ const knockTheDoor = async (obj) => {
   try {
     await Promise.all(
       subscriptions.map((subscription) =>
-        webPush.sendNotification(subscription, payload),
-      ),
+        webPush.sendNotification(subscription, payload)
+      )
     );
     return {
       status: 200,
@@ -90,7 +90,7 @@ const validateClientCreation = async (data, next) => {
   // Basic required field checks
   if (!name || !email || !userName) {
     return next(
-      new ErrorResponse("Name, email, and username are required!", 400),
+      new ErrorResponse("Name, email, and username are required!", 400)
     );
   }
 
@@ -99,7 +99,7 @@ const validateClientCreation = async (data, next) => {
     const existingByName = await Client.findOne({ name });
     if (existingByName)
       return next(
-        new ErrorResponse("Client with this name already exists!", 400),
+        new ErrorResponse("Client with this name already exists!", 400)
       );
   }
 
@@ -107,7 +107,7 @@ const validateClientCreation = async (data, next) => {
     const existingByEmail = await Client.findOne({ email });
     if (existingByEmail)
       return next(
-        new ErrorResponse("Client with this email already exists!", 400),
+        new ErrorResponse("Client with this email already exists!", 400)
       );
   }
 
@@ -117,8 +117,8 @@ const validateClientCreation = async (data, next) => {
       return next(
         new ErrorResponse(
           "Client with this registration number already exists!",
-          400,
-        ),
+          400
+        )
       );
   }
 
@@ -126,7 +126,7 @@ const validateClientCreation = async (data, next) => {
     const existingByTax = await Client.findOne({ taxId });
     if (existingByTax)
       return next(
-        new ErrorResponse("Client with this tax ID already exists!", 400),
+        new ErrorResponse("Client with this tax ID already exists!", 400)
       );
   }
 
@@ -134,7 +134,7 @@ const validateClientCreation = async (data, next) => {
     const existingByPhone = await Client.findOne({ phone });
     if (existingByPhone)
       return next(
-        new ErrorResponse("Client with this phone number already exists!", 400),
+        new ErrorResponse("Client with this phone number already exists!", 400)
       );
   }
 
@@ -182,9 +182,12 @@ const validateBranchCreation = async (req, next) => {
     slug,
     userName,
     userEmail,
+    clientName,
   } = req?.body;
   const loggedInUser = req.user ?? null;
-  const client = await Client.findOne({ user: loggedInUser?.id });
+  const client = await Client.findOne({
+    $or: [{ user: loggedInUser?.id }, { name: clientName }],
+  });
 
   if (!client)
     return next(new ErrorResponse("Client id (client) is required!", 400));
@@ -195,7 +198,7 @@ const validateBranchCreation = async (req, next) => {
   const clientExists = await Client.findById(client);
   if (!clientExists)
     return next(
-      new ErrorResponse(`Client not found with id of ${client}`, 404),
+      new ErrorResponse(`Client not found with id of ${client}`, 404)
     );
 
   // branchCode unique per client
@@ -205,8 +208,8 @@ const validateBranchCreation = async (req, next) => {
       return next(
         new ErrorResponse(
           `A branch with branchCode "${branchCode}" already exists for this client.`,
-          409,
-        ),
+          409
+        )
       );
   }
 
@@ -222,28 +225,28 @@ const validateBranchCreation = async (req, next) => {
     });
     if (existingByEmail)
       return next(
-        new ErrorResponse(`Branch email "${email}" is already in use.`, 409),
+        new ErrorResponse(`Branch email "${email}" is already in use.`, 409)
       );
   }
   if (phone) {
     const existingByPhone = await Branch.findOne({ phone });
     if (existingByPhone)
       return next(
-        new ErrorResponse(`Branch phone "${phone}" is already in use.`, 409),
+        new ErrorResponse(`Branch phone "${phone}" is already in use.`, 409)
       );
   }
   if (swiftCode) {
     const existingBySwift = await Branch.findOne({ swiftCode });
     if (existingBySwift)
       return next(
-        new ErrorResponse(`SWIFT code "${swiftCode}" is already used.`, 409),
+        new ErrorResponse(`SWIFT code "${swiftCode}" is already used.`, 409)
       );
   }
   if (ifscCode) {
     const existingByIfsc = await Branch.findOne({ ifscCode });
     if (existingByIfsc)
       return next(
-        new ErrorResponse(`IFSC code "${ifscCode}" is already used.`, 409),
+        new ErrorResponse(`IFSC code "${ifscCode}" is already used.`, 409)
       );
   }
 
@@ -295,7 +298,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const clientExists = await Client.findById(client);
     if (!clientExists)
       return next(
-        new ErrorResponse(`Client not found with id of ${client}`, 404),
+        new ErrorResponse(`Client not found with id of ${client}`, 404)
       );
   }
 
@@ -306,8 +309,8 @@ const validateBranchUpdate = async (branchId, data, next) => {
       return next(
         new ErrorResponse(
           `Another branch is using branchCode "${branchCode}" for this client.`,
-          409,
-        ),
+          409
+        )
       );
   }
 
@@ -321,7 +324,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await Branch.findOne({ email: email.toLowerCase() });
     if (existing && existing._id.toString() !== branchId)
       return next(
-        new ErrorResponse(`Branch email "${email}" is already in use.`, 409),
+        new ErrorResponse(`Branch email "${email}" is already in use.`, 409)
       );
   }
 
@@ -329,7 +332,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await Branch.findOne({ phone });
     if (existing && existing._id.toString() !== branchId)
       return next(
-        new ErrorResponse(`Branch phone "${phone}" is already in use.`, 409),
+        new ErrorResponse(`Branch phone "${phone}" is already in use.`, 409)
       );
   }
 
@@ -337,7 +340,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await Branch.findOne({ swiftCode });
     if (existing && existing._id.toString() !== branchId)
       return next(
-        new ErrorResponse(`SWIFT code "${swiftCode}" is already used.`, 409),
+        new ErrorResponse(`SWIFT code "${swiftCode}" is already used.`, 409)
       );
   }
 
@@ -345,7 +348,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await Branch.findOne({ ifscCode });
     if (existing && existing._id.toString() !== branchId)
       return next(
-        new ErrorResponse(`IFSC code "${ifscCode}" is already used.`, 409),
+        new ErrorResponse(`IFSC code "${ifscCode}" is already used.`, 409)
       );
   }
 
@@ -357,7 +360,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await User.findOne({ userName });
     if (existing && existing._id.toString() !== linkedUserId)
       return next(
-        new ErrorResponse(`Username "${userName}" is already taken.`, 409),
+        new ErrorResponse(`Username "${userName}" is already taken.`, 409)
       );
   }
 
@@ -366,10 +369,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
     const existing = await User.findOne({ email: ue });
     if (existing && existing._id.toString() !== linkedUserId)
       return next(
-        new ErrorResponse(
-          `Email "${ue}" is already used by another user.`,
-          409,
-        ),
+        new ErrorResponse(`Email "${ue}" is already used by another user.`, 409)
       );
   }
 
