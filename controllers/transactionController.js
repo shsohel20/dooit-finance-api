@@ -235,6 +235,7 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   #swagger.responses[401] = { description: 'Unauthorized' }
   #swagger.security = [] // public
   */
+
   const {
     transactionId,
     customerName,
@@ -264,20 +265,26 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("amount and currency are required", 400));
   }
 
-  // helper: find a doc by id or name
+  // helper: find a doc by id or name (returns doc with _id or null)
   const findByIdOrName = async (Model, value) => {
     if (!value) return null;
-    if (isValidId(value)) {
-      // if value is an id string, prefer findById (lean)
-      return Model.findById(value).select("_id").lean();
-    }
-    // otherwise search by name field
+    if (isValidId(value)) return Model.findById(value).select("_id").lean();
     return Model.findOne({ name: value }).select("_id").lean();
   };
 
-  // 1) Find customer user and client/branch in parallel where possible.
-  //    We need the user to find the customer's Customer doc, so do that sequentially per dependency,
-  //    but find client & branch in parallel to the user lookup.
+  // Validate presence of sender/receiver based on type early
+  if (type === "transfer" && !sender) {
+    return next(
+      new ErrorResponse("Sender is required for transfer transactions", 400)
+    );
+  }
+  if (type === "deposit" && !receiver) {
+    return next(
+      new ErrorResponse("Receiver is required for deposit transactions", 400)
+    );
+  }
+
+  // 1) Fetch user by customerName, client and branch in parallel
   const userPromise = User.findOne({ name: customerName }).select("_id").lean();
   const clientPromise = findByIdOrName(Client, clientName);
   const branchPromise = findByIdOrName(Branch, branchName);
@@ -292,7 +299,7 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("This customer not found by this name", 400));
   }
 
-  // Find Customer by user id
+  // Find Customer by user id (the "primary" customer referenced by customerName)
   const customerDoc = await Customer.findOne({ user: userDoc._id })
     .select("_id")
     .lean();
@@ -301,7 +308,6 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   }
 
   // client and branch are optional but if provided we already attempted to fetch them.
-  // If a clientName/id was provided but not found, return an error consistent with your original checks.
   let client = null;
   if (clientName) {
     if (!clientDoc) return next(new ErrorResponse("Client not found", 404));
@@ -314,11 +320,11 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
     branch = branchDoc._id;
   }
 
-  // Ensure sender's name matches customerName
+  // Additional validation:
   if (type === "transfer" && customerName !== sender?.name) {
     return next(
       new ErrorResponse(
-        "The Customer Name and Sender should be same, because of transaction type is transfer",
+        "The Customer Name and Sender should be same, because transaction type is transfer",
         400
       )
     );
@@ -326,58 +332,72 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   if (type === "deposit" && customerName !== receiver?.name) {
     return next(
       new ErrorResponse(
-        "The Customer Name and Receiver should be same, because of transaction type is deposit",
+        "The Customer Name and Receiver should be same, because transaction type is deposit",
         400
       )
     );
   }
 
-  // If receiver provided, find their user and customer; do it in parallel with minimal fields
-  let receiverWithId = null;
+  // Find receiver user & customer only if receiver provided (do it now)
+  let userReceiverDoc = null;
+  let customerReceiverDoc = null;
   if (receiver?.name) {
-    const userReceiverDoc = await User.findOne({ name: receiver.name })
+    userReceiverDoc = await User.findOne({ name: receiver.name })
       .select("_id")
       .lean();
     if (userReceiverDoc) {
-      const customerReceiverDoc = await Customer.findOne({
+      customerReceiverDoc = await Customer.findOne({
         user: userReceiverDoc._id,
       })
         .select("_id")
         .lean();
-      if (customerReceiverDoc) {
-        receiverWithId = {
-          ...receiver,
-          id: customerReceiverDoc._id,
-        };
-      } else {
-        // keep original behavior: missing receiver customer is allowed? original code used the result without checking.
-        // To be safe, set id undefined (so downstream can handle it), but do NOT crash.
-        receiverWithId = {
-          ...receiver,
-          id: undefined,
-        };
-      }
-    } else {
-      receiverWithId = {
-        ...receiver,
-        id: undefined,
-      };
     }
   }
 
-  // Build senderWithId (attach the found customer id)
-  const senderWithId = {
-    ...sender,
-    id: customerDoc._id,
-  };
+  // Build senderWithId (attach the found customer id for the primary customer)
+  const senderWithId = sender
+    ? {
+        ...sender,
+        id: customerDoc._id,
+      }
+    : undefined;
+
+  // Build receiverWithId (if receiver exists and we found a customer)
+  const receiverWithId = receiver
+    ? {
+        ...receiver,
+        id: customerReceiverDoc ? customerReceiverDoc._id : undefined,
+      }
+    : undefined;
+
+  // Determine which Customer._id should be set on transaction.customer based on type
+  // - transfer => sender's customer (customerDoc)
+  // - deposit  => receiver's customer (customerReceiverDoc) if found, else fallback to customerDoc
+  let transactionCustomerId = null;
+  if (type === "transfer") {
+    transactionCustomerId = customerDoc._id;
+  } else if (type === "deposit") {
+    // if receiver's customer not found, return 400 because you validated customerName must equal receiver.name
+    if (!customerReceiverDoc) {
+      return next(
+        new ErrorResponse(
+          "Receiver customer not found for deposit transaction",
+          404
+        )
+      );
+    }
+    transactionCustomerId = customerReceiverDoc._id;
+  } else {
+    // default fallback: set to primary customer
+    transactionCustomerId = customerDoc._id;
+  }
 
   // Build payload (keep same fields as original)
   const payload = {
-    // attach mongoose ObjectIds (or null) exactly as before
-    customer: customerDoc._id,
+    customer: transactionCustomerId,
     client: client || undefined,
     branch: branch || undefined,
-    //  transactionId,
+    transactionId: transactionId || undefined,
     type,
     subtype,
     amount,
@@ -407,6 +427,7 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
     data: tx,
   });
 });
+
 // @desc Update transaction status or partial update
 // @route PUT /api/v1/transactions/:id
 // @access Protected (admin/operator)
