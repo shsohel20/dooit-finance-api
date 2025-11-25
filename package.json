@@ -13,7 +13,7 @@
   "license": "MIT",
   "dependencies": {
     "bcryptjs": "^3.0.2",
-    "body-parser": "^2.2.0", 
+    "body-parser": "^2.2.0",
     "cloudinary": "^2.7.0",
     "colors": "^1.4.0",
     "cookie-parser": "^1.4.7",
@@ -22,7 +22,7 @@
     "csv-parser": "^3.2.0",
     "dayjs": "^1.11.19",
     "dotenv": "^17.2.2",
-    "express": "^5.1.0", 
+    "express": "^5.1.0",
     "express-fileupload": "^1.5.2",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^8.1.0",
@@ -47,10 +47,11 @@
     "swagger-ui-express": "^5.0.1",
     "web-push": "^3.6.7",
     "xss-clean": "^0.1.4",
-    "xss-filters": "^1.2.7"
+    "xss-filters": "^1.2.7",
+    "swagger-autogen": "^2.23.7"
+
   },
   "devDependencies": {
-    "nodemon": "^3.1.10",
-    "swagger-autogen": "^2.23.7"
+    "nodemon": "^3.1.10"
   }
 }
