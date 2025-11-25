@@ -9,27 +9,29 @@ const user = require("./user");
 const auth = require("./auth");
 const role = require("./role");
 const location = require("./location");
-const notification = require("./notification");
+// const notification = require("./notification");
 const client = require("./client");
 const branch = require("./branch");
 const customer = require("./customer");
 const transaction = require("./transaction");
 const demo = require("./demoData");
-const ecddRoutes = require("./ecdd-report");
+const ecddReport = require("./ecdd-report");
+const smrReport = require("./smr-report");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
 router.use("/auth", auth);
+router.use("/otp", otp);
 router.use("/user", user);
 router.use("/role", role);
 router.use("/location", location);
-router.use("/notify", notification);
-router.use("/otp", otp);
-router.use("/client", client);
+// router.use("/notify", notification);
 router.use("/branch", branch);
-router.use("/customer", customer);
 router.use("/transaction", transaction);
 router.use("/demo", demo);
-router.use("/ecdd-report", ecddRoutes);
+router.use("/customer", customer);
+router.use("/client", client);
+router.use("/smr-report", smrReport);
+router.use("/ecdd-report", ecddReport);
 
 module.exports = router;

@@ -41,6 +41,9 @@ const PersonalFormSchema = new Schema(
       postcode: String,
       country: String,
     },
+    identificationNo: {
+      type: String,
+    },
   },
   { _id: false }
 );

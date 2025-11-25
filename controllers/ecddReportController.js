@@ -341,19 +341,16 @@ exports.importEcddReportCsv = asyncHandler(async (req, res, next) => {
  * Streams CSV back to client
  */
 exports.exportEcddReportCsv = asyncHandler(async (req, res, next) => {
-  // Build query based on allowed filters in req.query (whitelist)
+  // Build query (whitelist)
   const filters = {};
   if (req.query.status) filters.status = req.query.status;
   if (req.query.caseNumber) filters.caseNumber = req.query.caseNumber;
   if (req.query.userId) filters.userId = req.query.userId;
   if (req.query.fullName)
     filters.fullName = { $regex: req.query.fullName, $options: "i" };
-  // add more as needed
 
-  // Use cursor to avoid loading all docs into memory
   const cursor = EcddReport.find(filters).cursor();
 
-  // Define CSV fields and header labels
   const fields = [
     { label: "Case Number", value: "caseNumber" },
     { label: "Analyst Name", value: "analystName" },
@@ -385,41 +382,35 @@ exports.exportEcddReportCsv = asyncHandler(async (req, res, next) => {
     { label: "Recommendation", value: "recommendation" },
   ];
 
-  // Prepare response headers for download
   const filename = `ecdd_export_${new Date()
     .toISOString()
     .replace(/[:.]/g, "-")}.csv`;
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Content-Type", "text/csv");
 
-  // Create a transform stream to convert each doc to plain object and pipe into json2csv
-  const json2csv = new Json2CsvParser({ fields, header: true });
-
-  // We'll stream rows: accumulate small batches and flush them as CSV chunks
+  // Parser to produce header using fields spec (label/value)
+  const headerParser = new Json2CsvParser({ fields, header: true });
+  const headerCsv = headerParser.parse([]); // header only
   const pass = new stream.PassThrough();
   pass.pipe(res);
-
-  // Write header row immediately (json2csv will produce header when converting)
-  // But json2csv expects all data at once. We'll stream by manually writing CSV lines:
-  // Use json2csv for header and then each row individually:
-  const headerCsv = json2csv.parse([], { header: true }); // will produce header row only
   pass.write(headerCsv + "\n");
 
-  // Iterate cursor and write each row
+  // We'll use a different parser for rows: supply fields as label strings
+  const labelFields = fields.map((f) => f.label);
+  const rowParser = new Json2CsvParser({ fields: labelFields, header: false });
+
   for await (const doc of cursor) {
-    // convert doc to plain object (pick fields)
+    // Build an object keyed by the label names (matching rowParser expectations)
     const rowObj = {};
     for (const f of fields) {
       const val = typeof f.value === "function" ? f.value(doc) : doc[f.value];
+      // use the label as the key so rowParser picks the right column
       rowObj[f.label] = val !== undefined && val !== null ? val : "";
     }
-    // Parse single row to CSV line via json2csv (parse array with single element but header: false)
-    const rowCsv = new Json2CsvParser({ fields, header: false }).parse([
-      rowObj,
-    ]);
+    // parse the single-row object (header:false)
+    const rowCsv = rowParser.parse([rowObj]);
     pass.write(rowCsv + "\n");
   }
 
-  // End stream
   pass.end();
 });

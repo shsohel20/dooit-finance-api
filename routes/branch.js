@@ -14,10 +14,10 @@ const {
 
 const Branch = require("../models/Branch");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
 
+const { protect, authorize } = require("../middleware/auth");
 // protect all branch routes and allow only admin by default
 router.use(protect);
 router.use(authorize("admin"));
@@ -25,8 +25,8 @@ router.use(authorize("admin"));
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router
   .route("/")
-  .post(advancedResults(Branch, null, filterBranchSection), getBranchesPost)
-  .get(advancedResults(Branch), getBranches);
+  .post(advancedResults(Branch, "client", filterBranchSection), getBranchesPost)
+  .get(advancedResults(Branch, "client"), getBranches);
 
 // create new branch
 router.route("/new").post(createBranch);

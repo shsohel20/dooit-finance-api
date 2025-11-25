@@ -18,12 +18,13 @@ exports.filterClientSection = (c, requestBody) => {
 };
 
 // @desc   Get all clients
-// @route  /api/v1/clients
-// @access Public (or restrict as needed)
+// @route GET  /api/v1/clients
+// @access Protected (or restrict as needed)
 exports.getClients = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Client']
-  #swagger.summary = 'Get All Client'
+  #swagger.summary = 'Get All Clients'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
   #swagger.responses[200] = { description: 'Success' }
   #swagger.responses[400] = { description: 'Bad Request' }
   #swagger.responses[401] = { description: 'Unauthorized' }

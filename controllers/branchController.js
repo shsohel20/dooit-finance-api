@@ -345,6 +345,13 @@ exports.getBranch = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/branches/slug/:slug
 // @access Public (or Private based on your route)
 exports.getBranchBySlug = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Get by slug'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const branch = await Branch.findOne({ slug: req.params.slug }).populate(
     "client"
   );
@@ -442,6 +449,13 @@ exports.updateBranch = asyncHandler(async (req, res, next) => {
 // @route  DELETE /api/v1/branches/:id
 // @access Public
 exports.deleteBranch = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Branch']
+  #swagger.summary = 'Delete by id'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const branch = await Branch.findById(req.params.id);
   if (!branch) {
     return next(

@@ -1,9 +1,7 @@
+const mongoose = require("mongoose");
+
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
-const Customer = require("../models/Customer");
-const Client = require("../models/Client");
-const Branch = require("../models/Branch");
-const User = require("../models/User");
 
 const { hashToken } = require("../utils");
 const sendEmail = require("../utils/sendEmail");
@@ -12,7 +10,11 @@ const InvitationEmailTemplate = require("../utils/email-template/invitation");
 const CompanyKyc = require("../models/CompanyKyc");
 const NonIndividualKyc = require("../models/NonIndividualKyc");
 const TrustKyc = require("../models/TrustKyc");
-const { default: mongoose } = require("mongoose");
+
+const Customer = require("../models/Customer");
+const Client = require("../models/Client");
+const Branch = require("../models/Branch");
+const User = require("../models/User");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -26,6 +28,13 @@ exports.filterCustomerSection = (c, requestBody) => {
 // @route  /api/v1/customer
 // @access Public (or restrict as needed)
 exports.getCustomers = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Customer']
+  #swagger.summary = 'Get All Customers '
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // expects advancedResults middleware to populate res.advancedResults
   res.status(200).json(res.advancedResults);
 });

@@ -7,6 +7,14 @@ const fs = require("fs");
 var cloudinary = require("cloudinary").v2;
 
 exports.photoUpload = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Upload Photo'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   if (!req.files) {
     return next(new ErrorResponse(`Please upload a file`, 400));
   }
@@ -21,8 +29,8 @@ exports.photoUpload = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(
         `Please upload an image less than ${process.env.MAX_FILE_UPLOAD}`,
-        400,
-      ),
+        400
+      )
     );
   }
 
@@ -46,6 +54,14 @@ exports.photoUpload = asyncHandler(async (req, res, next) => {
 });
 
 exports.photoNextUpload = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Upload Photo Next'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   if (!req.files) {
     return next(new ErrorResponse(`Please upload a file}`, 400));
   }
@@ -60,8 +76,8 @@ exports.photoNextUpload = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(
         `Please upload an image less than ${process.env.MAX_FILE_UPLOAD}`,
-        400,
-      ),
+        400
+      )
     );
   }
 
@@ -81,6 +97,13 @@ exports.photoNextUpload = asyncHandler(async (req, res, next) => {
 });
 
 exports.removeFile = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Delete By File Name'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const file = await File.findOne({ fileUrl: req.params.fileName });
   const filePath = `${process.env.FILE_UPLOAD_PATH}/${req.params.fileName}`;
 
@@ -102,6 +125,14 @@ exports.removeFile = asyncHandler(async (req, res, next) => {
 });
 
 exports.cloudinaryPhotoUpload = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Photo Upload on Cloudnary'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   if (!req.files) {
     return next(new ErrorResponse(`Please upload a file`, 400));
   }
@@ -116,8 +147,8 @@ exports.cloudinaryPhotoUpload = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(
         `Please upload an image less than ${process.env.MAX_FILE_UPLOAD}`,
-        400,
-      ),
+        400
+      )
     );
   }
 
@@ -146,6 +177,13 @@ exports.cloudinaryPhotoUpload = asyncHandler(async (req, res, next) => {
 });
 
 exports.destroyFile = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Delete File from Cloudnary'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const file = await File.findById(req.params.id);
 
   if (!file) {
@@ -179,6 +217,13 @@ exports.destroyFile = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/fileUpload
 // @access   Public
 exports.getAllFiles = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Files']
+  #swagger.summary = 'Get All Files'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   ///see the route
   res.status(200).json(res.advancedResults);
 });

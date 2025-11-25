@@ -5,16 +5,141 @@ const ErrorResponse = require("../utils/errorResponse");
 const Transaction = require("../models/Transaction");
 const Customer = require("../models/Customer");
 const Client = require("../models/Client");
+const Branch = require("../models/Branch");
+const User = require("../models/User");
 
 // Helper: validate ObjectId
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
 }
 
+// @desc Get single transaction
+// @route GET /api/v1/transactions/:id
+// @access Protected
+exports.getTransaction = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Get by Id'
+  #swagger.security = [{ "BearerAuth": [] }]
+ 
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+  const loggedInUser = req.user;
+  const tx = await Transaction.findById(req.params.id).populate(
+    "customer client branch createdBy"
+  );
+  if (!tx)
+    return next(
+      new ErrorResponse(`Transaction not found ${req.params.id}`, 404)
+    );
+  res.status(200).json({ success: true, data: tx });
+});
+
+// // @desc List transactions (filter + pagination + simple text search)
+// // @route GET /api/v1/transactions
+// // @access Protected
+// exports.getTransactions = asyncHandler(async (req, res, next) => {
+//   /*
+//   #swagger.tags = ['Transaction']
+//   #swagger.summary = 'Get All Transaction'
+//   #swagger.responses[200] = { description: 'Success' }
+//   #swagger.responses[400] = { description: 'Bad Request' }
+//   #swagger.responses[401] = { description: 'Unauthorized' }
+// */
+//   const {
+//     page = 1,
+//     limit = 25,
+//     customer,
+//     client,
+//     branch,
+//     status,
+//     type,
+//     currency,
+//     date_from,
+//     date_to,
+//     min_amount,
+//     max_amount,
+//     search,
+//     sort = "-timestamp",
+//   } = req.query;
+
+//   const q = {};
+
+//   if (customer && isValidId(customer)) q.customer = customer;
+//   if (client && isValidId(client)) q.client = client;
+//   if (branch && isValidId(branch)) q.branch = branch;
+//   if (status) q.status = status;
+//   if (type) q.type = type;
+//   if (currency) q.currency = currency.toUpperCase();
+//   if (min_amount || max_amount) q.amount = {};
+//   if (min_amount) q.amount.$gte = Number(min_amount);
+//   if (max_amount) q.amount.$lte = Number(max_amount);
+//   if (date_from || date_to) q.timestamp = {};
+//   if (date_from) q.timestamp.$gte = new Date(date_from);
+//   if (date_to) q.timestamp.$lte = new Date(date_to);
+
+//   let mongoQuery = Transaction.find(q);
+
+//   // Text search (reference or narrative)
+//   if (search && String(search).trim().length) {
+//     mongoQuery = Transaction.find({ $text: { $search: search }, ...q });
+//   }
+
+//   // Pagination
+//   const pageNum = parseInt(page, 10);
+//   const pageSize = Math.min(parseInt(limit, 10) || 25, 200);
+
+//   const total = await Transaction.countDocuments(
+//     search ? { $text: { $search: search }, ...q } : q
+//   );
+//   const skip = (pageNum - 1) * pageSize;
+
+//   const results = await mongoQuery
+//     .sort(sort)
+//     .skip(skip)
+//     .limit(pageSize)
+//     .lean()
+//     .exec();
+
+//   res.status(200).json({
+//     success: true,
+//     count: results.length,
+//     total,
+//     page: pageNum,
+//     pageSize,
+//     data: results,
+//   });
+// });
+
+// @desc   Get all Transactions
+// @route  GET /api/v1/transaction
+// @access Public
+exports.getTransactions = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Get All Transactions'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+  // assumes advancedResults middleware populates res.advancedResults
+  res.status(200).json(res.advancedResults);
+});
+
 // @desc Create a transaction
 // @route POST /api/v1/transactions
-// @access Protected (client/branch user)
+// @access Protected (transaction user)
 exports.createTransaction = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Create Transaction'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const {
     transactionId,
     customer,
@@ -97,102 +222,204 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
     data: tx,
   });
 });
-
-// @desc Get single transaction
-// @route GET /api/v1/transactions/:id
-// @access Protected
-exports.getTransaction = asyncHandler(async (req, res, next) => {
-  const loggedInUser = req.user;
-  const tx = await Transaction.findById(req.params.id).populate(
-    "customer client branch createdBy"
-  );
-  if (!tx)
-    return next(
-      new ErrorResponse(`Transaction not found ${req.params.id}`, 404)
-    );
-  res.status(200).json({ success: true, data: tx });
-});
-
-// @desc List transactions (filter + pagination + simple text search)
-// @route GET /api/v1/transactions
-// @access Protected
-exports.getTransactions = asyncHandler(async (req, res, next) => {
+// @desc Create Dummy a transaction
+// @route POST /api/v1/transactions
+// @access Protected (client/branch user)
+exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   /*
-  #swagger.tags = ['Transaction']
-  #swagger.summary = 'Get All Transaction'
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Create Dummy Transaction'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
   #swagger.responses[200] = { description: 'Success' }
   #swagger.responses[400] = { description: 'Bad Request' }
   #swagger.responses[401] = { description: 'Unauthorized' }
-*/
+  #swagger.security = [] // public
+  */
   const {
-    page = 1,
-    limit = 25,
-    customer,
-    client,
-    branch,
-    status,
-    type,
+    transactionId,
+    customerName,
+    clientName,
+    branchName,
+    type = "transfer",
+    subtype,
+    amount,
     currency,
-    date_from,
-    date_to,
-    min_amount,
-    max_amount,
-    search,
-    sort = "-timestamp",
-  } = req.query;
+    reference,
+    narrative,
+    status = "pending",
+    channel,
+    sender,
+    beneficiary,
+    intermediary,
+    purpose,
+    remittancePurposeCode,
+    crypto,
+    receiver,
+    bullion,
+    metadata,
+  } = req.body;
 
-  const q = {};
-
-  if (customer && isValidId(customer)) q.customer = customer;
-  if (client && isValidId(client)) q.client = client;
-  if (branch && isValidId(branch)) q.branch = branch;
-  if (status) q.status = status;
-  if (type) q.type = type;
-  if (currency) q.currency = currency.toUpperCase();
-  if (min_amount || max_amount) q.amount = {};
-  if (min_amount) q.amount.$gte = Number(min_amount);
-  if (max_amount) q.amount.$lte = Number(max_amount);
-  if (date_from || date_to) q.timestamp = {};
-  if (date_from) q.timestamp.$gte = new Date(date_from);
-  if (date_to) q.timestamp.$lte = new Date(date_to);
-
-  let mongoQuery = Transaction.find(q);
-
-  // Text search (reference or narrative)
-  if (search && String(search).trim().length) {
-    mongoQuery = Transaction.find({ $text: { $search: search }, ...q });
+  // required fields - validate early to avoid DB work
+  if (!amount || !currency) {
+    return next(new ErrorResponse("amount and currency are required", 400));
   }
 
-  // Pagination
-  const pageNum = parseInt(page, 10);
-  const pageSize = Math.min(parseInt(limit, 10) || 25, 200);
+  // helper: find a doc by id or name
+  const findByIdOrName = async (Model, value) => {
+    if (!value) return null;
+    if (isValidId(value)) {
+      // if value is an id string, prefer findById (lean)
+      return Model.findById(value).select("_id").lean();
+    }
+    // otherwise search by name field
+    return Model.findOne({ name: value }).select("_id").lean();
+  };
 
-  const total = await Transaction.countDocuments(
-    search ? { $text: { $search: search }, ...q } : q
-  );
-  const skip = (pageNum - 1) * pageSize;
+  // 1) Find customer user and client/branch in parallel where possible.
+  //    We need the user to find the customer's Customer doc, so do that sequentially per dependency,
+  //    but find client & branch in parallel to the user lookup.
+  const userPromise = User.findOne({ name: customerName }).select("_id").lean();
+  const clientPromise = findByIdOrName(Client, clientName);
+  const branchPromise = findByIdOrName(Branch, branchName);
 
-  const results = await mongoQuery
-    .sort(sort)
-    .skip(skip)
-    .limit(pageSize)
-    .lean()
-    .exec();
+  const [userDoc, clientDoc, branchDoc] = await Promise.all([
+    userPromise,
+    clientPromise,
+    branchPromise,
+  ]);
 
-  res.status(200).json({
+  if (!userDoc) {
+    return next(new ErrorResponse("This customer not found by this name", 400));
+  }
+
+  // Find Customer by user id
+  const customerDoc = await Customer.findOne({ user: userDoc._id })
+    .select("_id")
+    .lean();
+  if (!customerDoc) {
+    return next(new ErrorResponse("This customer not found by this name", 400));
+  }
+
+  // client and branch are optional but if provided we already attempted to fetch them.
+  // If a clientName/id was provided but not found, return an error consistent with your original checks.
+  let client = null;
+  if (clientName) {
+    if (!clientDoc) return next(new ErrorResponse("Client not found", 404));
+    client = clientDoc._id;
+  }
+
+  let branch = null;
+  if (branchName) {
+    if (!branchDoc) return next(new ErrorResponse("Branch not found", 404));
+    branch = branchDoc._id;
+  }
+
+  // Ensure sender's name matches customerName
+  if (type === "transfer" && customerName !== sender?.name) {
+    return next(
+      new ErrorResponse(
+        "The Customer Name and Sender should be same, because of transaction type is transfer",
+        400
+      )
+    );
+  }
+  if (type === "deposit" && customerName !== receiver?.name) {
+    return next(
+      new ErrorResponse(
+        "The Customer Name and Receiver should be same, because of transaction type is deposit",
+        400
+      )
+    );
+  }
+
+  // If receiver provided, find their user and customer; do it in parallel with minimal fields
+  let receiverWithId = null;
+  if (receiver?.name) {
+    const userReceiverDoc = await User.findOne({ name: receiver.name })
+      .select("_id")
+      .lean();
+    if (userReceiverDoc) {
+      const customerReceiverDoc = await Customer.findOne({
+        user: userReceiverDoc._id,
+      })
+        .select("_id")
+        .lean();
+      if (customerReceiverDoc) {
+        receiverWithId = {
+          ...receiver,
+          id: customerReceiverDoc._id,
+        };
+      } else {
+        // keep original behavior: missing receiver customer is allowed? original code used the result without checking.
+        // To be safe, set id undefined (so downstream can handle it), but do NOT crash.
+        receiverWithId = {
+          ...receiver,
+          id: undefined,
+        };
+      }
+    } else {
+      receiverWithId = {
+        ...receiver,
+        id: undefined,
+      };
+    }
+  }
+
+  // Build senderWithId (attach the found customer id)
+  const senderWithId = {
+    ...sender,
+    id: customerDoc._id,
+  };
+
+  // Build payload (keep same fields as original)
+  const payload = {
+    // attach mongoose ObjectIds (or null) exactly as before
+    customer: customerDoc._id,
+    client: client || undefined,
+    branch: branch || undefined,
+    //  transactionId,
+    type,
+    subtype,
+    amount,
+    currency,
+    convertedAmountAUD: req.body.convertedAmountAUD,
+    reference,
+    narrative,
+    status,
+    channel,
+    sender: senderWithId,
+    receiver: receiverWithId,
+    beneficiary,
+    intermediary,
+    purpose,
+    remittancePurposeCode,
+    crypto,
+    bullion,
+    createdBy: req.user ? req.user._id : undefined,
+    metadata,
+  };
+
+  // Create transaction
+  const tx = await Transaction.create(payload);
+
+  res.status(201).json({
     success: true,
-    count: results.length,
-    total,
-    page: pageNum,
-    pageSize,
-    data: results,
+    data: tx,
   });
 });
-
 // @desc Update transaction status or partial update
 // @route PUT /api/v1/transactions/:id
 // @access Protected (admin/operator)
 exports.updateTransaction = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Update Transaction'
+  #swagger.security = [{ "BearerAuth": [] }]
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: {  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const allowed = [
     "status",
     "reference",
@@ -226,6 +453,15 @@ exports.updateTransaction = asyncHandler(async (req, res, next) => {
 // @route GET /api/v1/transactions/stats
 // @access Protected
 exports.getTransactionStats = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Transactions']
+  #swagger.summary = 'Get Stats'
+  #swagger.security = [{ "BearerAuth": [] }]
+ 
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const { client, branch, date_from, date_to } = req.query;
   const match = {};
   if (client && isValidId(client))

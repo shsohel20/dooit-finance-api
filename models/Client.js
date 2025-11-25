@@ -4,6 +4,7 @@ const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const slugify = require("slugify");
+const autopopulate = require("mongoose-autopopulate");
 
 const { Schema } = mongoose;
 
@@ -134,6 +135,13 @@ ClientSchema.index({ user: 1 });
  * Virtuals
  */
 
+ClientSchema.virtual("branches", {
+  ref: "Branch",
+  localField: "_id",
+  foreignField: "client",
+  justOne: false,
+});
+
 ClientSchema.virtual("fullAddress").get(function () {
   const a = this.address || {};
   return [a.street, a.city, a.state, a.zipcode, a.country]
@@ -188,6 +196,8 @@ ClientSchema.plugin(AutoIncrement, {
   id: "client_sequence", // unique counter id for this schema
   start_seq: 1,
 });
+
+ClientSchema.plugin(autopopulate);
 
 const Client = mongoose.model("Client", ClientSchema);
 

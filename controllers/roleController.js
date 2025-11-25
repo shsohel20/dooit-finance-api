@@ -25,6 +25,19 @@ exports.getRoles = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/role
 // @access   Public
 exports.createRole = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Role']
+  #swagger.summary = 'Create Role'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { 
+  
+    "name":"Admin",
+    "permissions":["USER.ADD", "USER.EDIT", "USER.DELETE", "USER.GET"]
+
+  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   console.log(req.body);
   const role = await Role.create(req.body);
 
@@ -39,6 +52,14 @@ exports.createRole = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/role/:id
 // @access   Public
 exports.getRole = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Role']
+  #swagger.summary = 'Get Role By Id'
+
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const role = await Role.findById(req.params.id).populate(["products"]);
 
   if (!role) {
@@ -56,6 +77,19 @@ exports.getRole = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/role/:id
 // @access   Public
 exports.updateRole = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Role']
+  #swagger.summary = 'Update By Id'
+  #swagger.parameters['body'] = { in: 'body', required: true, schema: { 
+  
+    "name":"Admin",
+    "permissions":["USER.ADD", "USER.EDIT", "USER.DELETE", "USER.GET"]
+
+  } }
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   ///Name Checked in Role
   const duplicateItem = await Role.findOne({
     name: req.body.name,
@@ -90,6 +124,14 @@ exports.updateRole = asyncHandler(async (req, res, next) => {
 // @route   /api/v1/roles/:id
 // @access   Public
 exports.deleteRole = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Role']
+  #swagger.summary = 'Delete by ID'
+ 
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   // const role = await role.findByIdAndDelete(req.params.id);
   const role = await Role.findById(req.params.id);
   if (!role) {

@@ -8,6 +8,7 @@ dotenv.config({ path: "./config/config.env" });
 const User = require("./models/User");
 const Role = require("./models/Role");
 const Counter = require("./models/Counter");
+const Customer = require("./models/Customer");
 
 // Connect to DB
 mongoose.connect(process.env.MONGO_URI);
@@ -56,14 +57,34 @@ const deleteData = async () => {
     //await Permission.deleteMany();
     // await User.deleteMany();
     // await Role.deleteMany();
-    const resetSequence = async () => {
-      await Counter.findOneAndUpdate(
-        { _id: "transaction_sequence" },
-        { $set: { sequence: 1000 } }, // Start from 1000 or your desired number
-        { upsert: true }
-      );
-    };
-    await resetSequence();
+    // const resetSequence = async () => {
+    //   await Counter.findOneAndUpdate(
+    //     { _id: "transaction_sequence" },
+    //     { $set: { sequence: 1000 } }, // Start from 1000 or your desired number
+    //     { upsert: true }
+    //   );
+    // };
+    // await resetSequence();
+
+    const customers = await Customer.find().select("_id").lean();
+
+    let counter = 1;
+
+    // Helper sleep function
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+    for (const c of customers) {
+      const uid = `CUS_${Date.now()}`;
+
+      await Customer.updateOne({ _id: c._id }, { $set: { uid } });
+
+      console.log(`Updated: ${c._id} -> ${uid}`);
+
+      counter++;
+
+      // Wait 1 second before next update
+      await sleep(1000);
+    }
     console.log("Data Destroyed...".red.inverse);
     process.exit();
   } catch (err) {

@@ -1,13 +1,15 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
 const AutoIncrement = require("mongoose-sequence")(mongoose);
-const Counter = require("./Counter");
+// const Counter = require("./Counter");
+const autopopulate = require("mongoose-autopopulate");
 
 /**
  * Small reusable sub-schemas
  */
 const PartySchema = new Schema(
   {
+    id: { type: Schema.Types.ObjectId, index: true },
     name: { type: String, trim: true, index: true },
     account: { type: String, trim: true }, // account/wallet id
     institution: { type: String, trim: true }, // bank name / VASP name
@@ -54,7 +56,7 @@ const TransactionSchema = new Schema(
     uid: { type: String, unique: true, index: true },
 
     // relations
-    customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true }, // if type is  transfer it can be sender , if type is deposit it can be receiver
     client: { type: Schema.Types.ObjectId, ref: "Client", index: true },
     branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
 
@@ -124,7 +126,7 @@ const TransactionSchema = new Schema(
     travelRule: { type: TravelRuleSchema, default: {} },
 
     // Related party / group (TX_030)
-    relatedPartyTxnId: { type: String, trim: true, index: true }, // link to group/related txns
+    relatedPartyTxnId: { type: String, default: "", trim: true, index: true }, // link to group/related txns
     relatedPartyFlag: { type: Boolean, default: false },
 
     // Investigator / case link fields (INV_001..INV_004)
@@ -200,5 +202,7 @@ TransactionSchema.index({ reference: "text", narrative: "text" }); // text index
 TransactionSchema.virtual("displayAmount").get(function () {
   return `${this.amount} ${this.currency}`;
 });
+
+TransactionSchema.plugin(autopopulate);
 
 module.exports = mongoose.model("Transaction", TransactionSchema);

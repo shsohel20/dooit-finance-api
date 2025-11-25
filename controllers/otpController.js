@@ -4,6 +4,14 @@ const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 
 exports.sendOtp = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Send OTP '
+ 
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[400] = { description: 'Bad Request' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
   const code = Math.floor(100000 + Math.random() * 900000);
   const userId = req?.user?.id ?? null;
   if (!userId) {

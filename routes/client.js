@@ -26,7 +26,7 @@ const router = express.Router();
 router
   .route("/")
   .post(advancedResults(Client, null, filterClientSection), getClients)
-  .get(advancedResults(Client), getClients);
+  .get(advancedResults(Client, "branches"), getClients);
 
 // create new client
 router.route("/new").post(createClient);

@@ -3,16 +3,16 @@ const swaggerAutogen = require("swagger-autogen")();
 const dotenv = require("dotenv");
 dotenv.config({ path: "./config/config.env" });
 
-let mainHost = "";
-if (process.env.NODE_ENV === "development") {
-  mainHost = "localhost:6830";
-} else {
-  mainHost = "20.84.108.147:6830";
-}
+let mainHost = process.env.HOST_SWAGGER;
+// if (process.env.HOST_SWAGGER === "development") {
+//   mainHost = "localhost:6830";
+// } else {
+//   mainHost = "20.84.108.147:6830";
+// }
 
 const doc = {
   info: {
-    title: "My API",
+    title: "Dooit Fintech UI Docs",
     description: "Description",
   },
   host: `${mainHost}/api/v1`,

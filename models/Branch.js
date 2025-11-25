@@ -3,7 +3,7 @@ const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const slugify = require("slugify");
-
+const autopopulate = require("mongoose-autopopulate");
 const { Schema } = mongoose;
 
 /**
@@ -70,7 +70,7 @@ const BranchSchema = new Schema(
 
     user: {
       type: mongoose.Schema.ObjectId,
-      ref: "User",
+      ref: "Users",
       index: true,
       sparse: true,
     },
@@ -233,5 +233,6 @@ BranchSchema.plugin(AutoIncrement, {
 /**
  * Export model
  */
+BranchSchema.plugin(autopopulate);
 const Branch = mongoose.model("Branch", BranchSchema);
 module.exports = Branch;
