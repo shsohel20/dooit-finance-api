@@ -32,7 +32,7 @@ const AlertSchema = new Schema(
     sequence: { type: Number, index: true }, // auto incremented
     customer: {
       type: mongoose.Schema.ObjectId,
-      ref: "Customers",
+      ref: "Customer",
     },
     analyst: {
       type: mongoose.Schema.ObjectId,
@@ -40,7 +40,7 @@ const AlertSchema = new Schema(
     },
     transaction: {
       type: mongoose.Schema.ObjectId,
-      ref: "Transactions",
+      ref: "Transaction",
     },
     caseType: String,
 
@@ -99,7 +99,7 @@ AlertSchema.plugin(mongoosePaginate);
 
 AlertSchema.plugin(AutoIncrement, {
   inc_field: "sequence",
-  id: "client_sequence", // unique counter id for this schema
+  id: "alert_sequence", // unique counter id for this schema
   start_seq: 1,
 });
 

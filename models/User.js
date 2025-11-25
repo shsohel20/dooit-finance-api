@@ -54,6 +54,7 @@ const UserSchema = new mongoose.Schema(
         "approval",
         "admin",
         "customer",
+        "analyst",
         "client",
         "client-admin",
       ],

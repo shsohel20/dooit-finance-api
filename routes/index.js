@@ -17,6 +17,7 @@ const transaction = require("./transaction");
 const demo = require("./demoData");
 const ecddReport = require("./ecdd-report");
 const smrReport = require("./smr-report");
+const alert = require("./alert");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -33,5 +34,6 @@ router.use("/customer", customer);
 router.use("/client", client);
 router.use("/smr-report", smrReport);
 router.use("/ecdd-report", ecddReport);
+router.use("/alert", alert);
 
 module.exports = router;
