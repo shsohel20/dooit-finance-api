@@ -18,6 +18,7 @@ const demo = require("./demoData");
 const ecddReport = require("./ecdd-report");
 const smrReport = require("./smr-report");
 const alert = require("./alert");
+const rfi = require("./rfi");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -35,5 +36,6 @@ router.use("/client", client);
 router.use("/smr-report", smrReport);
 router.use("/ecdd-report", ecddReport);
 router.use("/alert", alert);
+router.use("/rfi", rfi);
 
 module.exports = router;

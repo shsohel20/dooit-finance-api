@@ -4,6 +4,7 @@ const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const slugify = require("slugify");
+const autopopulate = require("mongoose-autopopulate");
 
 const { Schema } = mongoose;
 

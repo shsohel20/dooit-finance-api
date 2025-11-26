@@ -9,6 +9,7 @@ const User = require("./models/User");
 const Role = require("./models/Role");
 const Counter = require("./models/Counter");
 const Customer = require("./models/Customer");
+const Client = require("./models/Client");
 
 // Connect to DB
 mongoose.connect(process.env.MONGO_URI);
@@ -66,24 +67,39 @@ const deleteData = async () => {
     // };
     // await resetSequence();
 
-    const customers = await Customer.find().select("_id").lean();
+    // const customers = await Customer.find().select("_id").lean();
 
-    let counter = 1;
+    // let counter = 1;
 
-    // Helper sleep function
-    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    // // Helper sleep function
+    // const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    for (const c of customers) {
-      const uid = `CUS_${Date.now()}`;
+    // for (const c of customers) {
+    //   const uid = `CUS_${Date.now()}`;
 
-      await Customer.updateOne({ _id: c._id }, { $set: { uid } });
+    //   await Customer.updateOne({ _id: c._id }, { $set: { uid } });
 
-      console.log(`Updated: ${c._id} -> ${uid}`);
+    //   console.log(`Updated: ${c._id} -> ${uid}`);
 
-      counter++;
+    //   counter++;
 
-      // Wait 1 second before next update
-      await sleep(1000);
+    //   // Wait 1 second before next update
+    //   await sleep(1000);
+    // }
+
+    var docs = await Client.find({}).sort({ _id: 1 }).limit(100).lean();
+
+    // 2. If less than 100 docs exist, nothing to delete
+    if (docs.length < 100) {
+      console.log("Collection has fewer than 100 documents — nothing deleted.");
+    } else {
+      // 3. Get the last ID you want to keep
+      var keepId = docs[99]._id;
+
+      // 4. Delete all documents except the first 100
+      var result = await Client.deleteMany({ _id: { $gt: keepId } });
+
+      console.log("Deleted docs:", result.deletedCount);
     }
     console.log("Data Destroyed...".red.inverse);
     process.exit();

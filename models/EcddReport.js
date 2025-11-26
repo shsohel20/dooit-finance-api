@@ -34,6 +34,7 @@ const EcddReportSchema = new Schema(
     position: { type: String, trim: true, default: "" },
     date: { type: Date, default: null },
     caseNumber: { type: String, trim: true, index: true },
+    caseId: { type: Schema.Types.ObjectId, ref: "Alert", required: false }, //alertId
 
     // Customer profile fields
     userId: { type: String, trim: true, default: "" },

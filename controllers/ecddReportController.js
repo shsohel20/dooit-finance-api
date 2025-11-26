@@ -1,5 +1,6 @@
 // controllers/ecddReport.js
 const asyncHandler = require("../middleware/async");
+const Alert = require("../models/Alert");
 const EcddReport = require("../models/EcddReport");
 const ErrorResponse = require("../utils/errorResponse");
 
@@ -120,8 +121,23 @@ exports.getEcddReports = asyncHandler(async (req, res, next) => {
 exports.createEcddReport = asyncHandler(async (req, res, next) => {
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
+  const { caseNumber } = payload;
 
-  const report = await EcddReport.create(payload);
+  const alert = await Alert.findOne({ uid: caseNumber });
+
+  if (!alert) {
+    return next(
+      new ErrorResponse(
+        `Alert not found by CASE Number or Alert UID ${caseNumber}`,
+        404
+      )
+    );
+  }
+  const submitObj = {
+    ...payload,
+    caseId: alert?._id || null,
+  };
+  const report = await EcddReport.create(submitObj);
 
   res.status(201).json({
     success: true,
