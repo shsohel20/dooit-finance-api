@@ -168,7 +168,20 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid type param", 400));
   }
 
-  const rfi = await RFI.findById(rfiId).populate("client").populate("customer");
+  const rfi = await RFI.findById(rfiId).populate([
+    { path: "case" },
+    { path: "client" },
+    { path: "branch" },
+    { path: "customer", populate: { path: "user" } },
+  ]);
+  // if (rfi) {
+  //   res.status(200).json({
+  //     succeed: true,
+  //     message: `RFI ${type} email sent to `,
+  //     data: rfi,
+  //   });
+  //   next();
+  // }
   if (!rfi)
     return next(new ErrorResponse(`RFI not found with id ${rfiId}`, 404));
 
@@ -193,18 +206,12 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     rfi.status = "Final Notice";
   }
 
-  const clientName =
-    req.body.clientName ||
-    rfi.client?.name ||
-    process.env.FIRM_NAME ||
-    "Client";
-  const customerName =
-    req.body.customerName ||
-    rfi.customer?.name ||
-    rfi.metadata?.customerName ||
-    "";
-  const caseNumber =
-    rfi.metadata?.caseNumber || rfi.metadata?.case || rfi.sequence || "";
+  const clientName = rfi.client?.name || "Unknown";
+  const customerName = rfi.customer?.user?.name || "Unknown";
+  const email = rfi.customer?.user?.email;
+  const caseNumber = rfi.metadata?.caseNumber || rfi.case?.uid || "Unknown";
+  const primaryContactName = rfi.client?.contacts?.name || "Unknown";
+  const replyToEmail = rfi.client?.contacts?.email || "Unknown";
 
   const context = {
     clientName,
@@ -212,12 +219,11 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     caseNumber,
     uid: rfi.uid,
     primaryContactName:
-      rfi.primaryContactName || req.body.primaryContactName || "",
-    replyToEmail:
-      rfi.replyToEmail || req.body.replyToEmail || process.env.REPLY_TO_EMAIL,
-    requestedItems:
-      req.body.requestedItems ||
-      rfi.requestedItems.map((it) => (typeof it === "string" ? it : it.text)),
+      rfi.primaryContactName || primaryContactName || "Unknown",
+    replyToEmail: rfi.replyToEmail || replyToEmail,
+    requestedItems: rfi.requestedItems.map((it) =>
+      typeof it === "string" ? it : it.text
+    ),
     responseDeadline: rfi.responseDeadline,
     followupDeadline: rfi.followupDeadline,
     finalDeadline: rfi.finalDeadline,
@@ -234,7 +240,7 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
 
   try {
     await sendEmail({
-      email: to,
+      email: "shsohel.tc@gmail.com",
       subject,
       message: body,
       replyTo: context.replyToEmail,
@@ -261,7 +267,7 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({
       succeed: true,
-      message: `RFI ${type} email sent to ${to}`,
+      message: `RFI ${type} email sent to ${email}`,
       data: rfi,
     });
   } catch (err) {

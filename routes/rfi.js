@@ -55,7 +55,7 @@ router.route("/new").post(createRFI);
 router.route("/dummy").post(createDummyRFI);
 
 // send (initial|followup|final) -> use query param ?type=initial
-router.route("/:id/send").put(sendRFI);
+router.route("/:id/send").get(sendRFI);
 
 // CRUD
 router.route("/:id").get(getRFI).put(updateRFI).delete(deleteRFI);

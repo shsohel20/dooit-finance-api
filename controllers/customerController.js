@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
