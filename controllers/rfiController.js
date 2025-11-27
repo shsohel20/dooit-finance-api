@@ -257,6 +257,7 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     rfi.metadata = rfi.metadata || {};
     rfi.metadata.secLog = rfi.metadata.secLog || [];
     rfi.metadata.secLog.push({
+      type,
       code: "SEC_LOG_003",
       action: `RFI_${type}_sent`,
       by: req.user?.id,
