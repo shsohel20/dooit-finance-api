@@ -17,6 +17,7 @@ const transaction = require("./transaction");
 const demo = require("./demoData");
 const ecddReport = require("./ecdd-report");
 const smrReport = require("./smr-report");
+const gfsReport = require("./gfs-report");
 const alert = require("./alert");
 const rfi = require("./rfi");
 
@@ -37,5 +38,6 @@ router.use("/smr-report", smrReport);
 router.use("/ecdd-report", ecddReport);
 router.use("/alert", alert);
 router.use("/rfi", rfi);
+router.use("/gfs-report", gfsReport);
 
 module.exports = router;
