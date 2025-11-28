@@ -1,17 +1,59 @@
-// routes/ecdd.js
+// routes/smrs.js
 const express = require("express");
+const {
+  getSMRs,
+  getSMRsPost,
+  createSMR,
+  createDummySMR,
+  getSMR,
+  updateSMR,
+  deleteSMR,
+  submitSMR,
+  approveSMR,
+  filterSMRSection,
+} = require("../controllers/smrReportController");
+
+const SMR = require("../models/SmrReport");
+const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 
-const EcddReport = require("../models/EcddReport"); // used by advancedResults middleware if needed
-const advancedResults = require("../middleware/advancedResults"); // if you use this pattern
+const { protect, authorize } = require("../middleware/auth");
 
-const { getSmrReport } = require("../controllers/smrReportController");
+// protect all SMR routes and allow only admin by default
+router.use(protect);
+router.use(authorize("admin"));
 
-router.get(
-  "/",
-  // optional: use advancedResults to handle query / pagination. Remove if you don't have it.
-  advancedResults(EcddReport, "customer analyst generatedBy transaction"),
-  getSmrReport
-);
+// list (GET query / POST body-filter)
+router
+  .route("/")
+  .get(
+    advancedResults(
+      SMR,
+      ["partC.personOrganisation", "partF.transactions"],
+      null
+    ),
+    getSMRs
+  )
+  .post(
+    advancedResults(
+      SMR,
+      ["partC.personOrganisation", "partF.transactions"],
+      filterSMRSection
+    ),
+    getSMRsPost
+  );
+
+// create
+router.route("/new").post(createSMR);
+
+// create dummy
+router.route("/dummy").post(createDummySMR);
+
+// submit & approve
+router.route("/:id/submit").put(submitSMR);
+router.route("/:id/approve").put(approveSMR);
+
+// CRUD
+router.route("/:id").get(getSMR).put(updateSMR).delete(deleteSMR);
 
 module.exports = router;
