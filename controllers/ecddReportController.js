@@ -119,6 +119,8 @@ exports.getEcddReports = asyncHandler(async (req, res, next) => {
 // @route  POST /api/v1/ecdd
 // @access Private (require authentication in routes)
 exports.createEcddReport = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
   const { caseNumber } = payload;
@@ -135,6 +137,8 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
   }
   const submitObj = {
     ...payload,
+    client,
+    branch,
     caseId: alert?._id || null,
   };
   const report = await EcddReport.create(submitObj);

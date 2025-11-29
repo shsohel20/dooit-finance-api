@@ -14,6 +14,19 @@ const EcddReportSchema = new Schema(
     // Auto increment sequence number
     sequence: { type: Number, index: true },
 
+    client: {
+      type: Schema.Types.ObjectId,
+      ref: "Client",
+      index: true,
+      default: null,
+    },
+    branch: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      index: true,
+      default: null,
+    },
+
     // Core relations
     customer: {
       type: Schema.Types.ObjectId,

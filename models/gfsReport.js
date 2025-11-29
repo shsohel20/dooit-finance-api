@@ -60,6 +60,27 @@ const GFSSchema = new Schema(
     uid: { type: String, index: true },
     sequence: { type: Number, index: true },
 
+    client: {
+      type: Schema.Types.ObjectId,
+      ref: "Client",
+      index: true,
+      default: null,
+    },
+    branch: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      index: true,
+      default: null,
+    },
+
+    // Core relations
+    customer: {
+      type: Schema.Types.ObjectId,
+      ref: "Customer",
+      index: true,
+      default: null,
+    },
+
     // suspicion meta
     suspicionType: { type: String, default: "" },
     suspicionReason: { type: String, default: "" },

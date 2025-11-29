@@ -30,6 +30,8 @@ exports.getSMRsPost = asyncHandler(async (req, res, next) => {
 
 // CREATE
 exports.createSMR = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   // minimal validation: ensure required parts exist
   const body = req.body || {};
   if (
@@ -47,6 +49,8 @@ exports.createSMR = asyncHandler(async (req, res, next) => {
 
   // create
   const smr = await SMR.create({
+    client,
+    branch,
     reportId: body.reportId,
     partA: body.partA,
     partB: body.partB,
