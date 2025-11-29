@@ -107,20 +107,20 @@ const UserSchema = new mongoose.Schema(
 // });
 
 // 🔥 Virtual populate for customers linked to this user
-UserSchema.virtual("customers", {
+UserSchema.virtual("customer", {
   ref: "Customer", // model name
   localField: "_id", // field on User
   foreignField: "user", // field on Customer
   justOne: true, // field on Customer
 });
 
-UserSchema.virtual("clients", {
+UserSchema.virtual("client", {
   ref: "Client", // model name
   localField: "_id", // field on User
   foreignField: "user",
   justOne: true, // field on Customer
 });
-UserSchema.virtual("branches", {
+UserSchema.virtual("branch", {
   ref: "Branch", // model name
   localField: "_id", // field on User
   foreignField: "user",

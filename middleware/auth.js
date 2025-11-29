@@ -25,16 +25,16 @@ exports.protect = asyncHandler(async (req, res, next) => {
 
     req.user = await User.findById(decoded.id).populate([
       {
-        path: "clients", // virtual on User
-        select: "name _id",
+        path: "client", // virtual on User
+        // select: "name _id",
       },
       {
-        path: "customers", // virtual on User
-        select: "name _id",
+        path: "customer", // virtual on User
+        // select: "name _id",
       },
       {
-        path: "branches", // virtual on User
-        select: "name _id",
+        path: "branch", // virtual on User
+        // select: "name _id",
       },
     ]);
     next();

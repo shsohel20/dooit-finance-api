@@ -168,7 +168,7 @@ const SMRSpec = new Schema(
     uid: { type: String, index: true }, // eg SMR_...
     sequence: { type: Number, index: true },
 
-    caseId: { type: String, index: true }, // external reference
+    caseId: { type: String, index: true, default: null }, // external reference
 
     status: {
       type: String,

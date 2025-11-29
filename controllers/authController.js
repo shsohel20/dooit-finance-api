@@ -208,11 +208,11 @@ exports.getMe = asyncHandler(async (req, res, next) => {
   #swagger.responses[200] = { description: 'Current user', schema: { success: true, data: {  } } }
   #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
-  const user = await User.findById(req.user.id);
+  // const user = await User.findById(req.user.id);
 
   res.status(200).json({
     success: true,
-    data: user,
+    data: req.user,
   });
 });
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {
