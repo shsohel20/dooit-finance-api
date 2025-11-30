@@ -19,6 +19,7 @@ const ecddReport = require("./ecdd-report");
 const smrReport = require("./smr-report");
 const gfsReport = require("./gfs-report");
 const iftiReport = require("./ifti-report");
+const ttrReport = require("./ttr-report");
 const alert = require("./alert");
 const rfi = require("./rfi");
 
@@ -41,5 +42,6 @@ router.use("/alert", alert);
 router.use("/rfi", rfi);
 router.use("/gfs-report", gfsReport);
 router.use("/ifti-report", iftiReport);
+router.use("/ttr-report", ttrReport);
 
 module.exports = router;
