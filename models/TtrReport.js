@@ -167,7 +167,7 @@ const PersonCompletingSchema = new Schema(
     jobTitle: { type: String, required: true },
     phone: { type: String, required: true },
     email: { type: String, required: true },
-    date: { type: Date, required: true },
+    // date: { type: Date, required: true },
   },
   { _id: false }
 );
