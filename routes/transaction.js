@@ -7,6 +7,8 @@ const {
   updateTransaction,
   getTransactionStats,
   createDummyTransaction,
+  changeTransactionStatus,
+  bulkChangeTransactionStatus,
 } = require("../controllers/transactionController");
 
 const { protect, authorize } = require("../middleware/auth"); // reuse your auth
@@ -32,5 +34,11 @@ router.route("/stats").get(getTransactionStats);
 
 // single tx
 router.route("/:id").get(getTransaction).put(updateTransaction);
+
+// status change endpoint (single)
+router.route("/:id/status").put(changeTransactionStatus);
+
+// bulk status update
+router.route("/status").put(bulkChangeTransactionStatus);
 
 module.exports = router;

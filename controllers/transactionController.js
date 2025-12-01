@@ -508,3 +508,149 @@ exports.getTransactionStats = asyncHandler(async (req, res, next) => {
   const stats = await Transaction.aggregate(pipeline);
   res.status(200).json({ success: true, data: stats });
 });
+
+// simple allowed state transitions (tweak to your business rules)
+const ALLOWED_TRANSITIONS = {
+  pending: ["completed", "failed", "cancelled"],
+  completed: ["closed"], // completed -> closed (final)
+  failed: ["pending"], // re-open failed -> pending (if allowed)
+  cancelled: [], // final
+  closed: [], // final
+};
+
+// change single transaction status
+exports.changeTransactionStatus = asyncHandler(async (req, res, next) => {
+  /*
+    PUT /api/v1/transactions/:id/status
+    body: { status: "completed", notes: "Verified by ops", notify: false }
+  */
+  const txId = req.params.id;
+  if (!isValidId(txId))
+    return next(new ErrorResponse("Invalid transaction id", 400));
+
+  const { status: newStatus, notes } = req.body;
+  if (!newStatus)
+    return next(new ErrorResponse("Missing status in request body", 400));
+
+  // check allowed transitions
+  const current = await Transaction.findById(txId).lean();
+  if (!current) return next(new ErrorResponse("Transaction not found", 404));
+
+  const fromStatus = current.status || "pending";
+  const allowed = ALLOWED_TRANSITIONS[fromStatus] || [];
+
+  // allow setting same status again (idempotent) OR if allowed list contains it
+  if (newStatus !== fromStatus && !allowed.includes(newStatus)) {
+    return next(
+      new ErrorResponse(
+        `Invalid status transition from "${fromStatus}" to "${newStatus}"`,
+        400
+      )
+    );
+  }
+
+  // update fields
+  const updates = {
+    status: newStatus,
+  };
+
+  // optionally set submissionDate if moving to 'completed' or 'submitted' style states
+  if (newStatus === "completed") {
+    updates["metadata.submissionDate"] = new Date();
+  }
+  updates["metadata.updatedBy"] = req.user?.id;
+
+  // apply DB update with runValidators
+  const tx = await Transaction.findByIdAndUpdate(txId, updates, {
+    new: true,
+    runValidators: true,
+  });
+
+  // append workflowHistory (use push and save to keep array)
+  tx.metadata = tx.metadata || {};
+  tx.metadata.workflowHistory = tx.metadata.workflowHistory || [];
+  tx.metadata.workflowHistory.push({
+    timestamp: new Date(),
+    user: req.user?.id || "",
+    action: "status_change",
+    fromStatus,
+    toStatus: newStatus,
+    notes: notes || "",
+  });
+
+  await tx.save();
+
+  return res.status(200).json({ success: true, data: tx });
+});
+
+// bulk change statuses (accepts array of ids)
+exports.bulkChangeTransactionStatus = asyncHandler(async (req, res, next) => {
+  /*
+    PUT /api/v1/transactions/status
+    body: { ids: ["id1","id2"], status: "completed", notes: "Batch processed" }
+  */
+  const { ids = [], status: newStatus, notes } = req.body;
+  if (!Array.isArray(ids) || ids.length === 0)
+    return next(new ErrorResponse("ids array required", 400));
+  if (!newStatus) return next(new ErrorResponse("status required", 400));
+
+  // validate ids
+  const invalid = ids.find((i) => !isValidId(i));
+  if (invalid) return next(new ErrorResponse(`Invalid id: ${invalid}`, 400));
+
+  const results = {
+    success: [],
+    failed: [],
+  };
+
+  // process sequentially to keep workflow history per document — could batch for performance
+  for (const id of ids) {
+    try {
+      const doc = await Transaction.findById(id).lean();
+      if (!doc) {
+        results.failed.push({ id, reason: "not_found" });
+        continue;
+      }
+      const fromStatus = doc.status || "pending";
+      const allowed = ALLOWED_TRANSITIONS[fromStatus] || [];
+
+      if (newStatus !== fromStatus && !allowed.includes(newStatus)) {
+        results.failed.push({
+          id,
+          reason: `invalid_transition: ${fromStatus}->${newStatus}`,
+        });
+        continue;
+      }
+
+      const updated = await Transaction.findByIdAndUpdate(
+        id,
+        {
+          status: newStatus,
+          "metadata.updatedBy": req.user?.id,
+          ...(newStatus === "completed"
+            ? { "metadata.submissionDate": new Date() }
+            : {}),
+        },
+        { new: true, runValidators: true }
+      );
+
+      updated.metadata = updated.metadata || {};
+      updated.metadata.workflowHistory = updated.metadata.workflowHistory || [];
+      updated.metadata.workflowHistory.push({
+        timestamp: new Date(),
+        user: req.user?.id,
+        action: "status_change_bulk",
+        fromStatus,
+        toStatus: newStatus,
+        notes: notes || "",
+      });
+      await updated.save();
+
+      results.success.push({ id, status: newStatus });
+    } catch (err) {
+      results.failed.push({ id, reason: err.message });
+    }
+  }
+
+  res.status(200).json({ success: true, result: results });
+});

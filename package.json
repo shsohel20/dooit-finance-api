@@ -8,7 +8,7 @@
     "start": "NODE_ENV=production node server",
     "dev": "nodemon server.js",
     "doc": "node swagger.js"
-  },
+  }, 
   "author": "SH Sohel",
   "license": "MIT",
   "dependencies": {
