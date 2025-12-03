@@ -243,9 +243,11 @@ const { isObjEmpty } = require("../utils");
 const advancedResults =
   (model, populate = null, filterSection = null) =>
   async (req, res, next) => {
+    const client = req?.user?.client?._id || null;
+    const branch = req?.user?.branch?._id || null;
     try {
       // Copy req.query
-      const reqQuery = { ...req.query };
+      const reqQuery = { ...req.query, client, branch };
 
       // Fields to exclude from filters
       const removeFields = [

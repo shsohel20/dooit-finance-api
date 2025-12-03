@@ -22,6 +22,7 @@ const iftiReport = require("./ifti-report");
 const ttrReport = require("./ttr-report");
 const alert = require("./alert");
 const rfi = require("./rfi");
+const notify = require("./notify");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -43,5 +44,6 @@ router.use("/rfi", rfi);
 router.use("/gfs-report", gfsReport);
 router.use("/ifti-report", iftiReport);
 router.use("/ttr-report", ttrReport);
+router.use("/report-notify", notify);
 
 module.exports = router;
