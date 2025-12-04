@@ -1,32 +1,57 @@
-# ---- deps: install production dependencies ----
+# ---- deps: install production dependencies (cached) ----
 FROM node:18-alpine AS deps
 WORKDIR /app
-COPY package*.json ./
-# install production dependencies only
-RUN npm ci --only=production
 
-# ---- builder: install dev deps & build (if you have a build step) ----
+# Add build tools for native modules if needed
+RUN apk add --no-cache libc6-compat python3 make g++
+
+# copy package files (including lockfile) to leverage cache
+COPY package*.json ./
+
+ENV NODE_ENV=production
+# prefer npm ci for reproducible installs; if it fails, the builder will fallback
+RUN npm ci --only=production --silent
+
+# ---- builder: copy source and optionally build ----
 FROM node:18-alpine AS builder
 WORKDIR /app
-COPY . .
-# copy deps from deps stage so builder can run build quickly
+
+# reuse production node_modules for speed
 COPY --from=deps /app/node_modules ./node_modules
-RUN npm ci
-# If you have a build step (TypeScript / transpile), uncomment:
+
+# copy project files
+COPY . .
+
+# If you need dev deps to build, try npm ci; on failure fallback to npm install
+RUN if [ -f package-lock.json ]; then \
+      npm ci --silent || npm install --legacy-peer-deps --silent; \
+    else \
+      npm install --legacy-peer-deps --silent; \
+    fi
+
+# run your build step if applicable (uncomment)
 # RUN npm run build
 
-# ---- runner: production image ----
+# ---- runner: minimal runtime ----
 FROM node:18-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# copy prod node_modules from deps stage
-COPY --from=deps /app/node_modules ./node_modules
-# copy built app (or source if no build)
-COPY --from=builder /app . 
 
+# copy only what's needed
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app ./
+COPY --from=deps /app/node_modules ./node_modules
+
+# If your build outputs to dist, ensure it is included (builder copied project already)
 EXPOSE 6800
-# optional non-root user
+
+# create non-root user
 RUN addgroup -S app && adduser -S app -G app
 USER app
 
+# default start; ensure package.json "start" runs production server (eg. node dist/index.js)
 CMD ["npm", "start"]
+
+# Optional healthcheck (uncomment if you have /health)
+# HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+#   CMD wget -qO- http://localhost:6830/health || exit 1
