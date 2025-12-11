@@ -143,8 +143,8 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
   const {
     transactionId,
     customer,
-    client,
-    branch,
+    // client,
+    // branch,
     type = "transfer",
     subtype,
     amount,
@@ -168,7 +168,8 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
   if (!amount || !currency) {
     return next(new ErrorResponse("amount and currency are required", 400));
   }
-
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   // If provided, validate ids
   if (customer && !isValidId(customer))
     return next(new ErrorResponse("Invalid customer id", 400));

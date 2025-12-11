@@ -97,6 +97,8 @@ exports.getGFSListPost = asyncHandler(async (req, res, next) => {
 
 // @desc Create new GFS
 exports.createGFS = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   const body = normalizeInput(req.body || {});
 
   // minimal server-side validation - ensure customerName or customerUID present
@@ -109,6 +111,8 @@ exports.createGFS = asyncHandler(async (req, res, next) => {
   // create document
   const gfs = await GFS.create({
     ...body,
+    client,
+    branch,
     // ensure numeric defaults
     totalDeposited: Number(body.totalDeposited) || 0,
     totalWithdrawn: Number(body.totalWithdrawn) || 0,
