@@ -47,8 +47,8 @@ exports.getRFIsPost = asyncHandler(async (req, res, next) => {
 exports.createRFI = asyncHandler(async (req, res, next) => {
   const {
     caseId,
-    clientId,
-    branchId,
+    // clientId,
+    // branchId,
     customerId,
     primaryContactName,
     replyToEmail,
@@ -56,7 +56,8 @@ exports.createRFI = asyncHandler(async (req, res, next) => {
     metadata = {},
     settings = {},
   } = req.body;
-
+  const clientId = req?.user?.client?._id || null;
+  const branchId = req?.user?.branch?._id || null;
   // optional existence checks
   if (clientId) {
     const client = await Client.findById(clientId);
