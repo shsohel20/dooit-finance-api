@@ -121,9 +121,23 @@ exports.getEcddReports = asyncHandler(async (req, res, next) => {
 exports.createEcddReport = asyncHandler(async (req, res, next) => {
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
+
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
   const { caseNumber } = payload;
+
+  const existing = await EcddReport.findOne({
+    caseNumber: caseNumber,
+  });
+
+  if (existing) {
+    return next(
+      new ErrorResponse(
+        `The caseNumber (${caseNumber}) is already used by another report.`,
+        409
+      )
+    );
+  }
 
   const alert = await Alert.findOne({ uid: caseNumber });
 
