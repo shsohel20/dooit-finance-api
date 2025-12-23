@@ -51,7 +51,8 @@ exports.createSMR = asyncHandler(async (req, res, next) => {
   const smr = await SMR.create({
     client,
     branch,
-    reportId: body.reportId,
+    caseId: body.caseId,
+    caseNumber: body.caseNumber,
     partA: body.partA,
     partB: body.partB,
     partC: body.partC,
