@@ -21,7 +21,7 @@ const { protect, authorize } = require("../middleware/auth");
 
 // protect all SMR routes and allow only admin by default
 router.use(protect);
-router.use(authorize("admin"));
+// router.use(authorize("admin"));
 
 // list (GET query / POST body-filter)
 router

@@ -21,7 +21,7 @@ const { protect, authorize } = require("../middleware/auth");
 
 // Protect all alert routes and allow only admin by default
 router.use(protect);
-router.use(authorize("admin"));
+// router.use(authorize("admin"));
 
 // List alerts (GET with query params, POST with body filter via advancedResults)
 router

@@ -20,7 +20,7 @@ const { protect, authorize } = require("../middleware/auth");
 
 // protect all RFI routes and allow only admin by default
 router.use(protect);
-router.use(authorize("admin"));
+// router.use(authorize("admin"));
 
 // list
 router

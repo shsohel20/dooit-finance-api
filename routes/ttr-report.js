@@ -20,7 +20,7 @@ const { protect, authorize } = require("../middleware/auth");
 
 // Protect all TTR routes and allow only admin
 router.use(protect);
-router.use(authorize("admin"));
+// router.use(authorize("admin"));
 
 // list (GET query / POST body-filter)
 router

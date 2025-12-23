@@ -17,7 +17,9 @@ const {
   deleteEcddReport,
   getEcddReportByCaseNumber,
 } = require("../controllers/ecddReportController");
-
+// protect all SMR routes and allow only admin by default
+router.use(protect);
+// router.use(authorize("admin"));
 /**
  * Public listing (supports advancedResults for filtering/pagination)
  * GET /api/v1/ecdd

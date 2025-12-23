@@ -122,6 +122,8 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
 
+  console.log(req?.user);
+
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
   const { caseNumber } = payload;
