@@ -9,11 +9,11 @@ const { Schema } = mongoose;
 // reuse small schemas from your JSON Schema
 const AddressSchema = new Schema(
   {
-    street: String,
-    city: String,
-    state: String,
-    postcode: String,
-    country: String,
+    street: { type: String, default: "" },
+    city: { type: String, default: "" },
+    state: { type: String, default: "" },
+    postcode: { type: String, default: "" },
+    country: { type: String, default: "" },
   },
   { _id: false }
 );
@@ -33,13 +33,20 @@ const PartyDetailsSchema = new Schema(
       {
         // array of Institution
         name: String,
-        address: AddressSchema,
+        address: { type: AddressSchema, default: {} },
       },
     ],
   },
   { _id: false }
 );
-
+const DigitalCurrencySchema = new Schema(
+  {
+    type: String,
+    amount: Number,
+    walletAddress: String,
+  },
+  { _id: false }
+);
 const TransactionSchema = new Schema(
   {
     date: Date,
@@ -49,9 +56,7 @@ const TransactionSchema = new Schema(
     totalAmount: MoneySchema,
     cashAmount: MoneySchema,
     foreignCurrencies: [{ currencyCode: String, amount: Number }],
-    digitalCurrencies: [
-      { type: String, amount: Number, walletAddress: String },
-    ],
+    digitalCurrencies: [DigitalCurrencySchema],
     sender: PartyDetailsSchema,
     payee: PartyDetailsSchema,
     beneficiary: PartyDetailsSchema,
@@ -168,7 +173,13 @@ const SMRSpec = new Schema(
     uid: { type: String, index: true }, // eg SMR_...
     sequence: { type: Number, index: true },
 
-    caseId: { type: String, index: true, default: null }, // external reference
+    caseId: {
+      type: Schema.Types.ObjectId,
+      ref: "Alert",
+      required: false,
+      default: null,
+    },
+    caseNumber: { type: String, index: true, default: null }, // external reference
 
     status: {
       type: String,
