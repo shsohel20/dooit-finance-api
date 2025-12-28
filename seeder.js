@@ -10,6 +10,11 @@ const Role = require("./models/Role");
 const Counter = require("./models/Counter");
 const Customer = require("./models/Customer");
 const Client = require("./models/Client");
+const runEcddForAlerts = require("./runEcddForAlerts");
+const runSmrForAlerts = require("./runSmrForAlerts");
+const runRfiForAlerts = require("./runRfiForAlerts");
+const runGfsForAlerts = require("./runGfsForAlerts");
+const runDismissalForAlerts = require("./runDismissalForAlerts");
 
 // Connect to DB
 mongoose.connect(process.env.MONGO_URI);
@@ -35,13 +40,19 @@ const users = JSON.parse(
 // Import into DB
 const importData = async () => {
   try {
-    await User.create(users);
+    //await User.create(users);
     // await Permission.create(permissions);
     // await Role.create(roles);
     // await Course.create(courses);
+    // await runEcddForAlerts();
+    // await runSmrForAlerts();
+    // await runRfiForAlerts();
+    // await runGfsForAlerts();
+    await runDismissalForAlerts();
+    process.exit(0);
 
-    console.log("Data Imported...".green.inverse);
-    process.exit();
+    // console.log("Data Imported...".green.inverse);
+    // process.exit();
   } catch (err) {
     console.error(err);
   }

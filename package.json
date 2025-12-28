@@ -8,10 +8,11 @@
     "start": "NODE_ENV=production node server",
     "dev": "nodemon server.js",
     "doc": "node swagger.js"
-  }, 
+  },
   "author": "SH Sohel",
   "license": "MIT",
   "dependencies": {
+    "axios": "^1.13.2",
     "bcryptjs": "^3.0.2",
     "body-parser": "^2.2.0",
     "cloudinary": "^2.7.0",

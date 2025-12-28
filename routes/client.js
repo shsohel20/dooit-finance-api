@@ -19,7 +19,7 @@ const { protect, authorize } = require("../middleware/auth");
 const router = express.Router();
 
 // protect all client routes and allow only admin by default
-// router.use(protect);
+router.use(protect);
 // router.use(authorize("admin", "client"));
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
