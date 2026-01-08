@@ -16,9 +16,10 @@ const {
   updateEcddReport,
   deleteEcddReport,
   getEcddReportByCaseNumber,
+  createPublicEcddReport,
 } = require("../controllers/ecddReportController");
 // protect all SMR routes and allow only admin by default
-router.use(protect);
+// router.use(protect);
 // router.use(authorize("admin"));
 /**
  * Public listing (supports advancedResults for filtering/pagination)
@@ -35,6 +36,7 @@ router.use(protect);
 // );
 router.get(
   "/",
+  protect,
   // optional: use advancedResults to handle query / pagination. Remove if you don't have it.
   advancedResults(EcddReport, "customer analyst generatedBy transaction"),
   getEcddReports
@@ -45,54 +47,44 @@ router.get(
  * POST /api/v1/ecdd
  * Protected: only appropriate roles should create reports
  */
-router.post("/", createEcddReport);
+router.post("/", protect, createEcddReport);
+
+router.post("/ai/create", createPublicEcddReport);
 
 /**
  * Import JSON (single object or array)
  * POST /api/v1/ecdd/import
  * Protected
  */
-router.post(
-  "/import",
-
-  importFromJsonEcddReports
-);
+router.post("/import", protect, importFromJsonEcddReports);
 
 /**
  * Import CSV (multipart form upload field name: 'file')
  * POST /api/v1/ecdd/import-csv
  * Protected
  */
-router.post("/import-csv", upload.single("file"), importEcddReportCsv);
+router.post("/import-csv", protect, upload.single("file"), importEcddReportCsv);
 
 /**
  * Export CSV
  * GET /api/v1/ecdd/export-csv
  * Protected
  */
-router.get(
-  "/export-csv",
-
-  exportEcddReportCsv
-);
+router.get("/export-csv", protect, exportEcddReportCsv);
 
 /**
  * Get single report by ID
  * GET /api/v1/ecdd/:id
  * Public or Protected depending on your needs (here protected)
  */
-router.get(
-  "/:id",
-
-  getEcddReport
-);
+router.get("/:id", protect, getEcddReport);
 
 /**
  * Update report by ID
  * PUT /api/v1/ecdd/:id
  * Protected
  */
-router.put("/:id", updateEcddReport);
+router.put("/:id", protect, updateEcddReport);
 
 /**
  * Delete report by ID
@@ -106,6 +98,6 @@ router.delete("/:id", deleteEcddReport);
  * GET /api/v1/ecdd/case/:caseNumber
  * Note: this should be placed before the '/:id' route to avoid conflict
  */
-router.get("/case/:caseNumber", getEcddReportByCaseNumber);
+router.get("/case/:caseNumber", protect, getEcddReportByCaseNumber);
 
 module.exports = router;

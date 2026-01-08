@@ -122,8 +122,6 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
 
-  console.log(req?.user);
-
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
   const { caseNumber } = payload;
@@ -155,6 +153,49 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
     ...payload,
     client,
     branch,
+    caseId: alert?._id || null,
+  };
+  const report = await EcddReport.create(submitObj);
+
+  res.status(201).json({
+    success: true,
+    data: report,
+    id: report._id,
+  });
+});
+// @desc   Create a single ECDD report
+// @route  POST /api/v1/ecdd
+// @access Private (require authentication in routes)
+exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
+  // whitelist allowed fields server-side if you prefer
+  const payload = req.body || {};
+  const { caseNumber } = payload;
+
+  const existing = await EcddReport.findOne({
+    caseNumber: caseNumber,
+  });
+
+  if (existing) {
+    return next(
+      new ErrorResponse(
+        `The caseNumber (${caseNumber}) is already used by another report.`,
+        409
+      )
+    );
+  }
+
+  const alert = await Alert.findOne({ uid: caseNumber });
+
+  if (!alert) {
+    return next(
+      new ErrorResponse(
+        `Alert not found by CASE Number or Alert UID ${caseNumber}`,
+        404
+      )
+    );
+  }
+  const submitObj = {
+    ...payload,
     caseId: alert?._id || null,
   };
   const report = await EcddReport.create(submitObj);

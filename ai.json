@@ -1,0 +1,985 @@
+{
+  "_comment": "alert Data for ECDD Report Generation",
+  "alert": {
+    "_id": "692dc345487c01b785cc03b1",
+    "customer": {
+      "declaration": {
+        "declarations_accepted": true,
+        "signatory_name": "sarah johnson",
+        "signature": "https://dummyimage.com/400x200/000/fff&text=signature",
+        "date": "2007-09-02T00:00:00.000Z"
+      },
+      "_id": "69288cf017ad54c4d684a399",
+      "user": "69288cef17ad54c4d684a395",
+      "relations": [
+        {
+          "client": "69246a31ea72906116c443f5",
+          "type": "individual",
+          "onboardingChannel": "API",
+          "registeredAt": "2025-11-27T17:40:00.337Z",
+          "source": "api",
+          "notes": "",
+          "active": true,
+          "invitedBy": null,
+          "inviteToken": null,
+          "inviteTokenExpire": null,
+          "inviteCreatedAt": null,
+          "_id": "69288cf017ad54c4d684a39a",
+          "id": "69288cf017ad54c4d684a39a"
+        }
+      ],
+      "invitedBy": null,
+      "personalKyc": {
+        "funds_wealth": {
+          "source_of_funds": "salary",
+          "source_of_wealth": "family wealth",
+          "account_purpose": "savings",
+          "estimated_trading_volume": "39358"
+        },
+        "sole_trader": {
+          "is_sole_trader": false
+        },
+        "personal_form": {
+          "customer_details": {
+            "given_name": "sarah",
+            "middle_name": "",
+            "surname": "johnson",
+            "date_of_birth": "1973-01-17T00:00:00.000Z",
+            "other_names": "brenda",
+            "referral": "facebook"
+          },
+          "contact_details": {
+            "email": "sarahjohnson72@example.com",
+            "phone": "7658004827"
+          },
+          "employment_details": {
+            "occupation": "designer, jewellery",
+            "industry": "manufacturing",
+            "employer_name": "meadows-castillo"
+          },
+          "residential_address": {
+            "address": "237 kelly oval, new carolburgh, as 91170",
+            "suburb": "north jodyville",
+            "state": "indiana",
+            "postcode": "14647",
+            "country": "united states"
+          },
+          "mailing_address": {
+            "address": "34246 sanders gateway apt. 133, gregoryville, in 73630",
+            "suburb": "new ashley",
+            "state": "montana",
+            "postcode": "11479",
+            "country": "united states"
+          }
+        }
+      },
+      "documents": [
+        {
+          "name": "id front",
+          "url": "https://dummyimage.com/600x400/000/fff&text=front",
+          "mimeType": "image/jpeg",
+          "type": "id_front",
+          "docType": "id",
+          "uploadedAt": "2025-11-27T17:40:00.548Z"
+        },
+        {
+          "name": "id back",
+          "url": "https://dummyimage.com/600x400/000/fff&text=back",
+          "mimeType": "image/jpeg",
+          "type": "id_back",
+          "docType": "id",
+          "uploadedAt": "2025-11-27T17:40:00.548Z"
+        }
+      ],
+      "country": "united states",
+      "kycStatus": "pending",
+      "kycNotes": "",
+      "isPep": false,
+      "sanction": false,
+      "consentToScreen": false,
+      "isActive": true,
+      "authorized": {
+        "documents_attested": false
+      },
+      "kycHistory": [],
+      "createdAt": "2025-11-27T17:40:00.550Z",
+      "updatedAt": "2025-11-27T17:40:00.550Z",
+      "uid": "CR_1764265200550",
+      "sequence": 1,
+      "__v": 0,
+      "isInviteActive": false,
+      "relationRisks": [
+        {
+          "client": "69246a31ea72906116c443f5",
+          "branch": null,
+          "type": "individual",
+          "registeredAt": "2025-11-27T17:40:00.337Z",
+          "onboardingChannel": "API",
+          "source": "api",
+          "riskAssessment": {
+            "customerType": {
+              "value": "individual",
+              "score": 20
+            },
+            "jurisdiction": {
+              "value": "united states",
+              "score": 10,
+              "band": "LRC"
+            },
+            "customerRetention": {
+              "value": "New",
+              "score": 30
+            },
+            "product": {
+              "value": "",
+              "score": 0
+            },
+            "channel": {
+              "value": "api",
+              "score": 30
+            },
+            "occupation": {
+              "value": "designer, jewellery",
+              "score": 0
+            },
+            "industry": {
+              "value": "manufacturing",
+              "score": 0
+            }
+          },
+          "riskScore": 90,
+          "riskLabel": "Low"
+        }
+      ],
+      "riskSummary": {
+        "maxScore": 90,
+        "averageScore": 90,
+        "highestLabel": "Low"
+      },
+      "riskAssessment": {
+        "customerType": {
+          "value": "individual",
+          "score": 20
+        },
+        "jurisdiction": {
+          "value": "united states",
+          "score": 10,
+          "band": "LRC"
+        },
+        "customerRetention": {
+          "value": "New",
+          "score": 30
+        },
+        "product": {
+          "value": "",
+          "score": 0
+        },
+        "channel": {
+          "value": "api",
+          "score": 30
+        },
+        "occupation": {
+          "value": "designer, jewellery",
+          "score": 0
+        },
+        "industry": {
+          "value": "manufacturing",
+          "score": 0
+        }
+      },
+      "riskScore": 90,
+      "riskLabel": "Low",
+      "id": "69288cf017ad54c4d684a399"
+    },
+    "analyst": {
+      "_id": "692586191ab71082b3804c05",
+      "name": "Dooit analyst",
+      "userName": "shsoheldooit",
+      "email": "shsohel.strikeo@gmail.com",
+      "userType": "user",
+      "role": "analyst",
+      "photoUrl": "https://res.cloudinary.com/dxczhch36/image/upload/v1711183818/default-user_toualj.png",
+      "isActive": true,
+      "createdAt": "2025-11-25T10:34:01.541Z",
+      "updatedAt": "2025-11-25T10:34:01.541Z",
+      "slug": "dooit-analyst",
+      "uid": "U_1764066841626",
+      "sequence": 1,
+      "__v": 0,
+      "id": "692586191ab71082b3804c05"
+    },
+    "transaction": {
+      "investigation": {
+        "flagged": false
+      },
+      "_id": "69295115fc63670e30fc437b",
+      "sequence": 1,
+      "customer": "69288cf017ad54c4d684a399",
+      "client": "69246a31ea72906116c443f5",
+      "type": "transfer",
+      "subtype": "wire",
+      "amount": 34866.87,
+      "currency": "BDT",
+      "reference": "INV-2025-3471",
+      "narrative": "Payment for invoice #2030-8310",
+      "status": "pending",
+      "channel": "Online",
+      "sender": {
+        "id": "69288cf017ad54c4d684a399",
+        "name": "sarah johnson",
+        "account": "AU398137754",
+        "institution": "Trading_152_zSXd",
+        "institutionCountry": "Bangladesh",
+        "bic": "B15717AU2S",
+        "address": "1002 Willie Station\nRussellmouth, RI 14209",
+        "extra": {
+          "customerRef": "CUST-776"
+        }
+      },
+      "beneficiary": {
+        "name": "Payne-Wilson",
+        "account": "AU436909404",
+        "institution": "Gomez Group",
+        "institutionCountry": "Australia",
+        "address": "151 Stephanie Harbor\nPort Anthony, NY 11785"
+      },
+      "receiver": {
+        "name": "Richard Wright",
+        "account": "3436501",
+        "institution": "Moore Inc",
+        "institutionCountry": "Bangladesh",
+        "bic": "B39116",
+        "address": "175 Luis Wells\nIsaiahburgh, SC 48635"
+      },
+      "purpose": "supplier_payment",
+      "remittancePurposeCode": "S01",
+      "crypto": {
+        "hops": 0
+      },
+      "riskScore": 0,
+      "riskFlags": [],
+      "relatedPartyTxnId": "",
+      "relatedPartyFlag": false,
+      "createdBy": "6906ef042b25d3502f3a6915",
+      "metadata": {
+        "ip": "186.247.243.181",
+        "deviceId": "device-eYo-150"
+      },
+      "timestamp": "2025-11-28T07:36:53.686Z",
+      "createdAt": "2025-11-28T07:36:53.686Z",
+      "updatedAt": "2025-11-28T07:36:53.686Z",
+      "uid": "TXN_1764315413686",
+      "__v": 0,
+      "displayAmount": "34866.87 BDT",
+      "id": "69295115fc63670e30fc437b"
+    },
+    "caseType": "SMR",
+    "riskScore": 75,
+    "riskLabel": "Medium",
+    "activity": [
+      {
+        "title": "Dismissal Report (gam_d3)",
+        "details": "Dismissal analysis completed for gam_d3",
+        "uploadedAt": "2025-12-27T09:26:07.579Z"
+      }
+    ],
+    "activityNote": [
+      {
+        "note": "Alert dismissed based on applicable criteria.",
+        "uploadedAt": "2025-12-27T09:26:07.579Z"
+      }
+    ],
+    "status": "Inactive",
+    "createdAt": "2025-12-01T16:33:09.450Z",
+    "updatedAt": "2025-12-27T09:26:07.579Z",
+    "uid": "CA_1764606789451",
+    "sequence": 1,
+    "__v": 0,
+    "metadata": {
+      "ecddReport": {
+        "analyst_name": "Dooit analyst",
+        "position": null,
+        "analysis_date": "2025-12-01T16:33:09.450Z",
+        "account_creation_date": "2025-11-27T17:40:00.550Z",
+        "user_id": "69288cf017ad54c4d684a399",
+        "name": "sarah",
+        "email": "sarahjohnson72@example.com",
+        "account_purpose": "savings",
+        "Expected_Trading_Volume": "39358",
+        "annual_income": 191048.01,
+        "beneficial_owner": null,
+        "director_name": null,
+        "pep_flag": false,
+        "sanction_flag": false,
+        "ip_address": "186.247.243.181",
+        "ip_geolocation": "Australia",
+        "total_deposits_AUD": 34866.87,
+        "company_name": null,
+        "abn": null,
+        "total_withdrawals_USDT": 5581.41,
+        "total_withdrawals_ETH": 18036.82,
+        "total_withdrawals_BTC": 2568.74,
+        "total_withdrawals_AUD": 30921.869876201945,
+        "onboarding_date": "2025-11-27T17:40:00.550Z",
+        "analysis_end_date": "2025-12-15T16:33:09.450000+00:00",
+        "profile_summary": "The customer **sarah** (UID: **69288cf017ad54c4d684a399**), was onboarded on **2025-11-27T17:40:00.550Z**. Account opening purpose was stated as **savings** and expected trading volume is listed as **39358**. An open media search was not performed in this synthetic sample. The beneficial owner(s) recorded at onboarding: **sarah**.",
+        "transaction_analysis": "Since account creation on 2025-11-27 until 2025-12-15, total platform activity shows AUD deposits $34866.87, AUD withdrawals $30921.87, USDT out $5581.41, ETH out $18036.82, and BTC out $2568.74. The transaction pattern of multiple deposits and withdrawals within this short timeframe raises concerns. The rapid movement of funds into and out of the account, coupled with the conversion to and withdrawal of significant amounts in USDT, ETH, and BTC, presents a potential layering risk, a common money laundering technique used to obscure the origin of funds. The conversion to cryptocurrency and subsequent withdrawals complicate tracing the funds' ultimate destination. While the subject is not flagged as a PEP or sanctioned individual, and resides in Australia, the velocity of transactions and the use of cryptocurrencies warrant further scrutiny. The observed activity could be indicative of structuring to avoid reporting thresholds, or a more sophisticated scheme involving the rapid movement of illicit funds. Further investigation is required to determine the source of the AUD deposits and the ultimate beneficiaries of the cryptocurrency withdrawals to assess the legitimacy of the funds and ensure compliance with AML/CTF regulations.",
+        "recommendation_type": "SMR",
+        "recommendation": "Given the patterns observed for **sarah** (UID: **69288cf017ad54c4d684a399**) — rapid deposits and withdrawals within a short timeframe, conversion to and withdrawal of significant amounts in USDT, ETH, and BTC, potential layering risk to obscure the origin of funds, and structuring concerns — classify as **High Risk**. Immediate actions: suspend cryptocurrency withdrawals, perform enhanced due diligence on the source of deposits and destination of cryptocurrency withdrawals, and notify senior management. Consider reporting to relevant authorities (SMR/CTR) given potential money laundering indicators. Escalate for urgent regulatory engagement.",
+        "behavioral_analysis": "Sarah's account activity exhibits several red flags indicative of potential money laundering. The rapid turnover of funds, involving deposits in AUD followed by withdrawals in USDT, ETH, and BTC within a short timeframe, suggests a layering attempt to obscure the origin of the funds. The significant amounts withdrawn in cryptocurrencies further complicate tracing. While the user is not a PEP or sanctioned individual, the transaction velocity and cryptocurrency usage warrant a high-risk classification and immediate enhanced due diligence to determine the legitimacy of the funds and compliance with AML/CTF regulations.",
+        "additional_information": "Further investigation required based on transaction patterns.",
+        "deposit_details": "Total deposits AUD: $34866.87 recorded via Bank (Company X1) and Exchange (Binance).",
+        "withdrawal_details": "Withdrawals summary:\n- USDT: 5581.41 to various wallets.\n- ETH: 18036.82 to various wallets.\n- BTC: 2568.74 to various wallets."
+      },
+      "source": "ECDD_API",
+      "fetchedAt": "2025-12-27T08:29:26.047Z",
+      "smrReport": {
+        "smr_id": "SMR_CA_1764606789451_20251227",
+        "uid": "CA_1764606789451",
+        "report_date": "2025-12-27",
+        "name": "sarah",
+        "dob": "1985-12-02",
+        "country_of_citizenship": "Australia",
+        "contact_details": {
+          "residential_address": "N/A",
+          "mailing_address": "N/A"
+        },
+        "phone_numbers": ["7658004827", "+61-429613028"],
+        "email_address": "sarahjohnson72@example.com",
+        "occupation": "designer, jewellery",
+        "transaction_details": {
+          "date_of_transaction": "2025-11-28",
+          "transaction_type": "transfer",
+          "transaction_subtype": "wire",
+          "transaction_reference_number": "69295115fc63670e30fc437b",
+          "total_amount": 34866.87,
+          "total_amount_aud": 34866.87,
+          "currency": "BDT",
+          "total_cash_involved": 34866.87
+        },
+        "parties": {
+          "sender": {
+            "name": "sarah johnson",
+            "account": "AU398137754",
+            "institution": "Trading_152_zSXd",
+            "country": "Australia"
+          },
+          "beneficiary": {
+            "name": "Payne-Wilson",
+            "account": "AU436909404",
+            "institution": "Gomez Group",
+            "country": "Australia"
+          },
+          "drawer": "sarah johnson",
+          "issuer": "Trading_152_zSXd",
+          "payee": "Payne-Wilson"
+        },
+        "suspicious_indicators": {
+          "linked_to_smr": true,
+          "suspicious_flag": true,
+          "pep_flag": false,
+          "sanctions_match": false
+        },
+        "narrative": "This transaction raises several red flags and warrants further investigation. The primary concern stems from the unusual combination of currency, amount, and the lack of clear business purpose. Specifically, a transfer of 34,866.87 Bangladeshi Taka (BDT) from an individual, Sarah Johnson, to an entity named Payne-Wilson, both located in Australia, is highly atypical. BDT is not a commonly used currency for international transactions, especially between parties residing in Australia. This immediately suggests an attempt to obscure the origin or destination of funds, potentially to avoid detection. \n\nFurthermore, the amount transferred is significant enough to warrant scrutiny. While not exceptionally large, it is a substantial sum that would typically be associated with a legitimate business transaction or a significant personal transfer (e.g., property purchase, investment). However, the use of BDT makes these explanations less plausible. It is unusual for Australian residents to conduct such transactions in BDT unless there is a specific underlying reason related to Bangladesh, which is not immediately apparent. \n\nThe absence of PEP (Politically Exposed Person) or Sanctions flags does not negate the suspicion. The transaction could still be related to other illicit activities, such as tax evasion, money laundering related to other crimes, or the funding of illegal activities. The use of an uncommon currency could be a deliberate attempt to circumvent AML (Anti-Money Laundering) monitoring systems that are primarily focused on major currencies. \n\nTo further assess the risk, the following steps are recommended: \n\n1.  **Customer Due Diligence (CDD):** Conduct enhanced due diligence on both Sarah Johnson and Payne-Wilson. Verify their identities, addresses, and sources of funds/income. Determine the nature of their relationship and the purpose of the transaction. \n2.  **Transaction Monitoring:** Review past transaction history for both parties to identify any other unusual patterns or similar transactions involving uncommon currencies or high-risk jurisdictions. \n3.  **Beneficiary Information:** Investigate Payne-Wilson to determine its business activities, ownership structure, and any potential links to high-risk industries or individuals. \n4.  **Source of Funds:** Request documentation from Sarah Johnson to verify the source of the BDT being transferred. \n\nWithout further information, this transaction is considered suspicious due to the unusual currency, the significant amount, and the lack of a clear legitimate purpose. The potential for money laundering or other illicit activities cannot be ruled out.",
+        "investigation_notes": "Under investigation",
+        "status": "Under Review"
+      },
+      "smrGeneratedAt": "2025-12-27T08:34:51.649Z",
+      "rfiReport": {
+        "rfi_id": "RFI_CA_1764606789451_20251227",
+        "uid": "CA_1764606789451",
+        "case_number": "CASE-202512-5149",
+        "customer_name": "sarah",
+        "customer_uid": "69288cf017ad54c4d684a399",
+        "customer_email": "sarahjohnson72@example.com",
+        "primary_contact_name": "sarah",
+        "response_deadline": "January 10, 2026",
+        "requested_items": [
+          "Please provide recent payslips (last 3 months) or an employment contract to verify your stated source of funds (salary).",
+          "Please provide a brief explanation detailing the purpose of this specific transfer of $34,866.87.",
+          "Please provide bank statements showing the origin of the funds being transferred.",
+          "Please provide documentation confirming your residential address (e.g., utility bill, bank statement)."
+        ],
+        "reply_to_email": "compliance@amlservices.com",
+        "client_name": "AML Compliance Services",
+        "created_date": "2025-12-27",
+        "Subject": "Request for information – CASE-202512-5149 (sarah)",
+        "body": "Hi sarah,\n\nAs part of our standard review for sarah (UID 69288cf017ad54c4d684a399, case CASE-202512-5149), please provide the information below within 14 calendar days (by January 10, 2026):\n\n• Please provide recent payslips (last 3 months) or an employment contract to verify your stated source of funds (salary).\n• Please provide a brief explanation detailing the purpose of this specific transfer of $34,866.87.\n• Please provide bank statements showing the origin of the funds being transferred.\n• Please provide documentation confirming your residential address (e.g., utility bill, bank statement).\n\nYou can reply to compliance@amlservices.com with documents or clarifications. If an item is unavailable, please note the reason and an expected date.\n\nKind regards,\nCompliance Team\nAML Compliance Services"
+      },
+      "rfiGeneratedAt": "2025-12-27T08:38:39.563Z",
+      "gfsReport": {
+        "gfs_id": "GFS_CA_1764606789451_20251227",
+        "uid": "CA_1764606789451",
+        "customerName": "sarah",
+        "customerUID": "69288cf017ad54c4d684a399",
+        "companyName": null,
+        "customerAge": 30,
+        "accountOpeningDate": "2025-11-27",
+        "sourceOfFunds": "salary",
+        "sourceOfWealth": "family wealth",
+        "accountOpeningPurpose": "savings",
+        "reviewStartDate": "2025-12-01",
+        "reviewEndDate": "2026-02-03",
+        "totalDeposited": 34866.87,
+        "totalWithdrawn": 26509.725806096263,
+        "transactions": [
+          {
+            "tx_id": "69295115fc63670e30fc437b",
+            "date": "2025-11-28",
+            "type": "transfer",
+            "subtype": "wire",
+            "amount": 34866.87,
+            "currency": "BDT",
+            "status": "pending",
+            "counterparty": "Payne-Wilson"
+          }
+        ],
+        "ofis": [
+          {
+            "institution_name": "Gomez Group",
+            "country": "Australia",
+            "bic": "BIC71094"
+          }
+        ],
+        "pois": [
+          {
+            "name": "Payne-Wilson",
+            "relationship": "Counterparty",
+            "country": "Australia"
+          }
+        ],
+        "cryptoAddresses": [],
+        "ipAddresses": [
+          {
+            "ip": "186.247.243.181",
+            "geolocation": "Australia",
+            "risk_category": "Low"
+          }
+        ],
+        "totalSuspicionAmount": 14684.38397730302,
+        "customerCountry": "Australia",
+        "riskRating": "Medium",
+        "pepFlag": false,
+        "sanctionsFlag": false,
+        "linkedToSMR": true,
+        "behavioralChange": true,
+        "suspicionSummary": "While the customer's stated source of funds is salary and account purpose is savings, the high withdrawal amount (26509.73) relative to the total deposited (34866.87) and the single transaction count raises suspicion. This pattern deviates from typical savings account behavior, suggesting potential layering or other unusual financial activity. Further investigation is warranted to determine the legitimacy of these transactions."
+      },
+      "gfsGeneratedAt": "2025-12-27T08:41:58.277Z",
+      "dismissalReports": {
+        "fi_d1": {
+          "warning": "Dismissal type 'fi_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Finance", "Banking", "Financial Services"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:31.453Z"
+        },
+        "fi_d2": {
+          "warning": "Dismissal type 'fi_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": [
+            "Finance",
+            "Banking",
+            "Import/Export",
+            "Trade"
+          ],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:33.567Z"
+        },
+        "fi_d3": {
+          "warning": "Dismissal type 'fi_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Retail", "Finance"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:35.680Z"
+        },
+        "vasp_d1": {
+          "warning": "Dismissal type 'vasp_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Cryptocurrency", "VASP", "Digital Assets"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:37.808Z"
+        },
+        "vasp_d2": {
+          "warning": "Dismissal type 'vasp_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Cryptocurrency", "VASP", "Digital Assets"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:39.923Z"
+        },
+        "vasp_d3": {
+          "warning": "Dismissal type 'vasp_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Cryptocurrency", "VASP", "Digital Assets"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:42.041Z"
+        },
+        "acc_d1": {
+          "warning": "Dismissal type 'acc_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Accounting", "Professional Services"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:44.170Z"
+        },
+        "acc_d2": {
+          "warning": "Dismissal type 'acc_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Accounting", "Payroll Services"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:46.283Z"
+        },
+        "acc_d3": {
+          "warning": "Dismissal type 'acc_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": [
+            "Accounting",
+            "Audit",
+            "Professional Services"
+          ],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:48.392Z"
+        },
+        "pm_d1": {
+          "warning": "Dismissal type 'pm_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Precious Metals", "Bullion", "Commodities"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:50.504Z"
+        },
+        "pm_d2": {
+          "warning": "Dismissal type 'pm_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Precious Metals", "Bullion", "Retail"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:52.691Z"
+        },
+        "pm_d3": {
+          "warning": "Dismissal type 'pm_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": [
+            "Precious Metals",
+            "Retail",
+            "Cash Intensive"
+          ],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:54.832Z"
+        },
+        "re_d1": {
+          "warning": "Dismissal type 're_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Real Estate", "Legal", "Conveyancing"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:56.952Z"
+        },
+        "re_d2": {
+          "warning": "Dismissal type 're_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Real Estate", "Legal", "Property"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:25:59.071Z"
+        },
+        "re_d3": {
+          "warning": "Dismissal type 're_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Real Estate", "Legal"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:26:01.233Z"
+        },
+        "gam_d1": {
+          "warning": "Dismissal type 'gam_d1' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Gambling", "Gaming", "Wagering"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:26:03.349Z"
+        },
+        "gam_d2": {
+          "warning": "Dismissal type 'gam_d2' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Gambling", "Gaming", "Wagering"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:26:05.463Z"
+        },
+        "gam_d3": {
+          "warning": "Dismissal type 'gam_d3' may not match customer industry 'manufacturing'",
+          "expected_industries": ["Gambling", "Gaming", "Wagering"],
+          "customer_industry": "manufacturing",
+          "proceed_anyway": true,
+          "generatedAt": "2025-12-27T09:26:07.578Z"
+        }
+      }
+    },
+    "id": "692dc345487c01b785cc03b1"
+  },
+
+  "customer": {
+    "declaration": {
+      "declarations_accepted": false
+    },
+    "_id": "69102e67db1513dc284b82f4",
+    "user": {
+      "_id": "691032f4db1513dc284b8301",
+      "name": "Aimun Nahar",
+      "userName": "info@acme.com",
+      "email": "aimunnaharr@gmail.com",
+      "photoUrl": "https://res.cloudinary.com/dxczhch36/image/upload/v1711183818/default-user_toualj.png",
+      "id": "691032f4db1513dc284b8301"
+    },
+    "relations": [
+      {
+        "client": {
+          "_id": "68fe70605a026bb521a8ae28",
+          "name": "Acme Financial Ltd",
+          "fullAddress": "",
+          "id": "68fe70605a026bb521a8ae28"
+        },
+        "type": "individual",
+        "onboardingChannel": "",
+        "registeredAt": "2025-11-09T06:02:15.470Z",
+        "source": "in-branch",
+        "notes": "",
+        "active": true,
+        "_id": "69102e67db1513dc284b82f5",
+        "invitedBy": "6906ef042b25d3502f3a6915",
+        "inviteToken": "b9f9608d4378d8a90366059d92a2682eabad361daa4e070d74fea88e9ba329d7",
+        "inviteTokenExpire": "2025-12-16T15:27:07.183Z",
+        "inviteCreatedAt": "2025-12-09T15:27:07.183Z",
+        "id": "69102e67db1513dc284b82f5"
+      },
+      {
+        "invitedBy": null,
+        "inviteToken": null,
+        "inviteTokenExpire": null,
+        "inviteCreatedAt": null,
+        "client": {
+          "_id": "68fe059c08955a639e7dec59",
+          "name": "test",
+          "fullAddress": "",
+          "id": "68fe059c08955a639e7dec59"
+        },
+        "type": "individual",
+        "onboardingChannel": "",
+        "registeredAt": "2025-11-12T11:53:03.357Z",
+        "source": "in-branch",
+        "notes": "Walk-in, collector invited",
+        "active": true,
+        "_id": "6914751f62e72aa3c8c1a3a7",
+        "id": "6914751f62e72aa3c8c1a3a7"
+      }
+    ],
+    "invitedBy": "6906ef042b25d3502f3a6915",
+    "personalKyc": {
+      "funds_wealth": {
+        "source_of_funds": "Cupiditate sit expl",
+        "source_of_wealth": "Consequatur ducimus",
+        "account_purpose": "Repellendus Fuga A",
+        "estimated_trading_volume": "Voluptas unde velit "
+      },
+      "sole_trader": {
+        "is_sole_trader": true
+      },
+      "personal_form": {
+        "customer_details": {
+          "given_name": "Gail Small",
+          "middle_name": "Jamal Blackwell",
+          "surname": "Skinner",
+          "date_of_birth": "1990-11-09T06:02:15.493Z"
+        },
+        "contact_details": {
+          "email": "zute@mailinator.com",
+          "phone": "+1 (722) 453-2046"
+        },
+        "employment_details": {
+          "occupation": "Pariatur Praesentiu",
+          "industry": "Aut non consequatur "
+        },
+        "residential_address": {
+          "address": "Laboriosam in et no",
+          "suburb": "In aute non rerum et",
+          "state": "Et autem fugiat aspe",
+          "postcode": "",
+          "country": "Afghanistan"
+        },
+        "mailing_address": {
+          "address": "Quia non non et quia",
+          "suburb": "Non rerum nihil dolo",
+          "state": "Corrupti cupiditate",
+          "postcode": "Incididunt a cupidit",
+          "country": "Afghanistan"
+        },
+        "identificationNo": "63221152"
+      }
+    },
+    "country": "Bangladesh",
+    "kycStatus": "in_review",
+    "kycNotes": "",
+    "consentToScreen": false,
+    "isActive": true,
+    "metadata": {
+      "invitedBy": "68fe059c08955a639e7dec57",
+      "client": "68fe059c08955a639e7dec59",
+      "branch": null,
+      "email": "aimunnaharr@gmail.com",
+      "phone": "01533045485"
+    },
+    "authorized": {
+      "documents_attested": false
+    },
+    "documents": [],
+    "kycHistory": [
+      {
+        "status": "in_review",
+        "note": "Personal KYC provided by invited user",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-10T08:36:11.882Z",
+        "_id": "6911a3fb8c9091231c1c477e",
+        "id": "6911a3fb8c9091231c1c477e"
+      },
+      {
+        "status": "in_review",
+        "note": "Personal KYC provided by invited user",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-11T08:42:20.776Z",
+        "_id": "6912f6ec976436d17921a5fb",
+        "id": "6912f6ec976436d17921a5fb"
+      },
+      {
+        "status": "in_review",
+        "note": "Personal KYC provided by invited user",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-12T06:09:43.401Z",
+        "_id": "691424a785eb463cf65c8462",
+        "id": "691424a785eb463cf65c8462"
+      },
+      {
+        "status": "pending",
+        "note": "Processed entity KYC input for type trust; missing: trustKyc",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-12T11:54:26.872Z",
+        "_id": "6914757262e72aa3c8c1a400",
+        "id": "6914757262e72aa3c8c1a400"
+      },
+      {
+        "status": "in_review",
+        "note": "Entity (company) KYC provided & representative personal KYC present",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-15T09:35:05.500Z",
+        "_id": "69184949fd4263baa2380c35",
+        "id": "69184949fd4263baa2380c35"
+      },
+      {
+        "status": "in_review",
+        "note": "Entity (trust) KYC provided & representative personal KYC present",
+        "changedBy": "691032f4db1513dc284b8301",
+        "changedAt": "2025-11-16T05:18:18.539Z",
+        "_id": "69195e9abf671db87fc48173",
+        "id": "69195e9abf671db87fc48173"
+      }
+    ],
+    "createdAt": "2025-11-09T06:02:15.493Z",
+    "updatedAt": "2025-12-09T15:27:07.184Z",
+    "__v": 7,
+    "uid": "CUS_1764054116162",
+    "isPep": false,
+    "sanction": false,
+    "isInviteActive": false,
+    "relationRisks": [
+      {
+        "client": {
+          "_id": "68fe70605a026bb521a8ae28",
+          "name": "Acme Financial Ltd"
+        },
+        "branch": null,
+        "type": "individual",
+        "registeredAt": "2025-11-09T06:02:15.470Z",
+        "onboardingChannel": null,
+        "source": "in-branch",
+        "riskAssessment": {
+          "customerType": {
+            "value": "individual",
+            "score": 20
+          },
+          "jurisdiction": {
+            "value": "Bangladesh",
+            "score": 30,
+            "band": "MRC"
+          },
+          "customerRetention": {
+            "value": "New",
+            "score": 30
+          },
+          "product": {
+            "value": "",
+            "score": 0
+          },
+          "channel": {
+            "value": "in-branch",
+            "score": 10
+          },
+          "occupation": {
+            "value": "Pariatur Praesentiu",
+            "score": 0
+          },
+          "industry": {
+            "value": "Aut non consequatur ",
+            "score": 0
+          }
+        },
+        "riskScore": 90,
+        "riskLabel": "Low"
+      },
+      {
+        "client": {
+          "_id": "68fe059c08955a639e7dec59",
+          "name": "test"
+        },
+        "branch": null,
+        "type": "individual",
+        "registeredAt": "2025-11-12T11:53:03.357Z",
+        "onboardingChannel": null,
+        "source": "in-branch",
+        "riskAssessment": {
+          "customerType": {
+            "value": "individual",
+            "score": 20
+          },
+          "jurisdiction": {
+            "value": "Bangladesh",
+            "score": 30,
+            "band": "MRC"
+          },
+          "customerRetention": {
+            "value": "New",
+            "score": 30
+          },
+          "product": {
+            "value": "",
+            "score": 0
+          },
+          "channel": {
+            "value": "in-branch",
+            "score": 10
+          },
+          "occupation": {
+            "value": "Pariatur Praesentiu",
+            "score": 0
+          },
+          "industry": {
+            "value": "Aut non consequatur ",
+            "score": 0
+          }
+        },
+        "riskScore": 90,
+        "riskLabel": "Low"
+      }
+    ],
+    "riskSummary": {
+      "maxScore": 90,
+      "averageScore": 90,
+      "highestLabel": "Low"
+    },
+    "riskAssessment": {
+      "customerType": {
+        "value": "individual",
+        "score": 20
+      },
+      "jurisdiction": {
+        "value": "Bangladesh",
+        "score": 30,
+        "band": "MRC"
+      },
+      "customerRetention": {
+        "value": "New",
+        "score": 30
+      },
+      "product": {
+        "value": "",
+        "score": 0
+      },
+      "channel": {
+        "value": "in-branch",
+        "score": 10
+      },
+      "occupation": {
+        "value": "Pariatur Praesentiu",
+        "score": 0
+      },
+      "industry": {
+        "value": "Aut non consequatur ",
+        "score": 0
+      }
+    },
+    "riskScore": 90,
+    "riskLabel": "Low",
+    "id": "69102e67db1513dc284b82f4"
+  },
+  "transaction": {
+    "investigation": {
+      "flagged": false
+    },
+    "_id": "69481f657f40d7c9e639564a",
+    "sequence": 1,
+    "client": "68fe70605a026bb521a8ae28",
+    "branch": null,
+    "type": "deposit",
+    "subtype": "wire",
+    "amount": 92,
+    "currency": "AUD",
+    "reference": "",
+    "narrative": "",
+    "status": "completed",
+    "channel": "Mobile App",
+    "sender": {
+      "id": "69292461fc63670e30fbb9b4",
+      "name": "ahmed khan",
+      "account": "Laborum qui aut ea f",
+      "institution": "Sed deserunt commodi",
+      "institutionCountry": "Voluptatum cumque li",
+      "bic": "Doloribus expedita s",
+      "address": "Et quia sint aut ex",
+      "extra": {
+        "customerRef": ""
+      }
+    },
+    "beneficiary": {
+      "name": "Ava Baker",
+      "account": "Id quia tempor quo",
+      "institution": "Eos eaque error nis",
+      "institutionCountry": "Ullam repellendus C",
+      "bic": "Dolor amet necessit",
+      "address": "Laboris lorem pariat"
+    },
+    "receiver": {
+      "id": "6929245dfc63670e30fbb9a7",
+      "name": "ahmed khan",
+      "account": "Et quae animi reici",
+      "institution": "Accusamus ea esse c",
+      "institutionCountry": "Quis non dolor quide",
+      "bic": "Et tempore aliquip",
+      "address": "Saepe eiusmod est d"
+    },
+    "purpose": "",
+    "remittancePurposeCode": "",
+    "crypto": {
+      "hops": 0
+    },
+    "riskScore": 0,
+    "riskFlags": [],
+    "relatedPartyTxnId": "",
+    "relatedPartyFlag": false,
+    "createdBy": "6906ef042b25d3502f3a6915",
+    "metadata": {
+      "ip": "203.0.113.5",
+      "deviceId": "device-abc-123",
+      "chain": "online"
+    },
+    "timestamp": "2025-12-21T16:25:09.679Z",
+    "createdAt": "2025-12-21T16:25:09.681Z",
+    "updatedAt": "2025-12-21T16:59:38.604Z",
+    "uid": "TXN_1766334309682",
+    "__v": 0,
+    "displayAmount": "92 AUD",
+    "id": "69481f657f40d7c9e639564a"
+  },
+  "note": "",
+  "docs": ""
+}

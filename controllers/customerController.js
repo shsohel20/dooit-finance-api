@@ -1255,11 +1255,9 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const userPayload = {
         name:
           body.name ||
-          `${
-            body.personalKyc?.personal_form?.customer_details?.given_name || ""
-          } ${
-            body.personalKyc?.personal_form?.customer_details?.surname || ""
-          }`.trim() ||
+          `${body.personalKyc?.personal_form?.customer_details?.given_name || ""
+            } ${body.personalKyc?.personal_form?.customer_details?.surname || ""
+            }`.trim() ||
           body.userName ||
           "Unnamed",
         userName: body.userName,
@@ -1290,17 +1288,17 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const relationCandidate =
         clientDoc || branchDoc
           ? {
-              client: clientDoc ? clientDoc._id : undefined,
-              branch: branchDoc ? branchDoc._id : undefined,
-              type: requestedType,
-              onboardingChannel: body.onboardingChannel || "API",
-              registeredAt: body.registeredAt
-                ? new Date(body.registeredAt)
-                : new Date(),
-              source: body.source || "api",
-              notes: body.notes || "",
-              active: true,
-            }
+            client: clientDoc ? clientDoc._id : undefined,
+            branch: branchDoc ? branchDoc._id : undefined,
+            type: requestedType,
+            onboardingChannel: body.onboardingChannel || "API",
+            registeredAt: body.registeredAt
+              ? new Date(body.registeredAt)
+              : new Date(),
+            source: body.source || "api",
+            notes: body.notes || "",
+            active: true,
+          }
           : null;
 
       // 4) Create or update Customer

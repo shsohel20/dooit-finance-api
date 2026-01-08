@@ -17,12 +17,29 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 
 const { protect, authorize } = require("../middleware/auth");
+const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
 // Protect all routes and allow only authorized roles (adjust as needed)
 
 router
-  .route("/", protect, authorize("admin", "client", "branch"))
-  .post(advancedResults(Customer, "user", filterCustomerSection), getCustomers)
-  .get(advancedResults(Customer, "user"), getCustomers);
+  .route("/")
+  .get(
+    protect,
+    authorize("admin", "client", "branch"),
+    advancedCustomerResultsQueryOnly({
+      populate: [
+        { path: "user", select: "name email userName photoUrl" },
+        { path: "relations.client", select: "name" },
+        { path: "relations.branch", select: "name" },
+      ],
+      searchFields: [
+        "user.name",
+        "user.email",
+        "personalKyc.personal_form.customer_details.given_name",
+        "personalKyc.personal_form.customer_details.surname",
+      ],
+    }),
+    getCustomers
+  );
 
 // protect: only client/admin can create invites
 router.post(
