@@ -34,7 +34,12 @@ const EcddReportSchema = new Schema(
       index: true,
       required: false,
     },
-    analyst: { type: Schema.Types.ObjectId, ref: "Users", required: false },
+    analyst: {
+      type: Schema.Types.ObjectId,
+      ref: "Users",
+      required: false,
+      default: null,
+    },
     generatedBy: { type: Schema.Types.ObjectId, ref: "Users", required: false },
     transaction: {
       type: Schema.Types.ObjectId,
