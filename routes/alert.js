@@ -15,9 +15,9 @@ const {
 const Alert = require("../models/Alert");
 const advancedResults = require("../middleware/advancedResults");
 
+const { protect, authorize } = require("../middleware/auth");
 const router = express.Router();
 
-const { protect, authorize } = require("../middleware/auth");
 
 // Protect all alert routes and allow only admin by default
 router.use(protect);

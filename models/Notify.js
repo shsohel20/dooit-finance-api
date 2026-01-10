@@ -3,7 +3,6 @@ const mongoose = require("mongoose");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
-
 const DocumentMetaSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -21,7 +20,8 @@ const NotifySchema = new Schema(
   {
     uid: { type: String, index: true, unique: true },
     sequence: { type: Number, index: true },
-
+    client: { type: Schema.Types.ObjectId, ref: "Client", index: true, default: null, },
+    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
     notifyFor: {
       type: String, // Transaction, ECDD, SMR, Customer, etc.
       index: true,
@@ -52,8 +52,8 @@ const NotifySchema = new Schema(
     // generic metadata - may include transactionId, smrId, ecddId, customerId etc.
     metadata: { type: Schema.Types.Mixed, default: {} },
 
-    createdBy: { type: Schema.Types.ObjectId, ref: "User", index: true },
-    updatedBy: { type: Schema.Types.ObjectId, ref: "User", index: true },
+    createdBy: { type: Schema.Types.ObjectId, ref: "Users", index: true },
+    updatedBy: { type: Schema.Types.ObjectId, ref: "Users", index: true },
   },
   {
     timestamps: true,

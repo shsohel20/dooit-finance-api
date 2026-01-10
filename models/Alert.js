@@ -42,7 +42,12 @@ const AlertSchema = new Schema(
     transaction: {
       type: mongoose.Schema.ObjectId,
       ref: "Transaction",
+      default: null
     },
+
+    client: { type: Schema.Types.ObjectId, ref: "Client", index: true, default: null, },
+    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
+
     caseType: String,
 
     riskScore: Number,

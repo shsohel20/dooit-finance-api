@@ -3,6 +3,10 @@ const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Notify = require("../models/Notify");
+const { default: axios } = require("axios");
+const Alert = require("../models/Alert");
+const reportAPI_risk = process.env.REPORT_AI_API_RISK;
+const reportAPI_eccd = process.env.REPORT_AI_API_ECCD;
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -61,38 +65,105 @@ exports.getNotifyByUid = asyncHandler(async (req, res, next) => {
 
 // CREATE
 exports.createNotify = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   const body = req.body || {};
-  const required = ["notifyFor", "notes"];
-  for (const k of required)
-    if (!body[k]) return next(new ErrorResponse(`${k} is required`, 400));
 
-  // optional: validate resourceId if provided
-  if (body.resourceId && !isValidId(body.resourceId))
+  const required = ["notifyFor", "notes"];
+  for (const k of required) {
+    if (!body[k]) return next(new ErrorResponse(`${k} is required`, 400));
+  }
+
+  // validate resourceId if provided
+  if (body.resourceId && !isValidId(body.resourceId)) {
     return next(new ErrorResponse("Invalid resourceId", 400));
+  }
 
   const notify = await Notify.create({
+    client,
+    branch,
     notifyFor: body.notifyFor,
     notes: body.notes,
     resourceType: body.resourceType,
     resourceId: body.resourceId,
-    documents: body.documents || [],
+    documents: Array.isArray(body.documents) ? body.documents : [],
     isActive: true,
     metadata: body.metadata || {},
     createdBy: req.user?.id || null,
   });
 
-  // initial workflow history in metadata
-  notify.metadata = notify.metadata || {};
+  // workflow history
   notify.metadata.workflowHistory = notify.metadata.workflowHistory || [];
   notify.metadata.workflowHistory.push({
     timestamp: new Date(),
-    user: req.user?.id,
+    user: req.user?.id || null,
     action: "created",
     notes: body.metadata?.notes || "Created via API",
   });
+
   await notify.save();
 
-  res.status(201).json({ succeed: true, data: notify, id: notify._id });
+  void (async () => {
+    try {
+      const notifyPopulateObject = await Notify.findById(notify._id).populate('createdBy updatedBy resourceId');
+      const reportApiEndPoint = `${reportAPI_risk}/risk/alert`;
+      const doc = Array.isArray(notifyPopulateObject.documents) ? notifyPopulateObject.documents[0] ?? null : null
+      let payload = {
+        customer: {},
+        transaction: {},
+        notes: body.notes ?? "",
+        docs: doc?.url ?? '',
+      };
+      if (notifyPopulateObject.resourceType === "Transaction") payload.transaction = notifyPopulateObject.resourceId;
+      else payload.customer = notifyPopulateObject.resourceId;
+
+      // console.log(payload)
+
+      const response = await axios.post(reportApiEndPoint, payload, { timeout: 10000 });
+      const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
+      const { caseType, riskScore, riskLabel } = data;
+
+      const alertPayload = {
+        customerId: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
+        analyst: null,
+        transaction: notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null,
+        caseType: caseType || "Fraud",
+        riskScore: riskScore ?? 0,
+        riskLabel: riskLabel || "Unknown",
+        activity: [{ title: "Initial Review", details: "Reviewed the transaction for possible fraud" }],
+        activityNote: [{ note: "Customer contacted for verification" }],
+        status: "Active",
+        settings: { priority: "urgent" },
+        metadata: { ...payload, source: "system" },
+      };
+
+      const alert = await Alert.create(alertPayload);
+      const alertPopulate = await Alert.findById(alert._id)
+        .populate("customer")
+        .populate("analyst")
+        .populate("transaction");
+      const reportApiEndPointForEcdd = `${reportAPI_eccd}/ecdd_report_v2`;
+      const ecddPayload = {
+        alert: alertPopulate
+      }
+      await axios.post(reportApiEndPointForEcdd, ecddPayload, { timeout: 10000 });
+
+    } catch (err) {
+      if (err.code === 'ECONNREFUSED') {
+        console.error('Risk API is unreachable:');
+      } else if (err.response) {
+        console.error('Risk API error response:', err.response.data);
+      } else {
+        console.error('Unexpected background error:', err.message);
+      }
+    }
+  })();
+  res.status(201).json({
+    succeed: true,
+    data: notify,
+    // alert,
+    id: notify._id,
+  });
 });
 
 // CREATE DUMMY

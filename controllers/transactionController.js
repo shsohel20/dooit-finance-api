@@ -117,6 +117,9 @@ exports.getTransaction = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/transaction
 // @access Public
 exports.getTransactions = asyncHandler(async (req, res, next) => {
+
+  // console.log(req?.user?.client?._id || null)
+  // console.log(req?.user?.branch?._id || null)
   /*
   #swagger.tags = ['Transactions']
   #swagger.summary = 'Get All Transactions'
@@ -358,17 +361,17 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   // Build senderWithId (attach the found customer id for the primary customer)
   const senderWithId = sender
     ? {
-        ...sender,
-        id: customerDoc._id,
-      }
+      ...sender,
+      id: customerDoc._id,
+    }
     : undefined;
 
   // Build receiverWithId (if receiver exists and we found a customer)
   const receiverWithId = receiver
     ? {
-        ...receiver,
-        id: customerReceiverDoc ? customerReceiverDoc._id : undefined,
-      }
+      ...receiver,
+      id: customerReceiverDoc ? customerReceiverDoc._id : undefined,
+    }
     : undefined;
 
   // Determine which Customer._id should be set on transaction.customer based on type

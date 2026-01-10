@@ -18,13 +18,15 @@ exports.filterAlertSection = (doc, requestBody, req) => {
 // @route  GET /api/v1/alerts
 // @access Public
 exports.getAlerts = asyncHandler(async (req, res, next) => {
+  console.log(req?.user?.client?._id || null)
+  console.log(req?.user?.branch?._id || null)
   /*
   #swagger.tags = ['Alert']
   #swagger.summary = 'Get All Alerts'
   #swagger.responses[200] = { description: 'Success' }
   #swagger.responses[400] = { description: 'Bad Request' }
   #swagger.responses[401] = { description: 'Unauthorized' }
-*/
+  */
   res.status(200).json(res.advancedResults);
 });
 
@@ -48,6 +50,9 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     #swagger.summary = 'Create Alert'
     #swagger.security = [{ "BearerAuth": [] }]
   */
+
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   const {
     customerId,
     analystId,
@@ -79,6 +84,8 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     );
 
   const alert = await Alert.create({
+    client,
+    branch,
     customer: customer?._id,
     analyst: null,
     transaction: transaction?._id,
