@@ -33,6 +33,7 @@ const EcddReportSchema = new Schema(
       ref: "Customer",
       index: true,
       required: false,
+      default: null,
     },
     analyst: {
       type: Schema.Types.ObjectId,

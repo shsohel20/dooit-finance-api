@@ -1,4 +1,5 @@
 // controllers/ecddReport.js
+const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const Alert = require("../models/Alert");
 const EcddReport = require("../models/EcddReport");
@@ -167,14 +168,10 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
 // @route  POST /api/v1/ecdd
 // @access Private (require authentication in routes)
 exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
-  // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
-  const { caseNumber } = payload;
+  const { caseNumber, generatedBy, analyst, transaction, customer, client, branch } = payload;
 
-  const existing = await EcddReport.findOne({
-    caseNumber: caseNumber,
-  });
-
+  const existing = await EcddReport.findOne({ caseNumber });
   if (existing) {
     return next(
       new ErrorResponse(
@@ -185,7 +182,6 @@ exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
   }
 
   const alert = await Alert.findOne({ uid: caseNumber });
-
   if (!alert) {
     return next(
       new ErrorResponse(
@@ -194,10 +190,30 @@ exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
       )
     );
   }
+
   const submitObj = {
     ...payload,
-    caseId: alert?._id || null,
+    caseId: alert._id,
+    client: client
+      ? mongoose.Types.ObjectId.createFromHexString(client)
+      : null,
+    branch: branch
+      ? mongoose.Types.ObjectId.createFromHexString(branch)
+      : null,
+    customer: customer
+      ? mongoose.Types.ObjectId.createFromHexString(customer)
+      : null,
+    transaction: transaction
+      ? mongoose.Types.ObjectId.createFromHexString(transaction)
+      : null,
+    analyst: analyst
+      ? mongoose.Types.ObjectId.createFromHexString(analyst)
+      : null,
+    generatedBy: generatedBy
+      ? mongoose.Types.ObjectId.createFromHexString(generatedBy)
+      : null,
   };
+
   const report = await EcddReport.create(submitObj);
 
   res.status(201).json({
