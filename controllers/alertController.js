@@ -53,6 +53,8 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
 
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
+  const user = req?.user?._id || null;
+
   const {
     customerId,
     analystId,
@@ -96,6 +98,7 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     activityNote,
     settings,
     metadata,
+    createdBy: user,
     status,
   });
 

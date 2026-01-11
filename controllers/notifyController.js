@@ -124,8 +124,10 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
       const { caseType, riskScore, riskLabel } = data;
 
       const alertPayload = {
+        client,
+        branch,
         customerId: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
-        analyst: null,
+        analyst: req.user?.id || null,
         transaction: notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null,
         caseType: caseType || "Fraud",
         riskScore: riskScore ?? 0,
@@ -133,6 +135,7 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
         activity: [{ title: "Initial Review", details: "Reviewed the transaction for possible fraud" }],
         activityNote: [{ note: "Customer contacted for verification" }],
         status: "Active",
+        createdBy: req.user?.id || null,
         settings: { priority: "urgent" },
         metadata: { ...payload, source: "system" },
       };

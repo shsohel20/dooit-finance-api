@@ -61,7 +61,7 @@ const AlertSchema = new Schema(
       enum: ["Pending", "Active", "Inactive", "Blocked"],
       default: "Pending",
     },
-
+    createdBy: { type: Schema.Types.ObjectId, ref: "Users", index: true, default: null },
     // flexible fields
     settings: { type: Schema.Types.Mixed, default: {} },
     metadata: { type: Schema.Types.Mixed, default: {} },

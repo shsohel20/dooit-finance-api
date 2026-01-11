@@ -122,6 +122,7 @@ exports.getEcddReports = asyncHandler(async (req, res, next) => {
 exports.createEcddReport = asyncHandler(async (req, res, next) => {
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
+  const user = req?.user?._id || null;
 
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
@@ -155,6 +156,7 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
     client,
     branch,
     caseId: alert?._id || null,
+    generatedBy: user || null,
   };
   const report = await EcddReport.create(submitObj);
 
@@ -169,7 +171,10 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
 // @access Private (require authentication in routes)
 exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
   const payload = req.body || {};
+
   const { caseNumber, generatedBy, analyst, transaction, customer, client, branch } = payload;
+
+
 
   const existing = await EcddReport.findOne({ caseNumber });
   if (existing) {
@@ -194,24 +199,13 @@ exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
   const submitObj = {
     ...payload,
     caseId: alert._id,
-    client: client
-      ? mongoose.Types.ObjectId.createFromHexString(client)
-      : null,
-    branch: branch
-      ? mongoose.Types.ObjectId.createFromHexString(branch)
-      : null,
-    customer: customer
-      ? mongoose.Types.ObjectId.createFromHexString(customer)
-      : null,
-    transaction: transaction
-      ? mongoose.Types.ObjectId.createFromHexString(transaction)
-      : null,
-    analyst: analyst
-      ? mongoose.Types.ObjectId.createFromHexString(analyst)
-      : null,
-    generatedBy: generatedBy
-      ? mongoose.Types.ObjectId.createFromHexString(generatedBy)
-      : null,
+    client: alert?.client ?? null,
+    branch: alert?.branch ?? null,
+    analyst: alert?.analyst ?? null,
+    customer: alert?.customer ?? null,
+    transaction: alert?.transaction ?? null,
+    generatedBy: alert?.createdBy || null
+
   };
 
   const report = await EcddReport.create(submitObj);
