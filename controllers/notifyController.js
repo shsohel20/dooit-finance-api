@@ -5,6 +5,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const Notify = require("../models/Notify");
 const { default: axios } = require("axios");
 const Alert = require("../models/Alert");
+const Transaction = require("../models/Transaction");
 const reportAPI_risk = process.env.REPORT_AI_API_RISK;
 const reportAPI_eccd = process.env.REPORT_AI_API_ECCD;
 
@@ -114,8 +115,11 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
         notes: body.notes ?? "",
         docs: doc?.url ?? '',
       };
+
+      // console.log("notifyPopulateObject", notifyPopulateObject)
       if (notifyPopulateObject.resourceType === "Transaction") payload.transaction = notifyPopulateObject.resourceId;
       else payload.customer = notifyPopulateObject.resourceId;
+      // console.log("payload", payload)
 
       // console.log(payload)
 
@@ -123,14 +127,31 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
       const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
       const { caseType, riskScore, riskLabel } = data;
 
+      // console.log("data", data)
+
+      const transaction = notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null;
+
+      let transactionRadom = null
+
+      if (!transaction) {
+        const customerId = payload.customer?._id
+
+        const count = await Transaction.countDocuments({ customer: customerId });
+
+        const random = Math.floor(Math.random() * count);
+
+        transactionRadom = await Transaction.findOne({ customer: customerId })
+          .skip(random)
+          .lean();
+      }
       const alertPayload = {
         client,
         branch,
         customer: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
         analyst: req.user?.id || null,
-        transaction: notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null,
+        transaction: transaction || transactionRadom,
         caseType: caseType || "Fraud",
-        riskScore: riskScore ?? 0,
+        riskScore: riskScore || 0,
         riskLabel: riskLabel || "Unknown",
         activity: [{ title: "Initial Review", details: "Reviewed the transaction for possible fraud" }],
         activityNote: [{ note: "Customer contacted for verification" }],
@@ -144,13 +165,25 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
       const alertPopulate = await Alert.findById(alert._id)
         .populate("customer")
         .populate("analyst")
-        .populate("transaction");
+        .populate("transaction").lean();
       const reportApiEndPointForEcdd = `${reportAPI_eccd}/ecdd_report_v2`;
-      const ecddPayload = {
-        alert: alertPopulate
-      }
-      await axios.post(reportApiEndPointForEcdd, ecddPayload, { timeout: 10000 });
 
+
+
+
+
+      const ecddPayload = {
+        alert: {
+          ...alertPopulate,
+          transaction: transactionRadom
+        }
+      }
+
+      // console.log("ecddPayload", ecddPayload)
+      const eccdResponse = await axios.post(reportApiEndPointForEcdd, ecddPayload, { timeout: 100000 });
+      const dataeccdResponse = typeof eccdResponse.data === "string" ? JSON.parse(eccdResponse.data) : eccdResponse.data || {};
+
+      // console.log("dataeccdResponse", dataeccdResponse)
     } catch (err) {
       if (err.code === 'ECONNREFUSED') {
         console.error('Risk API is unreachable:');
