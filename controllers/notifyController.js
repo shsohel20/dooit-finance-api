@@ -126,7 +126,7 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
       const alertPayload = {
         client,
         branch,
-        customerId: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
+        customer: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
         analyst: req.user?.id || null,
         transaction: notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null,
         caseType: caseType || "Fraud",
