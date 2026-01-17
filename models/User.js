@@ -143,6 +143,25 @@ UserSchema.pre("save", async function (next) {
 });
 
 ///SIgn Jwt and Return
+// UserSchema.methods.getSignedJwtToken = function () {
+//   return jwt.sign(
+//     {
+//       id: this._id,
+//       email: this.email,
+//       userType: this.userType,
+//       name: this.name,
+//       role: this.role,
+//       photoUrl: this.photoUrl,
+//       isActive: this.isActive,
+//     },
+//     process.env.JWT_SECRET,
+//     {
+//       expiresIn: process.env.JWT_EXPIRE,
+//     }
+//   );
+// };
+
+
 UserSchema.methods.getSignedJwtToken = function () {
   return jwt.sign(
     {
@@ -153,13 +172,14 @@ UserSchema.methods.getSignedJwtToken = function () {
       role: this.role,
       photoUrl: this.photoUrl,
       isActive: this.isActive,
+      clientType: this.branch?.client?.clientType ?? this.client?.clientType,
+      isClient: this.client ? true : false,
     },
     process.env.JWT_SECRET,
-    {
-      expiresIn: process.env.JWT_EXPIRE,
-    }
+    { expiresIn: process.env.JWT_EXPIRE }
   );
 };
+
 
 // UserSchema.index({ email: 1 });
 // UserSchema.index({ phone: 1 });

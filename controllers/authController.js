@@ -101,7 +101,22 @@ exports.register = asyncHandler(async (req, res, next) => {
     userName,
     // resetPasswordToken,
     // resetPasswordExpire,
-  });
+  }).populate([
+    {
+      path: "client", // virtual on User
+      // select: "name _id",
+    },
+    {
+      path: "customer", // virtual on User
+      // select: "name _id",
+    },
+    {
+      path: "branch", // virtual on User
+      // select: "name _id",
+      populate: { path: "client" },
+    },
+  ])
+    .lean()
 
   const code = Math.floor(100000 + Math.random() * 900000);
 
@@ -179,7 +194,21 @@ exports.login = asyncHandler(async (req, res, next) => {
   }
 
   //Check User
-  const user = await User.findOne({ email }).select("+password");
+  const user = await User.findOne({ email }).select("+password").populate([
+    {
+      path: "client", // virtual on User
+      // select: "name _id",
+    },
+    {
+      path: "customer", // virtual on User
+      // select: "name _id",
+    },
+    {
+      path: "branch", // virtual on User
+      // select: "name _id",
+      populate: { path: "client" },
+    },
+  ]);
 
   if (!user) {
     return next(new ErrorResponse("Invalid Credential.", 401));
