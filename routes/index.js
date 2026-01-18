@@ -25,6 +25,7 @@ const rfi = require("./rfi");
 const notify = require("./notify");
 const leads = require("./leads");
 const clientRule = require("./clientRules");
+const policyHub = require("./policyHub");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -49,5 +50,6 @@ router.use("/ttr-report", ttrReport);
 router.use("/report-notify", notify);
 router.use("/email", leads);
 router.use("/client-rule", clientRule);
+router.use("/policy-hub", policyHub);
 
 module.exports = router;
