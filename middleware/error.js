@@ -1,32 +1,47 @@
-const ErrorResponse = require('../utils/errorResponse');
+const ErrorResponse = require("../utils/errorResponse");
+const sendErrorResponse = require("../utils/sendErrorResponse");
 
 const errorHandler = (err, req, res, next) => {
-  let error = { ...err };
-  error.message = err.message;
-  console.log('err', JSON.stringify(err, null, 2));
+  let error = err;
 
-  ///Mongoose bad Object Id
-  if (err.name === 'CastError') {
-    const message = `The Entry not found with id of ${err.value}`;
-    error = new ErrorResponse(message, 404);
+  console.error("err", err);
+
+  // Invalid ObjectId
+  if (err.name === "CastError") {
+    error = new ErrorResponse(
+      `Resource not found with id of ${err.value}`,
+      404
+    );
   }
-  ///Mongoose Duplicate key
+
+  // Duplicate key (MongoDB + Mongoose)
   if (err.code === 11000) {
-    const message = `The (${Object.getOwnPropertyNames(
-      err.keyValue
-    )}) value duplicate entreated`;
-    error = new ErrorResponse(message, 400);
+    let fields = "unknown field";
+
+    if (err.keyValue) {
+      fields = Object.keys(err.keyValue).join(", ");
+    } else if (err.errorResponse?.errmsg) {
+      const match = err.errorResponse.errmsg.match(/Index '(.+?)'/);
+      if (match) {
+        fields = match[1].replace("_1", "");
+      }
+    }
+
+    error = new ErrorResponse(
+      `Duplicate value for field(s): ${fields}`,
+      409
+    );
   }
-  ///Mongoose Validation Errors
-  if (err.name === 'ValidationError') {
-    const message = Object.values(err.errors).map((val) => val.message);
+
+  // Validation error
+  if (err.name === "ValidationError" && err.errors) {
+    const message = Object.values(err.errors)
+      .map((val) => val.message)
+      .join(", ");
     error = new ErrorResponse(message, 400);
   }
 
-  res.status(error.statusCode || 500).json({
-    success: false,
-    error: error.message || 'Sever Error',
-  });
+  return sendErrorResponse(error, res);
 };
 
 module.exports = errorHandler;

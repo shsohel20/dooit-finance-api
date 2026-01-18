@@ -92,7 +92,6 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
     autoCreateUserForBranch = false, // optional flag
   } = req.body;
 
-  console.log({ client });
   if (!client) {
     return next(
       new ErrorResponse("Un Authorized Person , please check login info", 500)
@@ -175,13 +174,13 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
     id: branch._id,
     ...(createdUser
       ? {
-          branchUser: {
-            id: createdUser._id,
-            userName: createdUser.userName,
-            email: createdUser.email,
-            password: initialPassword,
-          },
-        }
+        branchUser: {
+          id: createdUser._id,
+          userName: createdUser.userName,
+          email: createdUser.email,
+          password: initialPassword,
+        },
+      }
       : {}),
   });
 });
@@ -305,13 +304,13 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
     id: branch._id,
     ...(createdUser
       ? {
-          branchUser: {
-            id: createdUser._id,
-            userName: createdUser.userName,
-            email: createdUser.email,
-            password: initialPassword,
-          },
-        }
+        branchUser: {
+          id: createdUser._id,
+          userName: createdUser.userName,
+          email: createdUser.email,
+          password: initialPassword,
+        },
+      }
       : {}),
   });
 });

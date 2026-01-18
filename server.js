@@ -69,12 +69,14 @@ app.use(helmet());
 app.use(hpp());
 ///Mount File Upload Route
 app.use("/api/v1", routes);
-///Handle Error
-app.use(errorHandler);
+
 
 //SwaggerUI Docs
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
+
+///Handle Error
+app.use(errorHandler);
 ///Server Port
 const PORT = process.env.PORT || 5000;
 
