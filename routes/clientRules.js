@@ -18,20 +18,19 @@ const router = express.Router();
 
 // Protect all routes
 router.use(protect);
-router.use(authorize("admin"));
-
-// List rules
-router
-    .route("/")
-    .post(
-        advancedResults(
-            ClientRule,
-            ["client", "branch"],
-            filterClientRuleSection
-        ),
-        getClientRulesPost
-    )
-    .get(advancedResults(ClientRule, ["client", "branch"]), getClientRules);
+authorize("admin", "branch"),
+    // List rules
+    router
+        .route("/")
+        .post(
+            advancedResults(
+                ClientRule,
+                ["client", "branch"],
+                filterClientRuleSection
+            ),
+            getClientRulesPost
+        )
+        .get(advancedResults(ClientRule, ["client", "branch"]), getClientRules);
 
 // Create rule
 router.route("/new").post(createClientRule);
