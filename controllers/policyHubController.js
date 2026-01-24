@@ -89,7 +89,7 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
             ...req.body,
             ...data
         },
-        isActive,
+        isActive: true,
     });
 
     res.status(201).json({ success: true, data: policyHub });
