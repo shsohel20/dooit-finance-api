@@ -3,7 +3,7 @@ const asyncHandler = require("../middleware/async");
 const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
 const htmlPdf = require("html-pdf");
-
+import fs from "fs/promises";
 /**
  * Filter helper for POST search
  */
@@ -75,15 +75,16 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
     const response = await axios.post(policyAiEndPoint, payload, { timeout: 10000 });
     const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
-
+    const filePath = data?.file_path;
     console.log(data);
 
     // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
-
+    const content = await fs.readFile(filePath, "utf8");
     const policyHub = await PolicyHub.create({
         client,
         branch,
-        docs: "",
+        docs: content,
+        filePath: filePath,
         generatedBy: req.user?._id,
         metadata: {
             ...req.body,
