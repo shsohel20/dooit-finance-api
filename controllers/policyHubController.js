@@ -3,7 +3,7 @@ const asyncHandler = require("../middleware/async");
 const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
 const htmlPdf = require("html-pdf");
-import fs from "fs/promises";
+const fs = require("fs/promises");
 /**
  * Filter helper for POST search
  */
