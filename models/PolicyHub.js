@@ -22,12 +22,12 @@ const PolicyHubSchema = new Schema(
         },
         docs: {
             type: String,
-            required: true,
+            // required: true,
             default: "", //rich Text
         },
         filePath: {
             type: String,
-            required: true,
+            // required: true,
             default: "", //rich Text
         },
         generatedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
