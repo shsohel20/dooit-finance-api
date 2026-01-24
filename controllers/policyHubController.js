@@ -1,3 +1,4 @@
+const { default: axios } = require("axios");
 const asyncHandler = require("../middleware/async");
 const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
@@ -68,9 +69,11 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
 
 
     }
-
+    const payload = {
+        ...req.body
+    }
     const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
-    const response = await axios.post(reportApiEndPoint, payload, { timeout: 10000 });
+    const response = await axios.post(policyAiEndPoint, payload, { timeout: 10000 });
     const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
 
     console.log(data);
