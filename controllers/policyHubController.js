@@ -51,6 +51,46 @@ exports.createPolicyHub = asyncHandler(async (req, res, next) => {
 
     res.status(201).json({ success: true, data: policyHub });
 });
+// @desc    Create policy hub
+// @route   POST /api/v1/policy-hub/generate
+// @access  Private (Admin)
+exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
+
+    const policyAMLApi = process.env.REPORT_AI_API_AML;
+
+    const client = req?.user?.client?._id || null;
+    const branch = req?.user?.branch?._id || null;
+
+
+
+    if (!client) {
+        return next(new ErrorResponse("Unauthorized client", 401));
+
+
+    }
+
+    const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
+    const response = await axios.post(reportApiEndPoint, payload, { timeout: 10000 });
+    const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
+
+    console.log(data);
+
+    // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
+
+    const policyHub = await PolicyHub.create({
+        client,
+        branch,
+        docs: "",
+        generatedBy,
+        metadata: {
+            ...req.body,
+            ...data
+        },
+        isActive,
+    });
+
+    res.status(201).json({ success: true, data: policyHub });
+});
 
 // @desc    Get single policy hub
 // @route   GET /api/v1/policy-hub/:id

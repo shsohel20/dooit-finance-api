@@ -8,6 +8,7 @@ const {
     deletePolicyHub,
     filterPolicyHubSection,
     downloadPolicyHubPDF,
+    generatePolicyHub,
 } = require("../controllers/policyHubController");
 
 const PolicyHub = require("../models/PolicyHub");
@@ -31,6 +32,7 @@ router
 
 // Create PolicyHub
 router.route("/new").post(createPolicyHub);
+router.route("/generate").post(generatePolicyHub);
 
 // CRUD by ID
 router

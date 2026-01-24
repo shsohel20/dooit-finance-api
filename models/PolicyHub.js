@@ -25,6 +25,11 @@ const PolicyHubSchema = new Schema(
             required: true,
             default: "", //rich Text
         },
+        filePath: {
+            type: String,
+            required: true,
+            default: "", //rich Text
+        },
         generatedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
 
         metadata: { type: Schema.Types.Mixed, default: {} }, // createdBy, assignedTo, etc.
