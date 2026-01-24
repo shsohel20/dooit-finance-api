@@ -75,8 +75,19 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
     const response = await axios.post(policyAiEndPoint, payload, { timeout: 10000 });
     const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
-    const filePath = data?.file_path;
+    let filePath = data?.file_path;
+
+    // Replace root path with safer relative path
+    filePath = filePath.replace(
+        "/root/strikeo/strikeo-afc-ai/afc-document-generation/app/output",
+        "/app/output"
+    );
     console.log(data);
+
+    //PathReplacing
+    ///root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
+    //app/outpu instead of /root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
+
 
     // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
     const content = await fs.readFile(filePath, "utf8");
