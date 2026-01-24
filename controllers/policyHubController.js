@@ -84,7 +84,7 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
         client,
         branch,
         docs: "",
-        generatedBy,
+        generatedBy: req.user?._id,
         metadata: {
             ...req.body,
             ...data
