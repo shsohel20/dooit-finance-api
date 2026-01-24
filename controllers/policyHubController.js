@@ -4,6 +4,8 @@ const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
 const htmlPdf = require("html-pdf");
 const fs = require("fs/promises");
+const { marked } = require("marked");
+
 /**
  * Filter helper for POST search
  */
@@ -87,14 +89,18 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     //PathReplacing
     ///root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
     //app/outpu instead of /root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
+    // 📄 Read Markdown file
+    const markdownContent = await fs.readFile(filePath, "utf8");
 
+    // 🔥 Convert Markdown → HTML (string)
+    const htmlContent = marked.parse(markdownContent);
 
     // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
-    const content = await fs.readFile(filePath, "utf8");
+    // const content = await fs.readFile(filePath, "utf8");
     const policyHub = await PolicyHub.create({
         client,
         branch,
-        docs: content,
+        docs: htmlContent,
         filePath: filePath,
         generatedBy: req.user?._id,
         metadata: {

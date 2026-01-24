@@ -33,6 +33,7 @@
     "json2csv": "^6.0.0-alpha.2",
     "jsonwebtoken": "^9.0.2",
     "luxon": "^3.7.2",
+    "marked": "^17.0.1",
     "mongoose": "^8.18.1",
     "mongoose-autopopulate": "^1.2.1",
     "mongoose-paginate-v2": "^1.9.1",
