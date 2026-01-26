@@ -117,7 +117,7 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
 // @route   GET /api/v1/policy-hub/:id
 // @access  Private (Admin)
 exports.getPolicyHub = asyncHandler(async (req, res, next) => {
-    const policyHub = await policyHub.findById(req.params.id)
+    const policyHub = await PolicyHub.findById(req.params.id)
         .populate("client", "name")
         .populate("branch", "name")
         .populate("generatedBy", "name email");
