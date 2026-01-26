@@ -7,11 +7,8 @@ const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
 
-const { JSDOM } = require("jsdom");
-const createDOMPurify = require("dompurify");
+const sanitizeHtml = require("sanitize-html");
 
-const window = new JSDOM("").window;
-const DOMPurify = createDOMPurify(window);
 /**
  * Filter helper for POST search
  */
@@ -110,7 +107,15 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     const markdownContent = await fs.readFile(filePath, "utf8");
     const unsafeHtml = marked.parse(markdownContent);
     // 🔥 Convert Markdown → HTML (string)
-    const htmlContent = DOMPurify.sanitize(unsafeHtml);
+    const htmlContent = sanitizeHtml(unsafeHtml, {
+        allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+            "h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td"
+        ]),
+        allowedAttributes: {
+            a: ["href", "name", "target"],
+            img: ["src", "alt", "width", "height"],
+        },
+    });
 
     // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
     // const content = await fs.readFile(filePath, "utf8");
