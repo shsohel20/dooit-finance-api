@@ -38,12 +38,17 @@ router
 router.route("/new").post(createPolicyHub);
 router.route("/generate").post(generatePolicyHub);
 
-const json2mb = express.json({ limit: "5mb" });
-// CRUD by ID
+// const json2mb = [
+//     express.json({ limit: "25mb" }),
+//     express.urlencoded({ extended: true, limit: "25mb" }),
+// ];
+const json50mb = express.json({ limit: "50mb" });
+
 router
     .route("/:id")
+    .all(json50mb) // applies 50MB limit to all methods
     .get(getPolicyHub)
-    .put(json2mb, updatePolicyHub)
+    .put(updatePolicyHub)
     .delete(deletePolicyHub);
 
 router.route("/:id/download").get(downloadPolicyHubPDF);

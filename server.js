@@ -30,8 +30,8 @@ const { CLOUDINARY_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } =
 connectDB();
 // mysqlConnect();
 const app = express();
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
+// app.use(bodyParser.urlencoded({ extended: true }));
+// app.use(bodyParser.json());
 app.use(cookieParser());
 //using cors
 app.use(
@@ -41,7 +41,8 @@ app.use(
   })
 );
 
-app.use(express.json());
+// app.use(express.json({ limit: "200kb" }));
+app.use(express.urlencoded({ extended: true }));
 // app.use(mongoSanitize());
 
 ///Middle Run when Development State
