@@ -6,6 +6,12 @@ const htmlPdf = require("html-pdf");
 const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
+
+const { JSDOM } = require("jsdom");
+const createDOMPurify = require("dompurify");
+
+const window = new JSDOM("").window;
+const DOMPurify = createDOMPurify(window);
 /**
  * Filter helper for POST search
  */
@@ -102,9 +108,9 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     //app/outpu instead of /root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
     // 📄 Read Markdown file
     const markdownContent = await fs.readFile(filePath, "utf8");
-
+    const unsafeHtml = marked.parse(markdownContent);
     // 🔥 Convert Markdown → HTML (string)
-    const htmlContent = marked.parse(markdownContent);
+    const htmlContent = DOMPurify.sanitize(unsafeHtml);
 
     // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
     // const content = await fs.readFile(filePath, "utf8");
