@@ -4,3 +4,4 @@ _data/
 tmp/
 
 public/uploads/*
+*.env

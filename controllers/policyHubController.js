@@ -5,7 +5,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const htmlPdf = require("html-pdf");
 const fs = require("fs/promises");
 const { marked } = require("marked");
-
+const Diff = require("diff");
 /**
  * Filter helper for POST search
  */
@@ -50,6 +50,17 @@ exports.createPolicyHub = asyncHandler(async (req, res, next) => {
         generatedBy,
         metadata,
         isActive,
+        versionNumber: 1,
+        versions: [
+            {
+                versionNumber: 1,
+                docs,
+                metadata,
+                isActive,
+                editedBy: generatedBy,
+                editReason: "initial-create",
+            },
+        ],
     });
 
     res.status(201).json({ success: true, data: policyHub });
@@ -101,13 +112,29 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
         client,
         branch,
         docs: htmlContent,
-        filePath: filePath,
+        filePath,
         generatedBy: req.user?._id,
         metadata: {
+            source: "ai",
+            model: data?.model || "unknown",
+            promptVersion: "v1",
+            requestedBy: req.user?._id,
+            generatedAt: new Date(),
             ...req.body,
-            ...data
+            ...data,
         },
         isActive: true,
+        versionNumber: 1,
+        versions: [
+            {
+                versionNumber: 1,
+                docs: htmlContent,
+                filePath,
+                metadata: data,
+                editedBy: req.user?._id,
+                editReason: "ai-generation",
+            },
+        ],
     });
 
     res.status(201).json({ success: true, data: policyHub });
@@ -223,6 +250,31 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({ success: true, data: policyHub });
 });
+
+
+
+exports.diffPolicyHubVersions = asyncHandler(async (req, res, next) => {
+    const { id } = req.params;
+    const { v1, v2 } = req.query; // pass ?v1=1&v2=3
+
+    const policyHub = await PolicyHub.findById(id).select("versions docs versionNumber");
+    if (!policyHub) return next(new ErrorResponse("Not found id", 404));
+
+    const getVersionContent = (num) => {
+        if (String(num) === String(policyHub.versionNumber)) return policyHub.docs;
+        const v = policyHub.versions.find(pv => String(pv.versionNumber) === String(num));
+        return v ? v.docs : null;
+    };
+
+    const left = getVersionContent(v1);
+    const right = getVersionContent(v2);
+    if (left === null || right === null) return next(new ErrorResponse("One or both versions not found", 404));
+
+    const diff = Diff.createPatch("docs", left, right);
+    res.status(200).json({ success: true, data: { patch: diff } });
+});
+
+
 
 
 // @desc    Delete policy hub

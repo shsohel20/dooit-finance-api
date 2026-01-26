@@ -12,6 +12,7 @@ const {
     listPolicyHubVersions,
     getPolicyHubVersion,
     restorePolicyHubVersion,
+    diffPolicyHubVersions,
 } = require("../controllers/policyHubController");
 
 const PolicyHub = require("../models/PolicyHub");
@@ -51,5 +52,9 @@ router.route("/:id/download").get(downloadPolicyHubPDF);
 router.route("/:id/versions").get(listPolicyHubVersions);
 router.route("/:id/versions/:versionNumber").get(getPolicyHubVersion);
 router.route("/:id/restore/:versionNumber").post(restorePolicyHubVersion);
+
+router.route("/:id/diff").get(diffPolicyHubVersions);
+
+
 
 module.exports = router;
