@@ -132,20 +132,98 @@ exports.getPolicyHub = asyncHandler(async (req, res, next) => {
 // @desc    Update policy hub
 // @route   PUT /api/v1/policy-hub/:id
 // @access  Private (Admin)
+// controllers/policyHubController.js (updated updatePolicyHub)
 exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
-    let policyHub = await PolicyHub.findById(req.params.id);
-
+    const policyHub = await PolicyHub.findById(req.params.id);
     if (!policyHub) {
         return next(new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404));
     }
 
-    policyHub = await PolicyHub.findByIdAndUpdate(req.params.id, req.body, {
-        new: true,
-        runValidators: true,
+    // Create a version snapshot of the current state
+    const nextVersionNumber = (policyHub.versionNumber || 1) + 1;
+    const snapshot = {
+        versionNumber: policyHub.versionNumber || 1,
+        docs: policyHub.docs,
+        filePath: policyHub.filePath,
+        metadata: policyHub.metadata,
+        isActive: policyHub.isActive,
+        createdAt: new Date(),
+        editedBy: req.user?._id || null,
+        editReason: req.body.editReason || "update", // allow client to pass reason
+    };
+
+    // Push snapshot then update fields
+    policyHub.versions = policyHub.versions || [];
+    policyHub.versions.push(snapshot);
+
+    // Apply incoming updates (only allowed fields)
+    const allowed = ["docs", "filePath", "metadata", "isActive"];
+    allowed.forEach((k) => {
+        if (req.body[k] !== undefined) policyHub[k] = req.body[k];
     });
+
+    policyHub.versionNumber = nextVersionNumber;
+
+    await policyHub.save();
 
     res.status(200).json({ success: true, data: policyHub });
 });
+
+// controllers/policyHubController.js (new functions)
+
+// GET /api/v1/policy-hub/:id/versions
+exports.listPolicyHubVersions = asyncHandler(async (req, res, next) => {
+    const policyHub = await PolicyHub.findById(req.params.id).select("versions versionNumber");
+    console.log({ policyHub })
+    if (!policyHub) return next(new ErrorResponse("Not found", 404));
+    res.status(200).json({ success: true, data: policyHub.versions || [], currentVersion: policyHub.versionNumber });
+});
+
+// GET /api/v1/policy-hub/:id/versions/:versionNumber
+exports.getPolicyHubVersion = asyncHandler(async (req, res, next) => {
+    const { id, versionNumber } = req.params;
+    const policyHub = await PolicyHub.findById(id).select("versions versionNumber");
+    if (!policyHub) return next(new ErrorResponse("Not found", 404));
+    const version = policyHub.versions.find(v => String(v.versionNumber) === String(versionNumber));
+    if (!version) return next(new ErrorResponse("Version not found", 404));
+    res.status(200).json({ success: true, data: version });
+});
+
+// POST /api/v1/policy-hub/:id/restore/:versionNumber
+exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
+    const { id, versionNumber } = req.params;
+    const policyHub = await PolicyHub.findById(id);
+    if (!policyHub) return next(new ErrorResponse("Not found", 404));
+
+    const version = policyHub.versions.find(v => String(v.versionNumber) === String(versionNumber));
+    if (!version) return next(new ErrorResponse("Version not found", 404));
+
+    // Push current into versions as snapshot before restore
+    const snapshot = {
+        versionNumber: policyHub.versionNumber || 1,
+        docs: policyHub.docs,
+        filePath: policyHub.filePath,
+        metadata: policyHub.metadata,
+        isActive: policyHub.isActive,
+        createdAt: new Date(),
+        editedBy: req.user?._id || null,
+        editReason: `auto-restore-from-${versionNumber}`,
+    };
+
+    policyHub.versions.push(snapshot);
+
+    // Restore fields from selected version
+    policyHub.docs = version.docs;
+    policyHub.filePath = version.filePath;
+    policyHub.metadata = version.metadata;
+    policyHub.isActive = version.isActive;
+    policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
+
+    await policyHub.save();
+
+    res.status(200).json({ success: true, data: policyHub });
+});
+
 
 // @desc    Delete policy hub
 // @route   DELETE /api/v1/policy-hub/:id

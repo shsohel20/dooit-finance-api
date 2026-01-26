@@ -9,6 +9,9 @@ const {
     filterPolicyHubSection,
     downloadPolicyHubPDF,
     generatePolicyHub,
+    listPolicyHubVersions,
+    getPolicyHubVersion,
+    restorePolicyHubVersion,
 } = require("../controllers/policyHubController");
 
 const PolicyHub = require("../models/PolicyHub");
@@ -42,5 +45,11 @@ router
     .delete(deletePolicyHub);
 
 router.route("/:id/download").get(downloadPolicyHubPDF);
+
+///Version control 
+
+router.route("/:id/versions").get(listPolicyHubVersions);
+router.route("/:id/versions/:versionNumber").get(getPolicyHubVersion);
+router.route("/:id/restore/:versionNumber").post(restorePolicyHubVersion);
 
 module.exports = router;
