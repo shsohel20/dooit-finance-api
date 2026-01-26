@@ -38,11 +38,12 @@ router
 router.route("/new").post(createPolicyHub);
 router.route("/generate").post(generatePolicyHub);
 
+const json2mb = express.json({ limit: "5mb" });
 // CRUD by ID
 router
     .route("/:id")
     .get(getPolicyHub)
-    .put(updatePolicyHub)
+    .put(json2mb, updatePolicyHub)
     .delete(deletePolicyHub);
 
 router.route("/:id/download").get(downloadPolicyHubPDF);
