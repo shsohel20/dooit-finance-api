@@ -16,6 +16,7 @@ const Transaction = require("../models/Transaction");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 // Protect all transaction routes (adjust authorize roles as needed)
 router.use(protect);

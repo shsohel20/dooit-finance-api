@@ -17,7 +17,7 @@ const advancedResults = require("../middleware/advancedResults");
 
 const { protect, authorize } = require("../middleware/auth");
 const router = express.Router();
-
+router.use(express.json({ limit: "100kb" }));
 
 // Protect all alert routes and allow only admin by default
 router.use(protect);
@@ -29,7 +29,7 @@ router
   .get(advancedResults(Alert, "customer analyst transaction"), getAlerts)
   .post(
     advancedResults(Alert, "customer analyst transaction", filterAlertSection),
-    getAlertsPost
+    getAlertsPost,
   );
 
 // Create new alert

@@ -16,6 +16,7 @@ const Branch = require("../models/Branch");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 // protect all branch routes and allow only admin by default

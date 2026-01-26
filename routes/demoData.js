@@ -11,6 +11,7 @@ const {
 } = require("../controllers/demoDataController");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router

@@ -23,6 +23,7 @@ const { protect, authorize } = require("../middleware/auth");
 // protect all routes and allow only admin by default
 router.use(protect);
 // router.use(authorize("admin"));
+router.use(express.json({ limit: "100kb" }));
 
 // list (GET with query params, POST body filter via advancedResults)
 router

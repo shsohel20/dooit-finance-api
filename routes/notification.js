@@ -6,6 +6,7 @@ const {
 } = require("../controllers/notificationController");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 // router
 //   .route("/")

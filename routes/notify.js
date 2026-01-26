@@ -1,6 +1,7 @@
 // routes/notifies.js
 const express = require("express");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const {
   getNotifies,
@@ -30,30 +31,30 @@ router
   .get(
     advancedResults(Notify, ["resourceId"], null),
     //  authorize("admin", "operator"),
-    getNotifies
+    getNotifies,
   )
   .post(
     advancedResults(Notify, ["resourceId"], filterNotifySection),
     // authorize("admin", "operator"),
-    getNotifiesPost
+    getNotifiesPost,
   );
 
 // create
 router.route("/new").post(
   // authorize("admin", "operator"),
-  createNotify
+  createNotify,
 );
 
 // create dummy
 router.route("/dummy").post(
   // authorize("admin", "operator"),
-  createDummyNotify
+  createDummyNotify,
 );
 
 // get by uid
 router.route("/uid/:uid").get(
   // authorize("admin", "operator"),
-  getNotifyByUid
+  getNotifyByUid,
 );
 
 // CRUD
@@ -61,31 +62,31 @@ router
   .route("/:id")
   .get(
     // authorize("admin", "operator"),
-    getNotify
+    getNotify,
   )
   .put(
     // authorize("admin", "operator"),
-    updateNotify
+    updateNotify,
   )
   .delete(
     // authorize("admin"),
-    deleteNotify
+    deleteNotify,
   );
 
 // toggle active
 router.route("/:id/active").put(
   // authorize("admin", "operator"),
-  toggleNotifyActive
+  toggleNotifyActive,
 );
 
 // documents
 router.route("/:id/documents").post(
   // authorize("admin", "operator"),
-  addDocument
+  addDocument,
 );
 router.route("/:id/documents/:docIndex").delete(
   // authorize("admin", "operator"),
-  removeDocument
+  removeDocument,
 );
 
 module.exports = router;

@@ -15,6 +15,7 @@ const RFI = require("../models/Rfi");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 
@@ -32,7 +33,7 @@ router
       { path: "branch" },
       { path: "case", populate: { path: "transaction" } },
     ]),
-    getRFIs
+    getRFIs,
   )
   .post(
     advancedResults(
@@ -43,9 +44,9 @@ router
         { path: "branch" },
         { path: "case", populate: { path: "transaction" } },
       ],
-      filterRFISection
+      filterRFISection,
     ),
-    getRFIsPost
+    getRFIsPost,
   );
 
 // create

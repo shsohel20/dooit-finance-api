@@ -11,7 +11,7 @@ const swaggerUi = require("swagger-ui-express");
 const swaggerDocument = require("./swagger-output.json");
 
 dotenv.config({ path: "./config/config.env" });
-const bodyParser = require("body-parser");
+// const bodyParser = require("body-parser");
 const cookieParser = require("cookie-parser");
 
 const routes = require("./routes");
@@ -38,10 +38,10 @@ app.use(
   cors({
     origin: true, // reflect request origin//origin from where you requesting
     credentials: true,
-  })
+  }),
 );
 
-// app.use(express.json({ limit: "200kb" }));
+// app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true }));
 // app.use(mongoSanitize());
 
@@ -71,7 +71,6 @@ app.use(hpp());
 ///Mount File Upload Route
 app.use("/api/v1", routes);
 
-
 //SwaggerUI Docs
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
@@ -85,8 +84,8 @@ const PORT = process.env.PORT || 5000;
 const server = app.listen(
   PORT,
   console.log(
-    `Serer running in ${process.env.NODE_ENV} mode on port ${PORT}`.yellow
-  )
+    `Serer running in ${process.env.NODE_ENV} mode on port ${PORT}`.yellow,
+  ),
 );
 
 //Handle unhandled promise rejection

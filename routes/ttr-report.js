@@ -15,6 +15,7 @@ const {
 const TTR = require("../models/TtrReport");
 const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 
@@ -27,15 +28,15 @@ router
   .route("/")
   .get(
     advancedResults(TTR, ["partA.customers", "partC.transaction"], null),
-    getTTRs
+    getTTRs,
   )
   .post(
     advancedResults(
       TTR,
       ["partA.customers", "partC.transaction"],
-      filterTTRSection
+      filterTTRSection,
     ),
-    getTTRsPost
+    getTTRsPost,
   );
 
 // create

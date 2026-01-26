@@ -1,6 +1,8 @@
 // routes/leads.js
 const express = require("express");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
+
 const Lead = require("../models/Lead");
 const advancedResults = require("../middleware/advancedResults");
 

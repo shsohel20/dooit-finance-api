@@ -17,6 +17,7 @@ const advancedResults = require("../middleware/advancedResults");
 const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 // protect all client routes and allow only admin by default
 router.use(protect);

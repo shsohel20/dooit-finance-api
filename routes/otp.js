@@ -1,10 +1,12 @@
-const express = require('express');
+const express = require("express");
 
-const { sendOtp } = require('../controllers/otpController');
+const { sendOtp } = require("../controllers/otpController");
 
 const router = express.Router();
-const { protect } = require('../middleware/auth');
+router.use(express.json({ limit: "100kb" }));
 
-router.route('/').get(protect, sendOtp);
+const { protect } = require("../middleware/auth");
+
+router.route("/").get(protect, sendOtp);
 
 module.exports = router;

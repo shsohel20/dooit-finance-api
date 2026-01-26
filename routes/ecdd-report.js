@@ -1,6 +1,7 @@
 // routes/ecdd.js
 const express = require("express");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const EcddReport = require("../models/EcddReport"); // used by advancedResults middleware if needed
 const upload = require("../middleware/upload"); // multer instance for CSV import
@@ -39,7 +40,7 @@ router.get(
   protect,
   // optional: use advancedResults to handle query / pagination. Remove if you don't have it.
   advancedResults(EcddReport, "customer analyst generatedBy transaction"),
-  getEcddReports
+  getEcddReports,
 );
 
 /**

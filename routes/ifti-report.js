@@ -17,6 +17,7 @@ const {
 const IFTI = require("../models/IftiReport");
 const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 

@@ -13,6 +13,7 @@ const Role = require("../models/Role");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 router
   .route("/")

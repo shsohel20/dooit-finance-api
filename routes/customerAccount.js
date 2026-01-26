@@ -1,6 +1,8 @@
 // routes/customerAccounts.js
 const express = require("express");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
+
 const {
   getCustomerAccounts,
   getCustomerAccount,
@@ -28,10 +30,10 @@ router
     advancedResults(
       CustomerAccount,
       ["client", "branch", "customer", "createdBy"],
-      null
+      null,
     ),
     authorize("admin", "operator"),
-    getCustomerAccounts
+    getCustomerAccounts,
   )
   .post(authorize("admin", "operator"), createCustomerAccount);
 

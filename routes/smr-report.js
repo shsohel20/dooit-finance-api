@@ -16,6 +16,7 @@ const {
 const SMR = require("../models/SmrReport");
 const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 
@@ -30,17 +31,17 @@ router
     advancedResults(
       SMR,
       ["partC.personOrganisation", "partF.transactions"],
-      null
+      null,
     ),
-    getSMRs
+    getSMRs,
   )
   .post(
     advancedResults(
       SMR,
       ["partC.personOrganisation", "partF.transactions"],
-      filterSMRSection
+      filterSMRSection,
     ),
-    getSMRsPost
+    getSMRsPost,
   );
 
 // create

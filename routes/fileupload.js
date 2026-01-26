@@ -12,6 +12,7 @@ const advancedResults = require("../middleware/advancedResults");
 const File = require("../models/File");
 
 const router = express.Router();
+router.use(express.json({ limit: "100kb" }));
 
 router.route("/").get(advancedResults(File), getAllFiles);
 

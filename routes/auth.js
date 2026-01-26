@@ -20,6 +20,8 @@ const { protect } = require("../middleware/auth");
 
 const router = express.Router();
 
+router.use(express.json({ limit: "100kb" }));
+
 router.route("/re-send-opt").post(resendOtp);
 router.route("/register").post(register);
 router.route("/login").post(login);
