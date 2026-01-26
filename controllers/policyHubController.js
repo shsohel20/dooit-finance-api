@@ -195,10 +195,10 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
     policyHub.versions.push(snapshot);
 
     // Apply incoming updates (only allowed fields)
-    const allowed = ["docs", "filePath", "metadata", "isActive"];
-    allowed.forEach((k) => {
-        if (req.body[k] !== undefined) policyHub[k] = req.body[k];
-    });
+    // const allowed = ["docs", "filePath", "metadata", "isActive"];
+    // allowed.forEach((k) => {
+    //     if (req.body[k] !== undefined) policyHub[k] = req.body[k];
+    // });
 
     policyHub.versionNumber = nextVersionNumber;
 

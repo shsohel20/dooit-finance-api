@@ -20,6 +20,7 @@ const advancedResults = require("../middleware/advancedResults");
 const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
+const json50mb = express.json({ limit: "50mb" });
 
 // Protect all routes
 router.use(protect);
@@ -35,14 +36,13 @@ router
     .get(advancedResults(PolicyHub, ["client", "branch", "generatedBy"]), getPolicyHubs);
 
 // Create PolicyHub
-router.route("/new").post(createPolicyHub);
-router.route("/generate").post(generatePolicyHub);
+router.route("/new", json50mb).post(createPolicyHub);
+router.route("/generate", json50mb).post(generatePolicyHub);
 
 // const json2mb = [
 //     express.json({ limit: "25mb" }),
 //     express.urlencoded({ extended: true, limit: "25mb" }),
 // ];
-const json50mb = express.json({ limit: "50mb" });
 
 router
     .route("/:id")
