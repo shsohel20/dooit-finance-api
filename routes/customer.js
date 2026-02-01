@@ -9,6 +9,7 @@ const {
   getCustomers,
   getCustomer,
   createCustomerDummy,
+  getCompanyKycs,
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
@@ -67,6 +68,28 @@ router.post(
   "/dummy-create",
 
   createCustomerDummy,
+);
+
+
+///Company:
+router.get(
+  "/company",
+  protect,
+  authorize("admin", "client", "branch"),
+  advancedCustomerResultsQueryOnly({
+    populate: [
+      { path: "user", select: "name email userName photoUrl" },
+      { path: "relations.client", select: "name" },
+      { path: "relations.branch", select: "name" },
+    ],
+    searchFields: [
+      "companyName",
+      "email",
+      "registrationNumber",
+      "contactPerson.name",
+    ],
+  }),
+  getCompanyKycs
 );
 
 module.exports = router;

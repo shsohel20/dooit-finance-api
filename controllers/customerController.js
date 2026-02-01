@@ -280,22 +280,204 @@ exports.createInviteOld = asyncHandler(async (req, res, next) => {
   });
 });
 
+// exports.createInvite = asyncHandler(async (req, res, next) => {
+//   const loggedInUser = req.user ?? null;
+//   let client;
+//   let branch;
+
+//   if (loggedInUser?.userType == "branch") {
+//     const loggedInBranch = await Branch.findOne({ user: loggedInUser?.id });
+//     branch = loggedInBranch?.id ?? null;
+//     client = loggedInBranch?.client ?? null;
+//   } else {
+//     const loggedInClient = await Client.findOne({ user: loggedInUser?.id });
+//     client = loggedInClient?.id ?? null;
+//     branch = null;
+//   }
+//   // ... same client/branch resolution as before ...
+
+//   const {
+//     contact,
+//     relationType = null,
+//     onboardingChannel,
+//     source = "in-branch",
+//     notes = "",
+//   } = req.body;
+//   if (!contact || (!contact.email && !contact.phone))
+//     return next(new ErrorResponse("Provide email or phone to invite", 400));
+//   if (!client) return next(new ErrorResponse("client is required", 400));
+
+//   // validate client + branch
+//   const clientExists = await Client.findById(client);
+//   if (!clientExists) return next(new ErrorResponse("Client not found", 404));
+
+//   if (branch) {
+//     const br = await Branch.findById(branch);
+//     if (!br) return next(new ErrorResponse("Branch not found", 404));
+//     if (br.client && br.client.toString() !== client.toString()) {
+//       return next(
+//         new ErrorResponse("Branch does not belong to the client", 400)
+//       );
+//     }
+//   }
+
+//   // find user by email/phone if exists
+//   let user = null;
+//   const email = contact.email ? contact.email.toLowerCase() : null;
+//   const phone = contact.phone || null;
+//   if (email) user = await User.findOne({ email });
+//   if (!user && phone) user = await User.findOne({ phone });
+
+//   // helper: find existing customer linked to that client/branch or create new
+//   let customer = null;
+//   if (user) {
+//     customer = await Customer.findOne({ user: user._id });
+//   }
+//   // if (!customer && email) {
+//   //   customer = await Customer.findOne({
+//   //     "personalKyc.personal_form.contact_details.email": email,
+//   //   });
+//   // }
+
+//   // Add relation if needed (reuse your addRelationToCustomer logic)...
+//   // After ensuring the relation exists, find its index:
+//   // find relation index that matches client+branch
+//   const ensureRelation = async (customerDoc) => {
+//     const clientIdStr = client.toString();
+//     const branchIdStr = branch ? branch.toString() : null;
+//     let idx = customerDoc.relations.findIndex((r) => {
+//       const rClient = r.client ? r.client.toString() : null;
+//       const rBranch = r.branch ? r.branch.toString() : null;
+//       const branchMatches =
+//         branchIdStr === null ? !rBranch : rBranch === branchIdStr;
+//       return rClient === clientIdStr && branchMatches;
+//     });
+//     if (idx === -1) {
+//       // create relation row
+//       customerDoc.relations.push({
+//         client,
+//         branch: branch || undefined,
+//         type: relationType || "individual",
+//         onboardingChannel: onboardingChannel || "",
+//         registeredAt: Date.now(),
+//         source,
+//         notes,
+//         active: true,
+//         invitedBy: req.user ? req.user._id : null,
+//       });
+//       await customerDoc.save();
+//       idx = customerDoc.relations.length - 1;
+//     } else {
+//       // update relation fields if needed (same logic you had for update)
+//       const r = customerDoc.relations[idx];
+//       r.source = source || r.source;
+//       r.notes = notes || r.notes;
+//       r.type = relationType || r.type || "individual";
+//       if (onboardingChannel) r.onboardingChannel = onboardingChannel;
+//       r.active = true;
+//       if (!r.invitedBy) r.invitedBy = req.user ? req.user._id : null;
+//       await customerDoc.save();
+//     }
+//     return idx;
+//   };
+
+//   if (!customer) {
+//     // create new customer with relation
+//     customer = new Customer({
+//       relations: [
+//         {
+//           client,
+//           branch: branch || undefined,
+//           type: relationType || "individual",
+//           onboardingChannel: onboardingChannel || "",
+//           registeredAt: Date.now(),
+//           source,
+//           notes,
+//           active: true,
+//           invitedBy: req.user ? req.user._id : null,
+//         },
+//       ],
+//       metadata: {
+//         invitedBy: req.user ? req.user._id : null,
+//         client: client,
+//         branch: branch || null,
+//         ...contact,
+//       },
+//     });
+//     await customer.save();
+//   }
+
+//   // ensure relation index
+//   const relIndex = await ensureRelation(customer); // returns relation index
+
+//   // generate invite token *for the relation*
+//   const plain = customer.setRelationInvite(relIndex);
+//   // set invitedBy explicitly on relation (if not already)
+//   customer.relations[relIndex].invitedBy = req.user
+//     ? req.user._id
+//     : customer.relations[relIndex].invitedBy;
+//   await customer.save();
+
+//   const INVITE_BASE =
+//     process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
+//   const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
+
+//   // send invite (prefer provided contact; fallback to user's contact)
+
+//   const targetEmail = email || (user && user.email) || null;
+//   const targetPhone = phone || (user && user.phone) || null;
+//   if (targetEmail) {
+//     try {
+//       const subject = `${clientExists.name} invited you to register`;
+//       const html = InvitationEmailTemplate(clientExists.name, url);
+//       await sendEmail({ email: targetEmail, subject, message: html });
+//     } catch (err) {
+//       console.error("sendEmail error", err);
+//     }
+//   }
+//   if (targetPhone) {
+//     try {
+//       const message = `You are invited to register: ${url}`;
+//       await sendSMS(targetPhone, message);
+//     } catch (err) {
+//       console.error("sendSMS error", err);
+//     }
+//   }
+
+//   return res.status(201).json({
+//     success: true,
+//     message: "Invite created and sent",
+//     data: { customerId: customer._id, relationIndex: relIndex },
+//     invite:
+//       process.env.NODE_ENV === "development"
+//         ? { url, token: plain }
+//         : undefined,
+//   });
+// });
+
 exports.createInvite = asyncHandler(async (req, res, next) => {
   const loggedInUser = req.user ?? null;
-  let client;
-  let branch;
 
-  if (loggedInUser?.userType == "branch") {
-    const loggedInBranch = await Branch.findOne({ user: loggedInUser?.id });
-    branch = loggedInBranch?.id ?? null;
-    client = loggedInBranch?.client ?? null;
+  let client = null;
+  let branch = null;
+
+  // ---------------------------
+  // Resolve client + branch
+  // ---------------------------
+  if (loggedInUser?.userType === "branch") {
+    const b = await Branch.findOne({ user: loggedInUser.id });
+    if (!b) return next(new ErrorResponse("Branch not found", 404));
+    branch = b._id;
+    client = b.client;
   } else {
-    const loggedInClient = await Client.findOne({ user: loggedInUser?.id });
-    client = loggedInClient?.id ?? null;
-    branch = null;
+    const c = await Client.findOne({ user: loggedInUser?.id });
+    if (!c) return next(new ErrorResponse("Client not found", 404));
+    client = c._id;
   }
-  // ... same client/branch resolution as before ...
 
+  // ---------------------------
+  // Input
+  // ---------------------------
   const {
     contact,
     relationType,
@@ -303,157 +485,167 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
     source = "in-branch",
     notes = "",
   } = req.body;
-  if (!contact || (!contact.email && !contact.phone))
-    return next(new ErrorResponse("Provide email or phone to invite", 400));
-  if (!client) return next(new ErrorResponse("client is required", 400));
 
-  // validate client + branch
-  const clientExists = await Client.findById(client);
-  if (!clientExists) return next(new ErrorResponse("Client not found", 404));
-
-  if (branch) {
-    const br = await Branch.findById(branch);
-    if (!br) return next(new ErrorResponse("Branch not found", 404));
-    if (br.client && br.client.toString() !== client.toString()) {
-      return next(
-        new ErrorResponse("Branch does not belong to the client", 400)
-      );
-    }
+  if (!contact || (!contact.email && !contact.phone)) {
+    return next(new ErrorResponse("Provide email or phone", 400));
   }
 
-  // find user by email/phone if exists
-  let user = null;
-  const email = contact.email ? contact.email.toLowerCase() : null;
+  // ---------------------------
+  // Validate relationType
+  // ---------------------------
+  const allowedTypes = [
+    "individual",
+    "company",
+    "partnership",
+    "government_body",
+    "association",
+    "cooperative",
+    "trust",
+  ];
+
+  const safeType = allowedTypes.includes(relationType)
+    ? relationType
+    : "individual";
+
+  // ---------------------------
+  // Find user
+  // ---------------------------
+  const email = contact.email?.toLowerCase() || null;
   const phone = contact.phone || null;
+
+  let user = null;
   if (email) user = await User.findOne({ email });
   if (!user && phone) user = await User.findOne({ phone });
 
-  // helper: find existing customer linked to that client/branch or create new
-  let customer = null;
-  if (user) {
-    customer = await Customer.findOne({ user: user._id });
-  }
-  // if (!customer && email) {
-  //   customer = await Customer.findOne({
-  //     "personalKyc.personal_form.contact_details.email": email,
-  //   });
-  // }
+  // ---------------------------
+  // Find customer
+  // ---------------------------
+  let customer = user
+    ? await Customer.findOne({ user: user._id })
+    : null;
 
-  // Add relation if needed (reuse your addRelationToCustomer logic)...
-  // After ensuring the relation exists, find its index:
-  // find relation index that matches client+branch
-  const ensureRelation = async (customerDoc) => {
-    const clientIdStr = client.toString();
-    const branchIdStr = branch ? branch.toString() : null;
-    let idx = customerDoc.relations.findIndex((r) => {
-      const rClient = r.client ? r.client.toString() : null;
-      const rBranch = r.branch ? r.branch.toString() : null;
-      const branchMatches =
-        branchIdStr === null ? !rBranch : rBranch === branchIdStr;
-      return rClient === clientIdStr && branchMatches;
-    });
-    if (idx === -1) {
-      // create relation row
-      customerDoc.relations.push({
-        client,
-        branch: branch || undefined,
-        type: relationType || "individual",
-        onboardingChannel: onboardingChannel || "",
-        registeredAt: Date.now(),
-        source,
-        notes,
-        active: true,
-        invitedBy: req.user ? req.user._id : null,
-      });
-      await customerDoc.save();
-      idx = customerDoc.relations.length - 1;
-    } else {
-      // update relation fields if needed (same logic you had for update)
-      const r = customerDoc.relations[idx];
-      r.source = source || r.source;
-      r.notes = notes || r.notes;
-      if (relationType) r.type = relationType;
-      if (onboardingChannel) r.onboardingChannel = onboardingChannel;
-      r.active = true;
-      if (!r.invitedBy) r.invitedBy = req.user ? req.user._id : null;
-      await customerDoc.save();
-    }
-    return idx;
-  };
-
+  // ---------------------------
+  // Create customer if needed
+  // ---------------------------
   if (!customer) {
-    // create new customer with relation
     customer = new Customer({
       relations: [
         {
           client,
-          branch: branch || undefined,
-          type: relationType || "individual",
+          branch,
+          type: safeType,
           onboardingChannel: onboardingChannel || "",
-          registeredAt: Date.now(),
           source,
           notes,
           active: true,
-          invitedBy: req.user ? req.user._id : null,
+          invitedBy: req.user?._id,
         },
       ],
       metadata: {
-        invitedBy: req.user ? req.user._id : null,
-        client: client,
-        branch: branch || null,
+        invitedBy: req.user?._id,
+        client,
+        branch,
         ...contact,
       },
     });
-    await customer.save();
   }
 
-  // ensure relation index
-  const relIndex = await ensureRelation(customer); // returns relation index
+  // ---------------------------
+  // 🔧 Repair old broken relations
+  // ---------------------------
+  customer.relations.forEach(r => {
+    if (!r.type) r.type = "individual";
+  });
 
-  // generate invite token *for the relation*
+  // ---------------------------
+  // Ensure relation exists
+  // ---------------------------
+  let relIndex = customer.relations.findIndex(r =>
+    r.client?.toString() === client.toString() &&
+    (branch ? r.branch?.toString() === branch.toString() : !r.branch)
+  );
+
+  if (relIndex === -1) {
+    customer.relations.push({
+      client,
+      branch,
+      type: safeType,
+      onboardingChannel: onboardingChannel || "",
+      source,
+      notes,
+      active: true,
+      invitedBy: req.user?._id,
+    });
+    relIndex = customer.relations.length - 1;
+  } else {
+    const r = customer.relations[relIndex];
+    r.type = safeType;
+    r.source = source || r.source;
+    r.notes = notes || r.notes;
+    if (onboardingChannel) r.onboardingChannel = onboardingChannel;
+    r.active = true;
+    if (!r.invitedBy) r.invitedBy = req.user?._id;
+  }
+
+  // ---------------------------
+  // Set relation invite token
+  // ---------------------------
   const plain = customer.setRelationInvite(relIndex);
-  // set invitedBy explicitly on relation (if not already)
-  customer.relations[relIndex].invitedBy = req.user
-    ? req.user._id
-    : customer.relations[relIndex].invitedBy;
+
   await customer.save();
 
+  // ---------------------------
+  // Build invite URL
+  // ---------------------------
   const INVITE_BASE =
-    process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
+    process.env.CLIENT_INVITE_URL ||
+    "http://localhost:3000/accept-invite";
+
   const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
 
-  // send invite (prefer provided contact; fallback to user's contact)
+  // ---------------------------
+  // Send email / sms
+  // ---------------------------
+  const targetEmail = email || user?.email;
+  const targetPhone = phone || user?.phone;
 
-  const targetEmail = email || (user && user.email) || null;
-  const targetPhone = phone || (user && user.phone) || null;
   if (targetEmail) {
     try {
-      const subject = `${clientExists.name} invited you to register`;
-      const html = InvitationEmailTemplate(clientExists.name, url);
-      await sendEmail({ email: targetEmail, subject, message: html });
-    } catch (err) {
-      console.error("sendEmail error", err);
-    }
-  }
-  if (targetPhone) {
-    try {
-      const message = `You are invited to register: ${url}`;
-      await sendSMS(targetPhone, message);
-    } catch (err) {
-      console.error("sendSMS error", err);
+      await sendEmail({
+        email: targetEmail,
+        subject: "You are invited to register",
+        message: InvitationEmailTemplate("Client", url),
+      });
+    } catch (e) {
+      console.error("email fail", e);
     }
   }
 
-  return res.status(201).json({
+  if (targetPhone) {
+    try {
+      await sendSMS(targetPhone, `Register here: ${url}`);
+    } catch (e) {
+      console.error("sms fail", e);
+    }
+  }
+
+  // ---------------------------
+  // Response
+  // ---------------------------
+  res.status(201).json({
     success: true,
-    message: "Invite created and sent",
-    data: { customerId: customer._id, relationIndex: relIndex },
+    message: "Invite created",
+    data: {
+      customerId: customer._id,
+      relationIndex: relIndex,
+    },
     invite:
       process.env.NODE_ENV === "development"
         ? { url, token: plain }
         : undefined,
   });
 });
+
 
 // GET /api/v1/invites/validate?token=...&cid=...
 exports.validateInviteOld = asyncHandler(async (req, res, next) => {
@@ -1597,3 +1789,123 @@ function escapeRegExp(string) {
 function escapeRegExp(string) {
   return String(string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+
+///Company Controller:
+
+// Get many company KYC records (with filters, pagination, search)
+exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
+  // Query params: page, limit, client, branch, customer, reg (registration number),
+  // uid, sequence, search (legal_name or trading_names), sort
+  const {
+    page = 1,
+    limit = 25,
+    client,
+    branch,
+    customer,
+    reg,
+    uid,
+    sequence,
+    search,
+    sort = "-createdAt",
+  } = req.query;
+
+  const qPage = Math.max(parseInt(page, 10) || 1, 1);
+  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+
+  const filter = {};
+
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+  if (customer) filter.customer = customer;
+  if (uid) filter.uid = uid;
+  if (sequence) filter.sequence = Number(sequence);
+  if (reg)
+    filter["general_information.registration_number"] = String(reg).trim();
+
+  if (search) {
+    const rx = new RegExp(String(search).trim(), "i");
+    filter.$or = [
+      { "general_information.legal_name": rx },
+      { "general_information.trading_names": rx },
+    ];
+  }
+
+  const skip = (qPage - 1) * qLimit;
+  const total = await CompanyKyc.countDocuments(filter);
+  const pages = Math.ceil(total / qLimit);
+
+  const docs = await CompanyKyc.find(filter)
+    .populate("client", "name _id")
+    .populate("branch", "name _id")
+    .populate("customer", "user _id") // adjust fields as you like
+    .sort(sort)
+    .skip(skip)
+    .limit(qLimit)
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    count: docs.length,
+    total,
+    page: qPage,
+    pages,
+    data: docs,
+  });
+});
+
+// Get single company KYC by id|uid|sequence
+exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
+  const identifier = req.params.id; // can be ObjectId, uid (COMKYC_...), or sequence number
+
+  // Try find by Mongo ObjectId
+  let doc = null;
+  const isObjectId = mongoose.Types.ObjectId.isValid(identifier);
+
+  if (isObjectId) {
+    doc = await CompanyKyc.findById(identifier)
+      .populate("client", "name _id")
+      .populate("branch", "name _id")
+      .populate("customer", "user _id")
+      .lean();
+  }
+
+  // If not found by ObjectId, try uid match (e.g. COMKYC_123456) or sequence
+  if (!doc) {
+    // if identifier looks like COMKYC_* or contains non-numeric chars treat as uid
+    if (typeof identifier === "string" && identifier.match(/^COMKYC_/i)) {
+      doc = await CompanyKyc.findOne({ uid: identifier })
+        .populate("client", "name _id")
+        .populate("branch", "name _id")
+        .populate("customer", "user _id")
+        .lean();
+    } else if (!Number.isNaN(Number(identifier))) {
+      // numeric -> sequence
+      doc = await CompanyKyc.findOne({ sequence: Number(identifier) })
+        .populate("client", "name _id")
+        .populate("branch", "name _id")
+        .populate("customer", "user _id")
+        .lean();
+    } else {
+      // fallback: try search by legal_name (exact) as last resort
+      doc = await CompanyKyc.findOne({
+        "general_information.legal_name": identifier,
+      })
+        .populate("client", "name _id")
+        .populate("branch", "name _id")
+        .populate("customer", "user _id")
+        .lean();
+    }
+  }
+
+  if (!doc) {
+    return next(
+      new ErrorResponse(`CompanyKyc not found for identifier: ${identifier}`, 404)
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    data: doc,
+  });
+});

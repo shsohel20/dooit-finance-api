@@ -161,7 +161,16 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
   ///Name Checked in User
   const duplicateItem = await User.findById(req.params.id);
 
-  const user = await User.findByIdAndUpdate(req.params.id, req.body, {
+  const updates = {};
+
+  const allowedFields = ["name", "email", "phone", "photoUrl", "isActive"];
+
+  allowedFields.forEach(field => {
+    if (req.body[field] !== undefined) {
+      updates[field] = req.body[field];
+    }
+  });
+  const user = await User.findByIdAndUpdate(req.params.id, updates, {
     new: true,
     runValidators: true,
   });
@@ -184,6 +193,22 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     data: user,
+  });
+});
+
+exports.resetPassword = asyncHandler(async (req, res, next) => {
+  const user = await User.findById(req.user.id).select("+password");
+
+  if (!(await user.mathPassword(req.body.currentPassword))) {
+    return next(new ErrorResponse("Invalid current password", 401));
+  }
+
+  user.password = req.body.newPassword;
+  await user.save(); // 🔥 triggers bcrypt hashing
+
+  res.status(200).json({
+    success: true,
+    message: "Password updated successfully",
   });
 });
 // @desc   Delete single user

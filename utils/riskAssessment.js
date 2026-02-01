@@ -14,8 +14,7 @@ const UHRC = new Set([
   "central african republic",
   "croatia",
   "cuba",
-  "democratic people’s republic of korea",
-  "democratic people's republic of korea",
+  "democratic people's republic of korea (north korea)",
   "democratic republic of the congo",
   "guinea-bissau",
   "iran",
@@ -27,7 +26,6 @@ const UHRC = new Set([
   "myanmar",
   "burma",
   "russia",
-  "serbia",
   "serbia (including kosovo and vojvodina)",
   "slovenia",
   "somalia",
@@ -123,7 +121,6 @@ const MRC = new Set([
   "china",
   "colombia",
   "comoros",
-  "congo",
   "costa rica",
   "djibouti",
   "dominica",
@@ -162,7 +159,7 @@ const MRC = new Set([
   "malaysia",
   "maldives",
   "mexico",
-  "micronesia",
+  "micronesia, federated states of",
   "moldova",
   "mongolia",
   "morocco",
@@ -193,7 +190,7 @@ const MRC = new Set([
   "united arab emirates",
   "uruguay",
   "uzbekistan",
-  "vatican city",
+  "vatican city state",
   "zambia",
 ]);
 
@@ -211,8 +208,7 @@ const LRC = new Set([
   "ireland",
   "italy",
   "japan",
-  "korea south",
-  "south korea",
+  "korea, south",
   "netherlands",
   "new zealand",
   "norway",
@@ -223,10 +219,12 @@ const LRC = new Set([
   "sweden",
   "switzerland",
   "united kingdom",
-  "uk",
   "united states",
+  // common variants kept for convenience (optional)
+  "uk",
   "usa",
   "us",
+  "south korea",
 ]);
 
 /** canonical FACTORS (from your doc). Exported for reuse/testing */
@@ -409,8 +407,8 @@ function detectCustomerRetentionScore(customer = {}, relation = {}) {
   const registeredAt = relation?.registeredAt
     ? new Date(relation.registeredAt).getTime()
     : customer?.createdAt
-    ? new Date(customer.createdAt).getTime()
-    : null;
+      ? new Date(customer.createdAt).getTime()
+      : null;
   if (!registeredAt) return { value: "New", score: 30 };
   const years = (now - registeredAt) / (1000 * 60 * 60 * 24 * 365.25);
   if (years >= 3) return { value: "3+ Years", score: 10 };
@@ -506,7 +504,7 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
   // compute total (sum of component scores) but enforce "max product" already done
   const totalScore = Object.values(assessment).reduce(
     (acc, cur) => acc + (cur && cur.score ? Number(cur.score) : 0),
-    0
+    0,
   );
 
   // Labeling rules per CRA doc

@@ -4,6 +4,7 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { Schema } = mongoose;
 
 const UserSchema = new mongoose.Schema(
   {
@@ -48,18 +49,34 @@ const UserSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: [
-        "user",
-        "collector",
-        "approval",
-        "admin",
-        "customer",
-        "analyst",
-        "client",
-        "client-admin",
-      ],
+      // enum: [
+      //   "user",
+      //   "collector",
+      //   "approval",
+      //   "admin",
+      //   "customer",
+      //   "analyst",
+      //   "client",
+      //   "client-admin",
+      // ],
       default: "user",
     },
+
+    clientBelongs: {
+      type: Schema.Types.ObjectId,
+      ref: "Client",
+      //  required: true,
+      index: true,
+      default: null
+    },
+    branchBelongs: {
+      type: Schema.Types.ObjectId,
+      ref: "Branch",
+      default: null,
+      index: true,
+    },
+
+
     password: {
       type: String,
       required: [true, "Please add a password"],

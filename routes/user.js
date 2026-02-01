@@ -9,6 +9,7 @@ const {
   updateUserPassword,
   getUserBySlug,
   getUsersPost,
+  resetPassword,
 } = require("../controllers/userController");
 
 const User = require("../models/User");
@@ -29,6 +30,7 @@ router
 
 router.route("/new").post(createUser);
 router.route("/update-user-password/:id").put(updateUserPassword);
+router.route("/reset-password/:id").put(resetPassword);
 
 router.route("/:id").get(getUser).put(updateUser).delete(deleteUser);
 router.route("/slug/:slug").get(getUserBySlug);
