@@ -93,30 +93,49 @@ exports.register = asyncHandler(async (req, res, next) => {
   }
 
   //Create a new user
-  const user = await User.create({
+  // const user = await User.create({
+  //   name,
+  //   email,
+  //   password,
+  //   role,
+  //   userName,
+  //   // resetPasswordToken,
+  //   // resetPasswordExpire,
+  // }).populate([
+  //   {
+  //     path: "client", // virtual on User
+  //     // select: "name _id",
+  //   },
+  //   {
+  //     path: "customer", // virtual on User
+  //     // select: "name _id",
+  //   },
+  //   {
+  //     path: "branch", // virtual on User
+  //     // select: "name _id",
+  //     populate: { path: "client" },
+  //   },
+  // ])
+  //   .lean()
+
+  const newUser = await User.create({
     name,
     email,
     password,
     role,
     userName,
-    // resetPasswordToken,
-    // resetPasswordExpire,
-  }).populate([
-    {
-      path: "client", // virtual on User
-      // select: "name _id",
-    },
-    {
-      path: "customer", // virtual on User
-      // select: "name _id",
-    },
-    {
-      path: "branch", // virtual on User
-      // select: "name _id",
-      populate: { path: "client" },
-    },
-  ])
-    .lean()
+  });
+
+  const user = await User.findById(newUser._id)
+    .populate([
+      { path: "client" },
+      { path: "customer" },
+      {
+        path: "branch",
+        populate: { path: "client" },
+      },
+    ])
+    .lean();
 
   const code = Math.floor(100000 + Math.random() * 900000);
 
