@@ -135,7 +135,7 @@ exports.register = asyncHandler(async (req, res, next) => {
         populate: { path: "client" },
       },
     ])
-    .lean();
+
 
   const code = Math.floor(100000 + Math.random() * 900000);
 

@@ -2,6 +2,7 @@ node_modules/
 _data/
 
 tmp/
+config/*.env
 
 public/uploads/*
 *.env
