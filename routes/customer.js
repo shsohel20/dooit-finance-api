@@ -13,6 +13,7 @@ const {
   getCompanyKyc,
   getTrustKycs,
   getTrustKyc,
+  getNonIndividualKycs,
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
@@ -25,13 +26,14 @@ const { protect, authorize } = require("../middleware/auth");
 const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
 const CompanyKyc = require("../models/CompanyKyc");
 const TrustKyc = require("../models/TrustKyc");
+const NonIndividualKyc = require("../models/NonIndividualKyc");
 // Protect all routes and allow only authorized roles (adjust as needed)
 
 router.route("/").get(
   protect,
   authorize("admin", "client", "branch"),
   advancedCustomerResultsQueryOnly({
-    Customer,
+    model: Customer,
     populate: [
       { path: "user", select: "name email userName photoUrl" },
       { path: "relations.client", select: "name" },
@@ -108,5 +110,20 @@ router.get(
 
   getTrustKyc
 );
+
+router.get(
+  "/non-individual/all",
+  protect,
+  authorize("admin", "client", "branch"),
+  advancedResults(NonIndividualKyc),
+  getNonIndividualKycs
+);
+// router.get(
+//   "/non-individual/all",
+//   protect,
+//   authorize("admin", "client", "branch"),
+
+//   getTrustKyc
+// );
 
 module.exports = router;

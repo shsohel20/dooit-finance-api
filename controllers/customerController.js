@@ -2042,3 +2042,85 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
     data: doc,
   });
 });
+
+
+///For Non individual by Type 
+exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
+
+  function buildNonIndividualTypeFilter(type) {
+    switch (type) {
+      case "partnership":
+        return { "partnership.partnership_type": { $exists: true, $ne: null } };
+
+      case "government_body":
+        return { "government_body.government_body_type": { $exists: true, $ne: null } };
+
+      case "association":
+      case "cooperative":
+        return {
+          "association_cooperative.entity_type": { $exists: true, $ne: null },
+        };
+
+      default:
+        return {};
+    }
+  }
+
+  const {
+    page = 1,
+    limit = 25,
+    client,
+    branch,
+    customer,
+    type,
+    uid,
+    sequence,
+    search,
+    sort = "-createdAt",
+  } = req.query;
+
+  const qPage = Math.max(parseInt(page, 10) || 1, 1);
+  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+
+  const filter = {};
+
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+  if (customer) filter.customer = customer;
+  if (uid) filter.uid = uid;
+  if (sequence) filter.sequence = Number(sequence);
+
+  // ✅ type filter
+  if (type) {
+    Object.assign(filter, buildNonIndividualTypeFilter(type));
+  }
+
+  // ✅ search by name
+  if (search) {
+    const rx = new RegExp(search, "i");
+    filter.$or = [
+      { "general_information.entity_name": rx },
+      { "general_information.registered_business_name": rx },
+    ];
+  }
+
+  const skip = (qPage - 1) * qLimit;
+
+  const total = await NonIndividualKyc.countDocuments(filter);
+  const pages = Math.ceil(total / qLimit);
+
+  const docs = await NonIndividualKyc.find(filter)
+    .sort(sort)
+    .skip(skip)
+    .limit(qLimit)
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    count: docs.length,
+    total,
+    page: qPage,
+    pages,
+    data: docs,
+  });
+});
