@@ -6,10 +6,10 @@ const isEmpty = (v) =>
 const toBool = (v) => v === "true" || v === true;
 
 module.exports =
-    ({ populate = null, searchFields = [] } = {}) =>
+    ({ model, populate = null, searchFields = [] } = {}) =>
         async (req, res, next) => {
             try {
-                const Customer = mongoose.model("Customer");
+                // const Customer = mongoose.model("Customer");
 
                 console.log(req?.user?.client?._id)
                 console.log(req?.user?.branch?._id)
@@ -69,7 +69,7 @@ module.exports =
                 // -----------------------------
                 // 3. Base mongoose query
                 // -----------------------------
-                let baseQuery = Customer.find(dbQuery);
+                let baseQuery = model.find(dbQuery);
 
                 if (populate) baseQuery = baseQuery.populate(populate);
 
@@ -129,11 +129,11 @@ module.exports =
                     results = filtered.slice(skip, skip + limit);
 
                     if (populate) {
-                        results = await Customer.populate(results, populate);
+                        results = await model.populate(results, populate);
                     }
                 } else {
                     // DB-level pagination
-                    totalRecords = await Customer.countDocuments(dbQuery);
+                    totalRecords = await model.countDocuments(dbQuery);
                     results = await baseQuery.skip(skip).limit(limit);
                 }
 

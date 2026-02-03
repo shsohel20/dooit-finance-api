@@ -1836,9 +1836,9 @@ exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
   const pages = Math.ceil(total / qLimit);
 
   const docs = await CompanyKyc.find(filter)
-    .populate("client", "name _id")
-    .populate("branch", "name _id")
-    .populate("customer", "user _id") // adjust fields as you like
+    // .populate("client", "name _id")
+    // .populate("branch", "name _id")
+    // .populate("customer", "personalKyc country isPep sanction kycStatus") // adjust fields as you like
     .sort(sort)
     .skip(skip)
     .limit(qLimit)
@@ -1864,9 +1864,9 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
 
   if (isObjectId) {
     doc = await CompanyKyc.findById(identifier)
-      .populate("client", "name _id")
-      .populate("branch", "name _id")
-      .populate("customer", "user _id")
+      // .populate("client", "name _id")
+      // .populate("branch", "name _id")
+      .populate("customer", "personalKyc country isPep sanction kycStatus")
       .lean();
   }
 
@@ -1901,6 +1901,139 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
   if (!doc) {
     return next(
       new ErrorResponse(`CompanyKyc not found for identifier: ${identifier}`, 404)
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    data: doc,
+  });
+});
+
+
+///For Trust:
+
+// Get many trust KYC records
+exports.getTrustKycs = asyncHandler(async (req, res, next) => {
+  const {
+    page = 1,
+    limit = 25,
+    client,
+    branch,
+    customer,
+    uid,
+    sequence,
+    abn,
+    reg,
+    search,
+    sort = "-createdAt",
+  } = req.query;
+
+  const qPage = Math.max(parseInt(page, 10) || 1, 1);
+  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+
+  const filter = {};
+
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+  if (customer) filter.customer = customer;
+  if (uid) filter.uid = uid;
+  if (sequence) filter.sequence = Number(sequence);
+
+  // Trust registration filters
+  if (reg) {
+    filter[
+      "trust_details.trust_type.unregulated_trust.registration_number"
+    ] = String(reg).trim();
+  }
+
+  if (abn) {
+    filter[
+      "trust_details.trust_type.self_managed_super_fund.abn"
+    ] = String(abn).trim();
+  }
+
+  // search by trust name
+  if (search) {
+    const rx = new RegExp(String(search).trim(), "i");
+    filter["trust_details.full_trust_name"] = rx;
+  }
+
+  const skip = (qPage - 1) * qLimit;
+
+  const total = await TrustKyc.countDocuments(filter);
+  const pages = Math.ceil(total / qLimit);
+
+  const docs = await TrustKyc.find(filter)
+    // .populate("client", "name _id")
+    // .populate("branch", "name _id")
+    // .populate("customer", "personalKyc country isPep sanction kycStatus")
+    .sort(sort)
+    .skip(skip)
+    .limit(qLimit)
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    count: docs.length,
+    total,
+    page: qPage,
+    pages,
+    data: docs,
+  });
+});
+
+// Get single trust KYC by id | uid | sequence
+exports.getTrustKyc = asyncHandler(async (req, res, next) => {
+  const identifier = req.params.id;
+
+  let doc = null;
+  const isObjectId = mongoose.Types.ObjectId.isValid(identifier);
+
+  // Try ObjectId
+  if (isObjectId) {
+    doc = await TrustKyc.findById(identifier)
+      .populate("client", "name _id")
+      .populate("branch", "name _id")
+      .populate("customer", "personalKyc country isPep sanction kycStatus")
+      .lean();
+  }
+
+  // Try UID
+  if (!doc && /^TRKYC_/i.test(identifier)) {
+    doc = await TrustKyc.findOne({ uid: identifier })
+      .populate("client", "name _id")
+      .populate("branch", "name _id")
+      .populate("customer", "user _id")
+      .lean();
+  }
+
+  // Try sequence
+  if (!doc && !Number.isNaN(Number(identifier))) {
+    doc = await TrustKyc.findOne({ sequence: Number(identifier) })
+      .populate("client", "name _id")
+      .populate("branch", "name _id")
+      .populate("customer", "user _id")
+      .lean();
+  }
+
+  // Try trust name fallback
+  if (!doc) {
+    doc = await TrustKyc.findOne({
+      "trust_details.full_trust_name": identifier,
+    })
+      .populate("client", "name _id")
+      .populate("branch", "name _id")
+      .populate("customer", "user _id")
+      .lean();
+  }
+
+  if (!doc) {
+    return next(
+      new ErrorResponse(
+        `TrustKyc not found for identifier: ${identifier}`,
+        404
+      )
     );
   }
 

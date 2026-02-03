@@ -10,6 +10,9 @@ const {
   getCustomer,
   createCustomerDummy,
   getCompanyKycs,
+  getCompanyKyc,
+  getTrustKycs,
+  getTrustKyc,
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
@@ -20,12 +23,15 @@ router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
 const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
+const CompanyKyc = require("../models/CompanyKyc");
+const TrustKyc = require("../models/TrustKyc");
 // Protect all routes and allow only authorized roles (adjust as needed)
 
 router.route("/").get(
   protect,
   authorize("admin", "client", "branch"),
   advancedCustomerResultsQueryOnly({
+    Customer,
     populate: [
       { path: "user", select: "name email userName photoUrl" },
       { path: "relations.client", select: "name" },
@@ -73,23 +79,34 @@ router.post(
 
 ///Company:
 router.get(
-  "/company",
+  "/company/all",
   protect,
   authorize("admin", "client", "branch"),
-  advancedCustomerResultsQueryOnly({
-    populate: [
-      { path: "user", select: "name email userName photoUrl" },
-      { path: "relations.client", select: "name" },
-      { path: "relations.branch", select: "name" },
-    ],
-    searchFields: [
-      "companyName",
-      "email",
-      "registrationNumber",
-      "contactPerson.name",
-    ],
-  }),
+  advancedResults(CompanyKyc),
   getCompanyKycs
+);
+router.get(
+  "/company/:id",
+  protect,
+  authorize("admin", "client", "branch"),
+
+  getCompanyKyc
+);
+
+//Trust
+router.get(
+  "/trust/all",
+  protect,
+  authorize("admin", "client", "branch"),
+  advancedResults(TrustKyc),
+  getTrustKycs
+);
+router.get(
+  "/trust/:id",
+  protect,
+  authorize("admin", "client", "branch"),
+
+  getTrustKyc
 );
 
 module.exports = router;
