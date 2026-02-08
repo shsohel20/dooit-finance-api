@@ -6,7 +6,7 @@ const htmlPdf = require("html-pdf");
 const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
-
+const PolicyHubVersion = require("../models/PolicyHubVersion");
 const sanitizeHtml = require("sanitize-html");
 
 /**
@@ -46,34 +46,46 @@ exports.createPolicyHub = asyncHandler(async (req, res, next) => {
 
   const {
     docs,
+    filePath = "",
     generatedBy = req.user?._id,
     metadata = {},
     isActive = false,
   } = req.body;
 
+  // create the main PolicyHub (leave versions empty — we'll create a separate version doc)
   const policyHub = await PolicyHub.create({
     client,
     branch,
     docs,
+    filePath,
     generatedBy,
     metadata,
     isActive,
     versionNumber: 1,
-    versions: [
-      {
-        versionNumber: 1,
-        docs,
-        metadata,
-        isActive,
-        editedBy: generatedBy,
-        editReason: "initial-create",
-      },
-    ],
+    versions: [], // will hold ObjectId refs to PolicyHubVersion
   });
+
+  // create a PolicyHubVersion document for version 1
+  const versionDoc = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
+    versionNumber: 1,
+    docs: docs || "",
+    filePath: filePath || "",
+    metadata: metadata || {},
+    isActive: Boolean(isActive),
+    editedBy: generatedBy,
+    editReason: "initial-create",
+  });
+
+  // attach the version ref to the PolicyHub and save
+  policyHub.versions = policyHub.versions || [];
+  policyHub.versions.push(versionDoc._id);
+  await policyHub.save();
 
   res.status(201).json({ success: true, data: policyHub });
 });
-// @desc    Create policy hub
+
+// @desc    Generate policy hub
 // @route   POST /api/v1/policy-hub/generate
 // @access  Private (Admin)
 exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
@@ -85,33 +97,48 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
   if (!client) {
     return next(new ErrorResponse("Unauthorized client", 401));
   }
-  const payload = {
-    ...req.body,
-  };
+
+  const payload = { ...req.body };
   const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
-  const response = await axios.post(policyAiEndPoint, payload, {
-    timeout: 10000,
-  });
+
+  let response;
+  try {
+    response = await axios.post(policyAiEndPoint, payload, { timeout: 10000 });
+  } catch (err) {
+    return next(
+      new ErrorResponse("Error calling document generation API", 500),
+    );
+  }
+
   const data =
     typeof response.data === "string"
       ? JSON.parse(response.data)
       : response.data || {};
-  let filePath = data?.file_path;
 
-  // Replace root path with safer relative path
+  let filePath = data?.file_path || data?.filePath || null;
+  if (!filePath) {
+    return next(
+      new ErrorResponse("Generated file path not found in AI response", 500),
+    );
+  }
+
+  // Replace root path with safer relative path (only if present)
   filePath = filePath.replace(
     "/root/strikeo/strikeo-afc-ai/afc-document-generation/app/output",
     "/app/output",
   );
-  console.log(data);
 
-  //PathReplacing
-  ///root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
-  //app/outpu instead of /root/strikeo/strikeo-afc-ai/afc-document-generation/app/output
-  // 📄 Read Markdown file
-  const markdownContent = await fs.readFile(filePath, "utf8");
+  // Read Markdown file
+  let markdownContent;
+  try {
+    markdownContent = await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    return next(new ErrorResponse("Failed to read generated file", 500));
+  }
+
   const unsafeHtml = marked.parse(markdownContent);
-  // 🔥 Convert Markdown → HTML (string)
+
+  // Convert Markdown → sanitized HTML
   const htmlContent = sanitizeHtml(unsafeHtml, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat([
       "h1",
@@ -131,38 +158,56 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     },
   });
 
-  // const { docs, generatedBy = req.user?._id, metadata = {}, isActive = false } = req.body;
-  // const content = await fs.readFile(filePath, "utf8");
+  // Build metadata for the policyHub
+  const combinedMetadata = {
+    source: "ai",
+    model: data?.model || "unknown",
+    promptVersion: "v1",
+    requestedBy: req.user?._id,
+    generatedAt: new Date(),
+    ...req.body,
+    ...data,
+  };
+
+  // Create the main PolicyHub document (versions kept empty — version stored separately)
   const policyHub = await PolicyHub.create({
     client,
     branch,
     docs: htmlContent,
     filePath,
     generatedBy: req.user?._id,
-    metadata: {
-      source: "ai",
-      model: data?.model || "unknown",
-      promptVersion: "v1",
-      requestedBy: req.user?._id,
-      generatedAt: new Date(),
-      ...req.body,
-      ...data,
-    },
+    metadata: combinedMetadata,
     isActive: true,
     versionNumber: 1,
-    versions: [
-      {
-        versionNumber: 1,
-        docs: htmlContent,
-        filePath,
-        metadata: data,
-        editedBy: req.user?._id,
-        editReason: "ai-generation",
-      },
-    ],
+    versions: [], // will store ObjectId ref to PolicyHubVersion
   });
 
-  res.status(201).json({ success: true, data: policyHub });
+  // Create the separate PolicyHubVersion document for version 1
+  const versionDoc = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
+    versionNumber: 1,
+    docs: htmlContent,
+    filePath,
+    metadata: data,
+    isActive: true,
+    editedBy: req.user?._id,
+    editReason: "ai-generation",
+  });
+
+  // Attach version ref to main doc and save
+  policyHub.versions = policyHub.versions || [];
+  policyHub.versions.push(versionDoc._id);
+  await policyHub.save();
+
+  // Return populated PolicyHub (with the new version populated)
+  const populated = await PolicyHub.findById(policyHub._id)
+    .populate({
+      path: "versions",
+      populate: { path: "editedBy", select: "name email" },
+    })
+    .populate("generatedBy", "name email");
+
+  res.status(201).json({ success: true, data: populated });
 });
 
 // @desc    Get single policy hub
@@ -189,45 +234,41 @@ exports.getPolicyHub = asyncHandler(async (req, res, next) => {
 // controllers/policyHubController.js (updated updatePolicyHub)
 exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
   const policyHub = await PolicyHub.findById(req.params.id);
-  if (!policyHub) {
+  if (!policyHub)
     return next(
       new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404),
     );
-  }
 
-  // Create a version snapshot of the current state
-  const nextVersionNumber = (policyHub.versionNumber || 1) + 1;
-  const snapshot = {
+  // Snapshot current state to new version document
+  const snapshot = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
     versionNumber: policyHub.versionNumber || 1,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
     isActive: policyHub.isActive,
-    createdAt: new Date(),
     editedBy: req.user?._id || null,
-    editReason: req.body.editReason || "update", // allow client to pass reason
-  };
+    editReason: req.body.editReason || "update-snapshot",
+  });
 
-  // Push snapshot then update fields
+  // push snapshot id
   policyHub.versions = policyHub.versions || [];
-  policyHub.versions.push(snapshot);
+  policyHub.versions.push(snapshot._id);
 
-  // Apply incoming updates (only allowed fields)
-  // const allowed = ["docs", "filePath", "metadata", "isActive"];
-  // allowed.forEach((k) => {
-  //     if (req.body[k] !== undefined) policyHub[k] = req.body[k];
-  // });
-
+  // Apply incoming updates
   const { docs, filePath, metadata, isActive } = req.body;
   if (docs !== undefined) policyHub.docs = docs;
   if (filePath !== undefined) policyHub.filePath = filePath;
-  policyHub.metadata = {
-    ...policyHub.metadata,
-    editedBy: req.user?._id || null,
-  };
+  if (metadata !== undefined)
+    policyHub.metadata = {
+      ...policyHub.metadata,
+      ...metadata,
+      editedBy: req.user?._id || null,
+    };
   if (isActive !== undefined) policyHub.isActive = isActive;
-  policyHub.versionNumber = nextVersionNumber;
-  policyHub.versionNumber = nextVersionNumber;
+
+  // increment version number for the changed main doc
+  policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
 
   await policyHub.save();
 
@@ -238,28 +279,29 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
 
 // GET /api/v1/policy-hub/:id/versions
 exports.listPolicyHubVersions = asyncHandler(async (req, res, next) => {
-  const policyHub = await PolicyHub.findById(req.params.id).select(
-    "versions versionNumber",
-  );
-  console.log({ policyHub });
-  if (!policyHub) return next(new ErrorResponse("Not found", 404));
-  res.status(200).json({
-    success: true,
-    data: policyHub.versions || [],
-    currentVersion: policyHub.versionNumber,
-  });
+  const { id } = req.params;
+  // basic pagination
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+
+  const query = { policyHub: id };
+  const total = await PolicyHubVersion.countDocuments(query);
+  const versions = await PolicyHubVersion.find(query)
+    .sort({ versionNumber: 1 })
+    .skip((page - 1) * limit)
+    .limit(limit)
+    .populate("editedBy", "name email");
+
+  res.status(200).json({ success: true, data: versions, total, page, limit });
 });
 
 // GET /api/v1/policy-hub/:id/versions/:versionNumber
 exports.getPolicyHubVersion = asyncHandler(async (req, res, next) => {
   const { id, versionNumber } = req.params;
-  const policyHub = await PolicyHub.findById(id).select(
-    "versions versionNumber",
-  );
-  if (!policyHub) return next(new ErrorResponse("Not found", 404));
-  const version = policyHub.versions.find(
-    (v) => String(v.versionNumber) === String(versionNumber),
-  );
+  const version = await PolicyHubVersion.findOne({
+    policyHub: id,
+    versionNumber,
+  }).populate("editedBy", "name email");
   if (!version) return next(new ErrorResponse("Version not found", 404));
   res.status(200).json({ success: true, data: version });
 });
@@ -270,26 +312,27 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
   const policyHub = await PolicyHub.findById(id);
   if (!policyHub) return next(new ErrorResponse("Not found", 404));
 
-  const version = policyHub.versions.find(
-    (v) => String(v.versionNumber) === String(versionNumber),
-  );
+  const version = await PolicyHubVersion.findOne({
+    policyHub: id,
+    versionNumber,
+  });
   if (!version) return next(new ErrorResponse("Version not found", 404));
 
-  // Push current into versions as snapshot before restore
-  const snapshot = {
+  // snapshot current state
+  const snapshot = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
     versionNumber: policyHub.versionNumber || 1,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
     isActive: policyHub.isActive,
-    createdAt: new Date(),
     editedBy: req.user?._id || null,
-    editReason: `auto-restore-from-${versionNumber}`,
-  };
+    editReason: `auto-restore-snapshot-from-${versionNumber}`,
+  });
+  policyHub.versions = policyHub.versions || [];
+  policyHub.versions.push(snapshot._id);
 
-  policyHub.versions.push(snapshot);
-
-  // Restore fields from selected version
+  // apply selected version to main document
   policyHub.docs = version.docs;
   policyHub.filePath = version.filePath;
   policyHub.metadata = version.metadata;
@@ -303,23 +346,23 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
 
 exports.diffPolicyHubVersions = asyncHandler(async (req, res, next) => {
   const { id } = req.params;
-  const { v1, v2 } = req.query; // pass ?v1=1&v2=3
+  const { v1, v2 } = req.query;
 
-  const policyHub = await PolicyHub.findById(id).select(
-    "versions docs versionNumber",
-  );
+  // fetch policyHub for current if needed
+  const policyHub = await PolicyHub.findById(id).select("docs versionNumber");
   if (!policyHub) return next(new ErrorResponse("Not found id", 404));
 
-  const getVersionContent = (num) => {
+  const getVersionContent = async (num) => {
     if (String(num) === String(policyHub.versionNumber)) return policyHub.docs;
-    const v = policyHub.versions.find(
-      (pv) => String(pv.versionNumber) === String(num),
-    );
+    const v = await PolicyHubVersion.findOne({
+      policyHub: id,
+      versionNumber: num,
+    });
     return v ? v.docs : null;
   };
 
-  const left = getVersionContent(v1);
-  const right = getVersionContent(v2);
+  const left = await getVersionContent(v1);
+  const right = await getVersionContent(v2);
   if (left === null || right === null)
     return next(new ErrorResponse("One or both versions not found", 404));
 
