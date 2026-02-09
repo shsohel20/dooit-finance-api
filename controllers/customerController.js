@@ -2108,7 +2108,7 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
 
   const total = await NonIndividualKyc.countDocuments(filter);
   const pages = Math.ceil(total / qLimit);
-
+  console.log(filter)
   const docs = await NonIndividualKyc.find(filter)
     .sort(sort)
     .skip(skip)

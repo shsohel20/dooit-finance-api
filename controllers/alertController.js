@@ -18,8 +18,8 @@ exports.filterAlertSection = (doc, requestBody, req) => {
 // @route  GET /api/v1/alerts
 // @access Public
 exports.getAlerts = asyncHandler(async (req, res, next) => {
-  console.log(req?.user?.client?._id || null)
-  console.log(req?.user?.branch?._id || null)
+  console.log(req?.user?.client?._id || null);
+  console.log(req?.user?.branch?._id || null);
   /*
   #swagger.tags = ['Alert']
   #swagger.summary = 'Get All Alerts'
@@ -77,12 +77,12 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
 
   if (customerId && !customer)
     return next(
-      new ErrorResponse(`Customer not found with id ${customerId}`, 404)
+      new ErrorResponse(`Customer not found with id ${customerId}`, 404),
     );
 
   if (transactionId && !transaction)
     return next(
-      new ErrorResponse(`Transaction not found with id ${transactionId}`, 404)
+      new ErrorResponse(`Transaction not found with id ${transactionId}`, 404),
     );
 
   const alert = await Alert.create({
@@ -177,7 +177,7 @@ exports.getAlert = asyncHandler(async (req, res, next) => {
 
   if (!alert)
     return next(
-      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404)
+      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404),
     );
 
   res.status(200).json({
@@ -215,7 +215,7 @@ exports.deleteAlert = asyncHandler(async (req, res, next) => {
   const alert = await Alert.findById(req.params.id);
   if (!alert)
     return next(
-      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404)
+      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404),
     );
 
   await alert.deleteOne();
@@ -254,7 +254,7 @@ exports.assignAnalyst = asyncHandler(async (req, res, next) => {
   const analyst = await User.findById(analystId);
   if (!analyst)
     return next(
-      new ErrorResponse(`Analyst not found with id ${analystId}`, 404)
+      new ErrorResponse(`Analyst not found with id ${analystId}`, 404),
     );
 
   alert.analyst = analyst._id;
@@ -264,5 +264,68 @@ exports.assignAnalyst = asyncHandler(async (req, res, next) => {
     succeed: true,
     message: `Analyst ${analyst.name} assigned to alert ${alert.uid}`,
     data: alert,
+  });
+});
+
+// @desc   ECCD Dummy Data Creation for Presentation
+// @route  PUT /api/v1/alerts/:id/eccd-dummy
+// @access Private (Admin)
+// assumes asyncHandler, ErrorResponse and Alert are already imported
+exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
+  const { caseNumber } = req.params;
+
+  const alert = await Alert.findOne({ uid: caseNumber });
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with Case Number ${caseNumber}`, 404));
+  }
+
+  let eccdData = alert.metadata?.ecddReport || null;
+  let usedFallback = false;
+  let sourceUid = null;
+
+  // If not available → get random ECCD from another alert
+  if (!eccdData) {
+    const samples = await Alert.aggregate([
+      {
+        $match: {
+          _id: { $ne: alert._id }, // don't pick itself
+          "metadata.ecddReport": { $ne: null },
+        },
+      },
+      { $sample: { size: 1 } },
+      { $project: { uid: 1, "metadata.ecddReport": 1 } },
+    ]);
+
+    if (samples.length > 0) {
+      eccdData = samples[0].metadata.ecddReport;
+      sourceUid = samples[0].uid;
+      usedFallback = true;
+
+      // ✅ ensure metadata object exists
+      if (!alert.metadata) {
+        alert.metadata = {};
+      }
+
+      // ✅ save fallback ECCD into this alert
+      alert.metadata.ecddReport = eccdData;
+      alert.markModified("metadata");
+      await alert.save();
+    }
+  }
+
+  if (!eccdData) {
+    return res.status(200).json({
+      succeed: false,
+      data: null,
+      message: `No ECCD data available anywhere.`,
+    });
+  }
+
+  res.status(200).json({
+    succeed: true,
+    data: eccdData,
+    message: usedFallback
+      ? `ECCD copied from alert ${sourceUid} and saved to alert ${alert.uid}`
+      : `ECCD returned from alert ${alert.uid}`,
   });
 });

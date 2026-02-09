@@ -10,6 +10,7 @@ const {
   deleteAlert,
   filterAlertSection,
   assignAnalyst,
+  getDummyEccdData,
 } = require("../controllers/alertController");
 
 const Alert = require("../models/Alert");
@@ -42,5 +43,7 @@ router.route("/dummy").post(createDummyAlert);
 router.route("/:id").get(getAlert).put(updateAlert).delete(deleteAlert);
 
 router.route("/:id/assign-analyst").put(assignAnalyst);
+
+router.route("/:caseNumber/eccd-dummy").get(getDummyEccdData);
 
 module.exports = router;
