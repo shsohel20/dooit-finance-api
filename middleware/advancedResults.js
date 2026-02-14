@@ -1,3 +1,6 @@
+const colors = require("colors");
+
+
 // const { isObjEmpty } = require("../utils");
 
 // const advancedResults =
@@ -243,11 +246,21 @@ const { isObjEmpty } = require("../utils");
 const advancedResults =
   (model, populate = null, filterSection = null) =>
     async (req, res, next) => {
-      const client = req?.user?.client?._id || null;
-      const branch = req?.user?.branch?._id || null;
+      const client = req?.user?.client?._id || req?.user?.clientBelongs || null;
+      console.log(
+        `Serer running in  mode on port ${client}`.bgRed,
+      );
+
+      const branch = req?.user?.branch?._id || req?.user?.branchBelongs || null;;
       try {
         // Copy req.query
-        const reqQuery = { ...req.query, client, branch };
+        const reqQuery = {
+          ...req.query,
+          clientBelongs: client,
+          branchBelongs: branch,
+          client,
+          branch
+        };
         Object.keys(reqQuery).forEach((key) => {
           if (reqQuery[key] == null) {
             delete reqQuery[key];

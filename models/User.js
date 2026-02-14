@@ -5,6 +5,7 @@ const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const { Schema } = mongoose;
+const autopopulate = require("mongoose-autopopulate");
 
 const UserSchema = new mongoose.Schema(
   {
@@ -67,13 +68,16 @@ const UserSchema = new mongoose.Schema(
       ref: "Client",
       //  required: true,
       index: true,
-      default: null
+      default: null,
+      // autopopulate: true,
     },
     branchBelongs: {
       type: Schema.Types.ObjectId,
       ref: "Branch",
       default: null,
       index: true,
+      // autopopulate: true,
+
     },
 
 
@@ -243,4 +247,7 @@ UserSchema.plugin(AutoIncrement, {
   id: "user_sequence", // unique counter id for this schema
   start_seq: 1,
 });
+
+UserSchema.plugin(autopopulate);
+
 module.exports = mongoose.model("Users", UserSchema);

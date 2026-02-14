@@ -30,6 +30,8 @@ exports.getUsers = asyncHandler(async (req, res, next) => {
     }
   }
 */
+
+
   res.status(200).json(res.advancedResults);
 });
 exports.getUsersPost = asyncHandler(async (req, res, next) => {
@@ -79,8 +81,18 @@ exports.createUser = asyncHandler(async (req, res, next) => {
   #swagger.responses[400] = { description: 'Validation error' }
 */
 
-  const { email } = req.body;
-  const user = await User.create(req.body);
+  // const { email } = req.body;
+  const client = req?.user?.client?._id;
+  const branch = req?.user?.branch?._id;
+  const clientBelongs = client ?? null;
+  const branchBelongs = branch ?? null;
+
+  const obj = {
+    ...req.body,
+    clientBelongs,
+    branchBelongs
+  }
+  const user = await User.create(obj);
 
   res.status(201).json({
     succeed: true,

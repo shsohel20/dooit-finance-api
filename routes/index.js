@@ -26,6 +26,7 @@ const notify = require("./notify");
 const leads = require("./leads");
 const clientRule = require("./clientRules");
 const policyHub = require("./policyHub");
+const trainingModule = require("./trainingModule");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -51,5 +52,6 @@ router.use("/report-notify", notify);
 router.use("/email", leads);
 router.use("/client-rule", clientRule);
 router.use("/policy-hub", policyHub);
+router.use("/training-modules", trainingModule);
 
 module.exports = router;

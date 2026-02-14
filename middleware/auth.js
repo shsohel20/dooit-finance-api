@@ -26,6 +26,14 @@ exports.protect = asyncHandler(async (req, res, next) => {
     const u = await User.findById(decoded.id)
       .populate([
         {
+          path: "clientBelongs", // virtual on User
+          // select: "name _id",
+        },
+        {
+          path: "branchBelongs", // virtual on User
+          // select: "name _id",
+        },
+        {
           path: "client", // virtual on User
           // select: "name _id",
         },
@@ -41,12 +49,14 @@ exports.protect = asyncHandler(async (req, res, next) => {
       ])
       .lean();
 
+    const branchData = u.branch ?? u.branchBelongs ?? {}
+
     req.user = {
       ...u,
       id: u._id,
-      client: u.client ?? u.branch?.client ?? null,
+      client: u.client ?? u.branch?.client ?? u?.clientBelongs ?? null,
       branch: {
-        ...u.branch,
+        ...branchData,
         client: u?.branch?.client?._id,
       },
     };
