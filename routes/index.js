@@ -27,6 +27,7 @@ const leads = require("./leads");
 const clientRule = require("./clientRules");
 const policyHub = require("./policyHub");
 const trainingModule = require("./trainingModule");
+const riskassessment = require("./riskassessment");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -53,5 +54,6 @@ router.use("/email", leads);
 router.use("/client-rule", clientRule);
 router.use("/policy-hub", policyHub);
 router.use("/training-modules", trainingModule);
+router.use("/risk-assessment", riskassessment);
 
 module.exports = router;

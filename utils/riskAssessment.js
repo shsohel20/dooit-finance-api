@@ -402,17 +402,56 @@ function lookupFactor(list, raw) {
 }
 
 /** detect retention using relation.registeredAt or customer.createdAt */
+// function detectCustomerRetentionScore(customer = {}, relation = {}) {
+//   const now = Date.now();
+//   const registeredAt = relation?.registeredAt
+//     ? new Date(relation.registeredAt).getTime()
+//     : customer?.createdAt
+//       ? new Date(customer.createdAt).getTime()
+//       : null;
+//   if (!registeredAt) return { value: "New", score: 30 };
+//   const years = (now - registeredAt) / (1000 * 60 * 60 * 24 * 365.25);
+//   if (years >= 3) return { value: "3+ Years", score: 10 };
+//   if (years >= 1) return { value: "1-3 Years", score: 20 };
+//   return { value: "New", score: 30 };
+// }
+
+function parseRetentionValue(value) {
+  if (!value) return null;
+
+  const clean = value.replace(/\(.*\)/, "").trim();
+
+  const map = {
+    New: { value: "New", score: 30 },
+    "1-3 Years": { value: "1-3 Years", score: 20 },
+    "3+ Years": { value: "3+ Years", score: 10 },
+  };
+
+  return map[clean] || null;
+}
 function detectCustomerRetentionScore(customer = {}, relation = {}) {
+  // ✅ Priority: explicit retention value from payload
+  if (customer.retention) {
+    const parsed = parseRetentionValue(customer.retention);
+    if (parsed) return parsed;
+  }
+
+  // ✅ Fallback: calculate from dates
   const now = Date.now();
+
   const registeredAt = relation?.registeredAt
     ? new Date(relation.registeredAt).getTime()
     : customer?.createdAt
       ? new Date(customer.createdAt).getTime()
       : null;
+
   if (!registeredAt) return { value: "New", score: 30 };
+
   const years = (now - registeredAt) / (1000 * 60 * 60 * 24 * 365.25);
+
   if (years >= 3) return { value: "3+ Years", score: 10 };
   if (years >= 1) return { value: "1-3 Years", score: 20 };
+
   return { value: "New", score: 30 };
 }
 
