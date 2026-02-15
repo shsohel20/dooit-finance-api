@@ -108,34 +108,40 @@ exports.getCustomerDropdown = asyncHandler(async (req, res) => {
 
   // basic search
   if (q) {
-    filter.$or = [
-      { uid: new RegExp(q, "i") },
-      {
-        "personalKyc.personal_form.customer_details.given_name": new RegExp(
-          q,
-          "i",
-        ),
-      },
-      {
-        "personalKyc.personal_form.customer_details.surname": new RegExp(
-          q,
-          "i",
-        ),
-      },
-      {
-        "personalKyc.personal_form.contact_details.email": new RegExp(q, "i"),
-      },
-    ];
+    const tokens = q.trim().split(/\s+/);
+
+    filter.$and = tokens.map((word) => ({
+      $or: [
+        { uid: new RegExp(word, "i") },
+        {
+          "personalKyc.personal_form.customer_details.given_name":
+            new RegExp(word, "i"),
+        },
+        {
+          "personalKyc.personal_form.customer_details.surname":
+            new RegExp(word, "i"),
+        },
+        {
+          "personalKyc.personal_form.contact_details.email":
+            new RegExp(word, "i"),
+        },
+      ],
+    }));
   }
 
   const customers = await Customer.find(filter)
+
 
     .limit(Number(limit))
     .sort({ createdAt: -1 });
   // IMPORTANT → enables your risk virtuals
 
+  // console.log(customers[0])
+
   const data = customers.map((c) => {
     const rel = c.relations?.[0];
+
+
 
     return {
       id: c._id,

@@ -7,6 +7,7 @@ const {
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
+const { fieldEncryption } = require("mongoose-field-encryption");
 
 const PersonalFormSchema = new Schema(
   {
@@ -202,6 +203,9 @@ const CustomerSchema = new Schema(
       date: Date,
     },
     authorized: { type: Authorization, default: {} },
+
+    isDataEncrypted: { type: Boolean, default: false },
+
   },
   {
     timestamps: true,
@@ -284,6 +288,13 @@ CustomerSchema.index(
   { unique: true, sparse: true, name: "customer_relation_unique" }
 );
 
+CustomerSchema.index({
+  uid: "text",
+  "personalKyc.personal_form.customer_details.given_name": "text",
+  "personalKyc.personal_form.customer_details.surname": "text",
+  "personalKyc.personal_form.contact_details.email": "text",
+});
+
 // CustomerSchema.post("save", async function (doc, next) {
 //   if (!doc.uid && doc.sequence) {
 //     const padded = String(doc.sequence).padStart(3, "0");
@@ -344,4 +355,10 @@ CustomerSchema.virtual("riskLabel").get(function () {
   const plain = this.toObject({ virtuals: false, getters: false });
   return buildRiskAssessmentFromCustomer(plain).riskLabel;
 });
+
+CustomerSchema.plugin(fieldEncryption, {
+  fields: ["personalKyc", "documents", "declaration"],
+  secret: process.env.DATA_ENCRYPTION_KEY,
+});
+
 module.exports = mongoose.model("Customer", CustomerSchema);
