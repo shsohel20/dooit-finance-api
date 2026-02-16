@@ -17,7 +17,9 @@ const Alert = require("../models/Alert");
 const advancedResults = require("../middleware/advancedResults");
 
 const { protect, authorize } = require("../middleware/auth");
+
 const router = express.Router();
+
 router.use(express.json({ limit: "100kb" }));
 
 // Protect all alert routes and allow only admin by default

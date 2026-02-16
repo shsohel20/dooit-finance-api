@@ -2,6 +2,7 @@
 "use strict";
 
 const dayjs = require("dayjs");
+const { getCache } = require("./riskFactorCache");
 
 /**
  * Jurisdiction bands from CRA doc (lowercased).
@@ -64,6 +65,8 @@ const HRC = new Set([
   "isle of man",
   "jamaica",
   "kenya",
+  "kuwait",
+  "papua new guinea",
   "lao pdr",
   "laos",
   "liberia",
@@ -149,7 +152,7 @@ const MRC = new Set([
   "jordan",
   "kazakhstan",
   "kiribati",
-  "kuwait",
+
   "kyrgyzstan",
   "latvia",
   "lesotho",
@@ -165,7 +168,6 @@ const MRC = new Set([
   "morocco",
   "oman",
   "palau",
-  "papua new guinea",
   "paraguay",
   "peru",
   "qatar",
@@ -368,38 +370,75 @@ function norm(s) {
 }
 
 /** get jurisdiction band object from country string */
-function getJurisdictionRisk(countryRaw) {
-  const c = norm(countryRaw).replace(/\u2019/g, "'"); // fix curly apostrophe
-  if (!c) return { value: "", score: 0, band: null };
+// function getJurisdictionRisk(countryRaw) {
+//   const c = norm(countryRaw).replace(/\u2019/g, "'"); // fix curly apostrophe
+//   if (!c) return { value: "", score: 0, band: null };
 
-  // Direct name matches: check sets (we used many possible forms in lists; try contains)
-  if (UHRC.has(c) || (c.includes("korea") && c.includes("north"))) {
-    return { value: countryRaw, score: 50, band: "UHRC" };
+//   // Direct name matches: check sets (we used many possible forms in lists; try contains)
+//   if (UHRC.has(c) || (c.includes("korea") && c.includes("north"))) {
+//     return { value: countryRaw, score: 50, band: "UHRC" };
+//   }
+//   if (HRC.has(c)) return { value: countryRaw, score: 50, band: "HRC" };
+//   if (MRC.has(c)) return { value: countryRaw, score: 30, band: "MRC" };
+//   if (LRC.has(c)) return { value: countryRaw, score: 10, band: "LRC" };
+//   // fallback: treat unknown as MRC (medium)
+//   return { value: countryRaw, score: 30, band: "MRC" };
+// }
+
+function getJurisdictionRisk(countryRaw) {
+  const { countries } = getCache();
+  const s = norm(countryRaw);
+
+  const found = countries.find(c =>
+    c.country === s ||
+    (c.aliases || []).includes(s)
+  );
+
+  if (!found) {
+    return { value: countryRaw, score: 30, band: "MRC" };
   }
-  if (HRC.has(c)) return { value: countryRaw, score: 50, band: "HRC" };
-  if (MRC.has(c)) return { value: countryRaw, score: 30, band: "MRC" };
-  if (LRC.has(c)) return { value: countryRaw, score: 10, band: "LRC" };
-  // fallback: treat unknown as MRC (medium)
-  return { value: countryRaw, score: 30, band: "MRC" };
+
+  return {
+    value: countryRaw,
+    score: found.score,
+    band: found.band,
+  };
 }
+
 
 /** fuzzy lookup: exact or substring match, case-insensitive */
-function lookupFactor(list, raw) {
-  if (!raw) return { value: "", score: 0 };
+// function lookupFactor(list, raw) {
+//   if (!raw) return { value: "", score: 0 };
+//   const s = norm(raw);
+//   // exact match first
+//   for (const item of list) {
+//     if (norm(item.value) === s) return { value: item.value, score: item.score };
+//   }
+//   // contains match
+//   for (const item of list) {
+//     const v = norm(item.value);
+//     if (s.includes(v) || v.includes(s))
+//       return { value: item.value, score: item.score };
+//   }
+//   // no match -> return raw as value, score 0
+//   return { value: raw, score: 0 };
+// }
+
+
+function lookupFactorDynamic(factorName, raw) {
+  const { factors } = getCache();
+  const list = factors[factorName] || [];
   const s = norm(raw);
-  // exact match first
-  for (const item of list) {
-    if (norm(item.value) === s) return { value: item.value, score: item.score };
-  }
-  // contains match
-  for (const item of list) {
-    const v = norm(item.value);
-    if (s.includes(v) || v.includes(s))
-      return { value: item.value, score: item.score };
-  }
-  // no match -> return raw as value, score 0
-  return { value: raw, score: 0 };
+
+  const found =
+    list.find(x => norm(x.value) === s) ||
+    list.find(x => (x.aliases || []).includes(s));
+
+  return found
+    ? { value: found.value, score: found.score }
+    : { value: raw, score: 0 };
 }
+
 
 /** detect retention using relation.registeredAt or customer.createdAt */
 // function detectCustomerRetentionScore(customer = {}, relation = {}) {
@@ -465,7 +504,8 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
     (Array.isArray(customer.relations) && customer.relations[0]) || {};
   const requestedType = relation?.type || customer.type || "individual";
   // customerType - lookup from FACTORS.customerType
-  const customerType = lookupFactor(FACTORS.customerType, requestedType);
+  // const customerType = lookupFactor(FACTORS.customerType, requestedType);
+  const customerType = lookupFactorDynamic("customerType", requestedType);
 
   // jurisdiction - try multiple sources
   const country =
@@ -487,12 +527,14 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
     // choose the highest scoring product from FACTORS.product
     let best = { value: "", score: 0 };
     for (const p of customer.metadata.products) {
-      const found = lookupFactor(FACTORS.product, p);
+      // const found = lookupFactor(FACTORS.product, p);
+      const found = lookupFactorDynamic("product", p);
       if ((found.score || 0) > (best.score || 0)) best = found;
     }
     productLookupRaw = best.value;
   }
-  const product = lookupFactor(FACTORS.product, productLookupRaw);
+  // const product = lookupFactor(FACTORS.product, productLookupRaw);
+  const product = lookupFactorDynamic("product", productLookupRaw);
 
   // channel: relation.source or onboardingChannel or metadata.channel
   const channelRaw =
@@ -501,7 +543,8 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
     customer.onboardingChannel ||
     (customer.metadata && customer.metadata.channel) ||
     "in-branch";
-  const channel = lookupFactor(FACTORS.channel, channelRaw);
+  // const channel = lookupFactor(FACTORS.channel, channelRaw);
+  const channel = lookupFactorDynamic("channel", channelRaw);
 
   // occupation: personalKyc.personal_form.employment_details.occupation or metadata.occupation
   const occupationRaw =
@@ -511,7 +554,8 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
       customer.personalKyc.personal_form.employment_details.occupation) ||
     customer.metadata?.occupation ||
     "";
-  const occupation = lookupFactor(FACTORS.occupation, occupationRaw);
+  // const occupation = lookupFactor(FACTORS.occupation, occupationRaw);
+  const occupation = lookupFactorDynamic("occupation", occupationRaw);
 
   // industry: personalKyc.employment_details.industry or metadata.industry or company KYC
   const industryRaw =
@@ -524,7 +568,8 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
       customer.companyKyc.general_information &&
       customer.companyKyc.general_information.industry) ||
     "";
-  const industry = lookupFactor(FACTORS.industry, industryRaw);
+  // const industry = lookupFactor(FACTORS.industry, industryRaw);
+  const industry = lookupFactorDynamic("industry", industryRaw);
 
   const assessment = {
     customerType,

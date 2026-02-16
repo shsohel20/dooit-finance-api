@@ -1,6 +1,24 @@
 const asyncHandler = require("../middleware/async");
+const CountryRisk = require("../models/CountryRisk");
 const Customer = require("../models/Customer");
 const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
+const RiskFactorOption = require("../models/RiskFactorOption");
+const { Parser } = require("json2csv");
+const { Readable } = require("stream");
+
+
+
+const csv = require("csv-parser");
+const fs = require("fs");
+
+
+
+function bufferToStream(buffer) {
+  const stream = new Readable();
+  stream.push(buffer);
+  stream.push(null);
+  return stream;
+}
 const {
   FACTORS,
   UHRC,
@@ -8,6 +26,7 @@ const {
   MRC,
   LRC,
   buildRiskAssessmentFromCustomer,
+  buildRiskAssessmentPerRelation,
 } = require("../utils/riskAssessment");
 
 // build score map from FACTORS.jurisdiction
@@ -55,15 +74,60 @@ function buildCountryRiskList() {
   );
 }
 
-exports.getRiskFactors = asyncHandler(async (req, res, next) => {
-  // send FACTORS as-is (client uses value/score lists for dropdowns)
-  const data = buildCountryRiskList();
+async function buildCountryRiskListFromDB() {
+  const rows = await CountryRisk.find({})
+    .select("country band score")
+    .lean();
 
-  return res.json({ success: true, data: { ...FACTORS, countries: data } });
+  return rows
+    .map(r => ({
+      country: titleCase(r.country),
+      band: r.band,
+      score: r.score,
+    }))
+    .sort((a, b) => a.country.localeCompare(b.country));
+}
+
+
+// exports.getRiskFactors = asyncHandler(async (req, res, next) => {
+//   // send FACTORS as-is (client uses value/score lists for dropdowns)
+//   const data = buildCountryRiskList();
+
+//   return res.json({ success: true, data: { ...FACTORS, countries: data } });
+// });
+
+exports.getRiskFactors = asyncHandler(async (req, res) => {
+  const rows = await RiskFactorOption.find({})
+    .select("factor value score risk industry")
+    .lean();
+
+  // group by factor
+  const grouped = {};
+
+  for (const r of rows) {
+    if (!grouped[r.factor]) grouped[r.factor] = [];
+    grouped[r.factor].push({
+      value: r.value,
+      score: r.score,
+      risk: r.risk || null,
+      industry: r.industry || null,
+    });
+  }
+
+  const countries = await buildCountryRiskListFromDB();
+
+  res.json({
+    success: true,
+    data: {
+      ...grouped,
+      countries,
+    },
+  });
 });
 
+
 exports.getJurisdictions = asyncHandler(async (req, res, next) => {
-  const data = buildCountryRiskList();
+  const data = await buildCountryRiskListFromDB();
 
   res.json({
     success: true,
@@ -185,11 +249,18 @@ exports.assessFromBody = asyncHandler(async (req, res) => {
 
   // 1️⃣ compute
   const result = buildRiskAssessmentFromCustomer(payload);
+  const { summary } = buildRiskAssessmentPerRelation(payload);
+  // const { relationRisks } = buildRiskAssessmentPerRelation(payload);
 
   // 5️⃣ return saved doc
   res.json({
     success: true,
-    data: result,
+    data: {
+      ...result,
+      summary,
+      // relationRisks
+    },
+
   });
 });
 
@@ -278,4 +349,366 @@ exports.assessCustomerById = asyncHandler(async (req, res) => {
 exports.getIndividualRiskAssessments = asyncHandler(async (req, res, next) => {
   // assumes advancedResults middleware populates res.advancedResults
   res.status(200).json(res.advancedResults);
+});
+
+
+//// Risk dynamic model manipulation 
+
+// GET /risk/countries
+// exports.getCountryRisks = asyncHandler(async (req, res) => {
+//   const { q, band } = req.query;
+
+//   const filter = {};
+
+//   if (band) {
+//     filter.band = band.toUpperCase();
+//   }
+
+//   if (q) {
+//     filter.country = new RegExp(q, "i");
+//   }
+
+//   const rows = await CountryRisk.find(filter)
+//     .sort({ country: 1 })
+//     .lean();
+
+//   res.json({
+//     success: true,
+//     count: rows.length,
+//     data: rows,
+//   });
+// });
+
+exports.getCountryRisks = asyncHandler(async (req, res, next) => {
+  // assumes advancedResults middleware populates res.advancedResults
+  res.status(200).json(res.advancedResults);
+});
+
+
+// POST /risk/countries
+exports.createCountryRisk = asyncHandler(async (req, res) => {
+  const payload = req.body;
+
+  const createOne = (row) => {
+    const band = row.band.toUpperCase();
+
+    return {
+      country: titleCase(row.country),
+      band,
+      score: row.score ?? bandScoreMap[band] ?? 0,
+    };
+  };
+
+  let docs;
+
+  if (Array.isArray(payload)) {
+    docs = payload.map(createOne);
+    docs = await CountryRisk.insertMany(docs);
+  } else {
+    docs = await CountryRisk.create(createOne(payload));
+  }
+
+  res.status(201).json({
+    success: true,
+    data: docs,
+  });
+});
+
+// PUT /risk/countries/:id
+exports.updateCountryRisk = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const update = { ...req.body };
+
+  if (update.country) {
+    update.country = titleCase(update.country);
+  }
+
+  if (update.band) {
+    update.band = update.band.toUpperCase();
+    if (update.score == null) {
+      update.score = bandScoreMap[update.band] ?? 0;
+    }
+  }
+
+  const doc = await CountryRisk.findByIdAndUpdate(id, update, {
+    new: true,
+    runValidators: true,
+  });
+
+  if (!doc) {
+    return res.status(404).json({
+      success: false,
+      message: "Country risk not found",
+    });
+  }
+
+  res.json({
+    success: true,
+    data: doc,
+  });
+});
+
+exports.deleteCountryRisk = asyncHandler(async (req, res) => {
+
+
+  const countryRisk = await CountryRisk.findById(req.params.id);
+  if (!countryRisk) {
+    return next(
+      new ErrorResponse(`countryRisk not found with id of ${req.params.id}`, 404),
+    );
+  }
+
+  user.deleteOne();
+
+  res.status(200).json({
+    success: true,
+    data: req.params.id,
+  });
+
+  res.status(201).json({
+    success: true,
+    data: docs,
+  });
+});
+
+
+
+
+// GET /risk/factors
+// exports.getRiskFactorOptions = asyncHandler(async (req, res) => {
+//   const { factor } = req.query;
+
+//   const filter = {};
+//   if (factor) filter.factor = factor;
+
+//   const rows = await RiskFactorOption.find(filter)
+//     .sort({ factor: 1, score: -1 })
+//     .lean();
+
+//   // if factor specified → return flat
+//   if (factor) {
+//     return res.json({
+//       success: true,
+//       count: rows.length,
+//       data: rows,
+//     });
+//   }
+
+//   // else group by factor
+//   const grouped = {};
+
+//   for (const r of rows) {
+//     if (!grouped[r.factor]) grouped[r.factor] = [];
+
+//     grouped[r.factor].push({
+//       id: r._id,
+//       value: r.value,
+//       score: r.score,
+//       risk: r.risk,
+//       industry: r.industry,
+//     });
+//   }
+
+//   res.json({
+//     success: true,
+//     data: grouped,
+//   });
+// });
+
+exports.getRiskFactorOptions = asyncHandler(async (req, res, next) => {
+  // assumes advancedResults middleware populates res.advancedResults
+  res.status(200).json(res.advancedResults);
+});
+
+
+
+// POST /risk/factors
+exports.createRiskFactorOption = asyncHandler(async (req, res) => {
+  const payload = req.body;
+
+  const normalize = (r) => ({
+    factor: r.factor.toLowerCase(),
+    value: r.value,
+    score: r.score,
+    risk: r.risk || null,
+    industry: r.industry || null,
+  });
+
+  let docs;
+
+  if (Array.isArray(payload)) {
+    docs = await RiskFactorOption.insertMany(payload.map(normalize));
+  } else {
+    docs = await RiskFactorOption.create(normalize(payload));
+  }
+
+  res.status(201).json({
+    success: true,
+    data: docs,
+  });
+});
+
+
+// PUT /risk/factors/:id
+exports.updateRiskFactorOption = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const update = { ...req.body };
+
+  if (update.factor) {
+    update.factor = update.factor.toLowerCase();
+  }
+
+  const doc = await RiskFactorOption.findByIdAndUpdate(
+    id,
+    update,
+    {
+      new: true,
+      runValidators: true,
+    }
+  );
+
+  if (!doc) {
+    return res.status(404).json({
+      success: false,
+      message: "Risk factor option not found",
+    });
+  }
+
+  res.json({
+    success: true,
+    data: doc,
+  });
+});
+
+
+// DELETE /risk/factors/:id
+exports.deleteRiskFactorOption = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const doc = await RiskFactorOption.findByIdAndDelete(id);
+
+  if (!doc) {
+    return res.status(404).json({
+      success: false,
+      message: "Risk factor option not found",
+    });
+  }
+
+  res.json({
+    success: true,
+    message: "Risk factor option deleted",
+    data: doc._id,
+  });
+});
+
+// =========================
+// ✅ EXPORT — COUNTRY RISK → CSV
+// =========================
+
+exports.exportCountryRiskCsv = asyncHandler(async (req, res) => {
+  const rows = await CountryRisk.find({})
+    .select("country band score")
+    .lean();
+
+  const parser = new Parser({
+    fields: ["country", "band", "score", "aliases", "source"],
+  });
+
+  const csv = parser.parse(rows);
+
+  res.header("Content-Type", "text/csv");
+  res.attachment("country-risk.csv");
+  return res.send(csv);
+});
+
+// =========================
+// ✅ EXPORT — RISK FACTORS → CSV
+// =========================
+exports.exportRiskFactorsCsv = asyncHandler(async (req, res) => {
+  const rows = await RiskFactorOption.find({})
+    .select("factor value score risk industry")
+    .lean();
+
+  const parser = new Parser({
+    fields: ["factor", "value", "score", "risk", "industry"],
+  });
+
+  const csv = parser.parse(rows);
+
+  res.header("Content-Type", "text/csv");
+  res.attachment("risk-factors.csv");
+  res.send(csv);
+});
+
+
+
+
+exports.importCountryRiskCsv = asyncHandler(async (req, res) => {
+
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      message: "CSV file required",
+    });
+  }
+
+  const rows = [];
+
+  await new Promise((resolve, reject) => {
+    bufferToStream(req.file.buffer)
+      .pipe(csv())
+      .on("data", (row) => {
+        rows.push({
+          country: row.country.toLowerCase().trim(),
+          band: row.band.trim(),
+          score: Number(row.score),
+        });
+      })
+      .on("end", resolve)
+      .on("error", reject);
+  });
+
+  await CountryRisk.deleteMany({});
+  await CountryRisk.insertMany(rows);
+
+  res.json({
+    success: true,
+    inserted: rows.length,
+  });
+});
+
+
+exports.importRiskFactorsCsv = asyncHandler(async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      message: "CSV file required",
+    });
+  }
+
+  const rows = [];
+
+  await new Promise((resolve, reject) => {
+    bufferToStream(req.file.buffer)
+      .pipe(csv())
+      .on("data", (row) => {
+        rows.push({
+          factor: row.factor.toLowerCase().trim(),
+          value: row.value.trim(),
+          score: Number(row.score),
+          risk: row.risk || null,
+          industry: row.industry || null,
+        });
+      })
+      .on("end", resolve)
+      .on("error", reject);
+  });
+
+  await RiskFactorOption.deleteMany({});
+  await RiskFactorOption.insertMany(rows);
+
+  res.json({
+    success: true,
+    inserted: rows.length,
+  });
 });

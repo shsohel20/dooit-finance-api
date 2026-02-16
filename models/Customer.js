@@ -9,6 +9,12 @@ const AutoIncrement = require("mongoose-sequence")(mongoose);
 const { Schema } = mongoose;
 const { fieldEncryption } = require("mongoose-field-encryption");
 
+const ENC_FIELDS = ["personalKyc", "documents", "declaration", "kycStatus"];
+
+function hasAnyEncryptedFlag(doc) {
+  return ENC_FIELDS.some(f => doc[`__enc_${f}`]);
+}
+
 const PersonalFormSchema = new Schema(
   {
     customer_details: {
@@ -304,12 +310,52 @@ CustomerSchema.index({
 //   next();
 // });
 
-CustomerSchema.pre("save", async function (next) {
-  if (this.isNew && !this.uid) {
-    this.uid = `CR_${Date.now()}`;
+CustomerSchema.pre("save", function (next) {
+  try {
+    // your existing uid logic
+    if (this.isNew && !this.uid) {
+      this.uid = `CR_${Date.now()}`;
+    }
+
+    const encrypted = hasAnyEncryptedFlag(this);
+
+    if (this.isDataEncrypted && !encrypted) {
+      // encrypt now
+      if (this.encryptFieldsSync) {
+        this.encryptFieldsSync();
+      }
+    }
+
+    if (!this.isDataEncrypted && encrypted) {
+      // decrypt before save
+      if (this.decryptFieldsSync) {
+        this.decryptFieldsSync();
+      }
+    }
+
+    next();
+  } catch (err) {
+    next(err);
   }
-  next();
 });
+
+function autoDecrypt(doc) {
+  if (!doc) return;
+  if (hasAnyEncryptedFlag(doc) && doc.decryptFieldsSync) {
+    try {
+      doc.decryptFieldsSync();
+    } catch (e) { }
+  }
+}
+
+CustomerSchema.post("init", autoDecrypt);
+
+CustomerSchema.post("find", function (docs) {
+  docs.forEach(autoDecrypt);
+});
+
+CustomerSchema.post("findOne", autoDecrypt);
+
 CustomerSchema.methods.clearInviteToken = function () {
   this.inviteToken = undefined;
   this.inviteTokenExpire = undefined;

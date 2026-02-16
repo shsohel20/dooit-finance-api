@@ -247,9 +247,7 @@ const advancedResults =
   (model, populate = null, filterSection = null) =>
     async (req, res, next) => {
       const client = req?.user?.client?._id || req?.user?.clientBelongs || null;
-      console.log(
-        `Serer running in  mode on port ${client}`.bgRed,
-      );
+
 
       const branch = req?.user?.branch?._id || req?.user?.branchBelongs || null;;
       try {

@@ -2,7 +2,7 @@ const path = require("path");
 const express = require("express");
 const dotenv = require("dotenv");
 const colors = require("colors");
-const upload = require("express-fileupload");
+// const upload = require("express-fileupload");
 const errorHandler = require("./middleware/error");
 const morgan = require("morgan");
 const cloudinary = require("cloudinary").v2;
@@ -18,6 +18,7 @@ const routes = require("./routes");
 
 const cors = require("cors");
 const { connectDB } = require("./config/db");
+
 // const mongoSanitize = require("express-mongo-sanitize");
 const helmet = require("helmet");
 // const xss = require("xss-filters");
@@ -57,7 +58,7 @@ cloudinary.config({
   secure: true,
 });
 ///File Upload
-app.use(upload({ useTempFiles: true }));
+// app.use(upload({ useTempFiles: true }));
 //Make static path to access publicly
 app.use(express.static(path.join(__dirname, "public")));
 
