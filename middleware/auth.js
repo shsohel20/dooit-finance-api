@@ -68,7 +68,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
         clientId: clientId.toString(),
         branchId: branchId ? branchId.toString() : null,
         format: "base64",
-        useUrl: false,
+
       });
     }
 
