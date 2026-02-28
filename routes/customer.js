@@ -60,8 +60,6 @@ router.post(
 );
 router.post(
   "/invite-from-qr",
-  protect,
-  authorize("admin", "client", "branch", "user"),
   createInviteFromQr,
 );
 router.get(
