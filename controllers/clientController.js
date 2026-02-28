@@ -4,6 +4,7 @@ const Client = require("../models/Client");
 const User = require("../models/User");
 const { validateClientCreation } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
+const { generateQR } = require("../utils/qrService");
 
 /**
  * Simple filter helper similar to filterUserSection
@@ -287,7 +288,7 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
           email &&
           String(email).trim() !== "" &&
           String(linkedUser.email).trim().toLowerCase() !==
-            String(email).trim().toLowerCase()
+          String(email).trim().toLowerCase()
         ) {
           linkedUser.email = email;
           shouldSaveUser = true;
@@ -297,7 +298,7 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
           userName &&
           String(userName).trim() !== "" &&
           String(linkedUser.userName).trim().toLowerCase() !==
-            String(userName).trim().toLowerCase()
+          String(userName).trim().toLowerCase()
         ) {
           linkedUser.userName = userName;
           shouldSaveUser = true;
@@ -407,9 +408,8 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
 
       return res.status(200).json({
         success: true,
-        message: `Client ${
-          hardDelete ? "hard-deleted" : "deleted"
-        } successfully`,
+        message: `Client ${hardDelete ? "hard-deleted" : "deleted"
+          } successfully`,
         data: {
           id: clientId,
           deletedUser: deleteLinkedUser ? linkedUserId : null,
@@ -560,3 +560,5 @@ exports.createDummyClient = asyncHandler(async (req, res, next) => {
     id: client._id,
   });
 });
+
+

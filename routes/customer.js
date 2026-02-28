@@ -14,6 +14,8 @@ const {
   getTrustKycs,
   getTrustKyc,
   getNonIndividualKycs,
+  createInviteFromQr,
+  downloadQR,
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
@@ -56,6 +58,21 @@ router.post(
   authorize("admin", "client", "branch", "user"),
   createInvite,
 );
+router.post(
+  "/invite-from-qr",
+  protect,
+  authorize("admin", "client", "branch", "user"),
+  createInviteFromQr,
+);
+router.get(
+  "/download-qr",
+  protect,
+  authorize("admin", "client", "branch", "user"),
+  downloadQR,
+);
+
+
+
 
 router
   .route("/:id", protect, authorize("admin", "client", "branch"))

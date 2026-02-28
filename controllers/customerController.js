@@ -16,6 +16,7 @@ const Customer = require("../models/Customer");
 const Client = require("../models/Client");
 const Branch = require("../models/Branch");
 const User = require("../models/User");
+const { generateQR } = require("../utils/qrService");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -638,6 +639,153 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
     success: true,
     message: "Invite created",
     data: {
+      customerId: customer._id,
+      relationIndex: relIndex,
+    },
+    invite:
+      process.env.NODE_ENV === "development"
+        ? { url, token: plain }
+        : undefined,
+  });
+});
+exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
+
+  const {
+    client,
+    branch,
+    contact,
+    relationType = "individual",
+    onboardingChannel = "app",
+    source = "in-branch",
+    notes = "",
+  } = req.body;
+
+  if (!contact || (!contact.email && !contact.phone)) {
+    return next(new ErrorResponse("Provide email or phone", 400));
+  }
+
+  // ---------------------------
+  // Validate relationType
+  // ---------------------------
+  const allowedTypes = [
+    "individual",
+    "company",
+    "partnership",
+    "government_body",
+    "association",
+    "cooperative",
+    "trust",
+  ];
+
+  const safeType = allowedTypes.includes(relationType)
+    ? relationType
+    : "individual";
+
+  // ---------------------------
+  // Find user
+  // ---------------------------
+  const email = contact.email?.toLowerCase() || null;
+  const phone = contact.phone || null;
+
+  let user = null;
+  if (email) user = await User.findOne({ email });
+  if (!user && phone) user = await User.findOne({ phone });
+
+  // ---------------------------
+  // Find customer
+  // ---------------------------
+  let customer = user
+    ? await Customer.findOne({ user: user._id })
+    : null;
+
+  // ---------------------------
+  // Create customer if needed
+  // ---------------------------
+  if (!customer) {
+    customer = new Customer({
+      relations: [
+        {
+          client,
+          branch,
+          type: safeType,
+          onboardingChannel: onboardingChannel || "",
+          source,
+          notes,
+          active: true,
+          invitedBy: req.user?._id,
+        },
+      ],
+      metadata: {
+        invitedBy: req.user?._id,
+        client,
+        branch,
+        ...contact,
+      },
+    });
+  }
+
+  // ---------------------------
+  // 🔧 Repair old broken relations
+  // ---------------------------
+  customer.relations.forEach(r => {
+    if (!r.type) r.type = "individual";
+  });
+
+  // ---------------------------
+  // Ensure relation exists
+  // ---------------------------
+  let relIndex = customer.relations.findIndex(r =>
+    r.client?.toString() === client.toString() &&
+    (branch ? r.branch?.toString() === branch.toString() : !r.branch)
+  );
+
+  if (relIndex === -1) {
+    customer.relations.push({
+      client,
+      branch,
+      type: safeType,
+      onboardingChannel: onboardingChannel || "",
+      source,
+      notes,
+      active: true,
+      invitedBy: req.user?._id,
+    });
+    relIndex = customer.relations.length - 1;
+  } else {
+    const r = customer.relations[relIndex];
+    r.type = safeType;
+    r.source = source || r.source;
+    r.notes = notes || r.notes;
+    if (onboardingChannel) r.onboardingChannel = onboardingChannel;
+    r.active = true;
+    if (!r.invitedBy) r.invitedBy = req.user?._id;
+  }
+
+  // ---------------------------
+  // Set relation invite token
+  // ---------------------------
+  const plain = customer.setRelationInvite(relIndex);
+
+  await customer.save();
+
+  // ---------------------------
+  // Build invite URL
+  // ---------------------------
+  const INVITE_BASE =
+    process.env.CLIENT_INVITE_URL ||
+    "http://localhost:3000/accept-invite";
+
+  const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
+
+
+  // ---------------------------
+  // Response
+  // ---------------------------
+  res.status(201).json({
+    success: true,
+    message: "Invite created",
+    data: {
+      url,
       customerId: customer._id,
       relationIndex: relIndex,
     },
@@ -2125,4 +2273,49 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
     pages,
     data: docs,
   });
+});
+
+
+exports.downloadQR = asyncHandler(async (req, res, next) => {
+  const { format = "png" } = req.query;
+
+  const clientId = req.user?.client?._id;
+  const branchId = req.user?.branch?._id || null;
+
+  if (!clientId) {
+    return next(new ErrorResponse("Client not found for this user", 400));
+  }
+
+  // ============================
+  // Generate QR
+  // ============================
+
+  const qr = await generateQR({
+    clientId: clientId.toString(),
+    branchId: branchId ? branchId.toString() : null,
+    format,
+    useUrl: true,
+  });
+
+  // ============================
+  // Send File
+  // ============================
+
+  if (format === "svg") {
+    res.setHeader("Content-Type", "image/svg+xml");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=qr-${branchId || clientId}.svg`
+    );
+    return res.send(qr);
+  }
+
+  // Default PNG
+  res.setHeader("Content-Type", "image/png");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename=qr-${branchId || clientId}.png`
+  );
+
+  return res.send(qr);
 });

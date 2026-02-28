@@ -10,6 +10,7 @@ const {
   updateClientStatus,
   getClientBySlug,
   createDummyClient,
+  downloadQR,
 } = require("../controllers/clientController");
 
 const Client = require("../models/Client");
