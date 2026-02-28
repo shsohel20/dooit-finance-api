@@ -45,12 +45,14 @@ exports.getCustomers = asyncHandler(async (req, res, next) => {
 // @access Public
 exports.getCustomer = asyncHandler(async (req, res, next) => {
   const customer = await Customer.findById(req.params.id).populate("user");
-
   if (!customer) {
     return next(
       new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404)
     );
   }
+
+  //customer.isDataEncrypted = true;
+
   res.status(200).json({
     success: true,
     data: customer,

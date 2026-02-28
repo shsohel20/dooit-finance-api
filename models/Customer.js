@@ -7,13 +7,30 @@ const {
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
-const { fieldEncryption } = require("mongoose-field-encryption");
+const { fieldEncryption, decrypt } = require("mongoose-field-encryption");
+/* =========================
+   Encryption helpers
+========================= */
 
-const ENC_FIELDS = ["personalKyc", "documents", "declaration", "kycStatus"];
+// const ENC_FIELDS = ["personalKyc", "documents", "declaration"];
 
-function hasAnyEncryptedFlag(doc) {
-  return ENC_FIELDS.some(f => doc[`__enc_${f}`]);
-}
+// function hasAnyEncryptedFlag(doc) {
+//   return ENC_FIELDS.some((f) => doc[`__enc_${f}`]);
+// }
+
+// // decrypt only when plaintext mode requested
+// function shouldDecrypt(doc) {
+//   return doc && doc.isDataEncrypted === false;
+// }
+
+// function autoDecrypt(doc) {
+//   if (!doc) return;
+//   if (!shouldDecrypt(doc)) return;
+
+//   if (hasAnyEncryptedFlag(doc) && doc.decryptFieldsSync) {
+//     try { doc.decryptFieldsSync(); } catch { }
+//   }
+// }
 
 const PersonalFormSchema = new Schema(
   {
@@ -210,6 +227,7 @@ const CustomerSchema = new Schema(
     },
     authorized: { type: Authorization, default: {} },
 
+    // 🔐 controls READ behavior only
     isDataEncrypted: { type: Boolean, default: false },
 
   },
@@ -219,6 +237,15 @@ const CustomerSchema = new Schema(
     toObject: { virtuals: true },
   }
 );
+
+
+// CustomerSchema.set("toJSON", {
+//   transform: function (doc, ret) {
+//     if (ret.country) ret.country = decrypt(ret.country);
+//     //  if (ret.phone) ret.phone = decrypt(ret.phone);
+//     return ret;
+//   }
+// });
 
 /**
  * Generate and assign an invite token.
@@ -310,51 +337,44 @@ CustomerSchema.index({
 //   next();
 // });
 
+// always encrypt before save
 CustomerSchema.pre("save", function (next) {
   try {
-    // your existing uid logic
     if (this.isNew && !this.uid) {
       this.uid = `CR_${Date.now()}`;
     }
 
-    const encrypted = hasAnyEncryptedFlag(this);
-
-    if (this.isDataEncrypted && !encrypted) {
-      // encrypt now
-      if (this.encryptFieldsSync) {
-        this.encryptFieldsSync();
-      }
-    }
-
-    if (!this.isDataEncrypted && encrypted) {
-      // decrypt before save
-      if (this.decryptFieldsSync) {
-        this.decryptFieldsSync();
-      }
-    }
+    // if (!hasAnyEncryptedFlag(this) && this.encryptFieldsSync) {
+    //   this.encryptFieldsSync();
+    // }
 
     next();
-  } catch (err) {
-    next(err);
+  } catch (e) {
+    next(e);
   }
 });
 
-function autoDecrypt(doc) {
-  if (!doc) return;
-  if (hasAnyEncryptedFlag(doc) && doc.decryptFieldsSync) {
-    try {
-      doc.decryptFieldsSync();
-    } catch (e) { }
-  }
-}
 
-CustomerSchema.post("init", autoDecrypt);
+// function autoDecrypt(doc) {
+//   if (!doc) return;
 
-CustomerSchema.post("find", function (docs) {
-  docs.forEach(autoDecrypt);
-});
+//   // ✅ ONLY decrypt if you WANT plaintext mode
+//   if (!doc.isDataEncrypted && hasAnyEncryptedFlag(doc) && doc.decryptFieldsSync) {
+//     try {
+//       doc.decryptFieldsSync();
+//     } catch (e) { }
+//   }
+// }
 
-CustomerSchema.post("findOne", autoDecrypt);
+
+/* =========================
+   Read Middleware
+========================= */
+
+// CustomerSchema.post("init", autoDecrypt);
+// CustomerSchema.post("find", (docs) => docs.forEach(autoDecrypt));
+// CustomerSchema.post("findOne", autoDecrypt);
+
 
 CustomerSchema.methods.clearInviteToken = function () {
   this.inviteToken = undefined;
@@ -390,6 +410,7 @@ CustomerSchema.virtual("riskSummary").get(function () {
 });
 
 CustomerSchema.virtual("riskAssessment").get(function () {
+  // if (!shouldDecrypt(this)) return null;
   const plain = this.toObject({ virtuals: false, getters: false });
   return buildRiskAssessmentFromCustomer(plain).riskAssessment;
 });
@@ -402,9 +423,10 @@ CustomerSchema.virtual("riskLabel").get(function () {
   return buildRiskAssessmentFromCustomer(plain).riskLabel;
 });
 
-CustomerSchema.plugin(fieldEncryption, {
-  fields: ["personalKyc", "documents", "declaration"],
-  secret: process.env.DATA_ENCRYPTION_KEY,
-});
+// CustomerSchema.plugin(fieldEncryption, {
+//   fields: ["personalKyc", "documents", "declaration"],
+//   secret: process.env.DATA_ENCRYPTION_KEY,
+// });
+
 
 module.exports = mongoose.model("Customer", CustomerSchema);

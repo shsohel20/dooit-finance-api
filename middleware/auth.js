@@ -2,6 +2,7 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const ErrorResponse = require("../utils/errorResponse");
 const asyncHandler = require("./async");
+const { generateQR } = require("../utils/qrService");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -51,6 +52,29 @@ exports.protect = asyncHandler(async (req, res, next) => {
 
     const branchData = u.branch ?? u.branchBelongs ?? {}
 
+
+    const clientId =
+      u.client?._id ||
+      u.branch?.client?._id ||
+      u.clientBelongs?._id ||
+      null;
+    let qr = null;
+    const branchId =
+      u.branch?._id ||
+      u.branchBelongs?._id ||
+      null;
+    if (clientId) {
+      qr = await generateQR({
+        clientId: clientId.toString(),
+        branchId: branchId ? branchId.toString() : null,
+        format: "base64",
+        useUrl: false,
+      });
+    }
+
+
+
+
     req.user = {
       ...u,
       id: u._id,
@@ -59,6 +83,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
         ...branchData,
         client: u?.branch?.client?._id,
       },
+      qr
     };
     next();
   } catch (error) {
