@@ -2,15 +2,19 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 const autopopulate = require("mongoose-autopopulate");
 
+/**
+ * ModuleAssignment
+ * One document per (module, learner) pair — a manager assigns a module to one or more learners.
+ * Each learner gets their own document (insertMany approach in the controller).
+ */
 const ModuleAssignmentSchema = new Schema(
     {
-        uid: { type: String, unique: true, index: true },
-
         module: {
             type: Schema.Types.ObjectId,
             ref: "TrainingModule",
             required: true,
             index: true,
+            autopopulate: { select: "title uid status stats" },
         },
 
         learner: {
@@ -18,64 +22,47 @@ const ModuleAssignmentSchema = new Schema(
             ref: "Users",
             required: true,
             index: true,
-            autopopulate: true,
-
+            autopopulate: { select: "name email" },
         },
 
         assignedBy: {
             type: Schema.Types.ObjectId,
             ref: "Users",
-            required: true, // manager
+            required: true,
+            index: true,
+            autopopulate: { select: "name email" },
         },
 
-        dueDate: Date,
+        dueDate: { type: Date },
 
-        maxAttempts: {
-            type: Number,
-            default: 0, // 0 = unlimited
-        },
+        // 0 = unlimited
+        maxAttempts: { type: Number, default: 0 },
 
-        attemptsUsed: {
-            type: Number,
-            default: 0,
-        },
+        // Number of times the manager has granted a retake
+        retakesGranted: { type: Number, default: 0 },
 
         status: {
             type: String,
-            enum: [
-                "assigned",
-                "in_progress",
-                "completed",
-                "passed",
-                "failed",
-                "expired",
-            ],
-            default: "assigned",
+            enum: ["pending", "in-progress", "completed", "overdue"],
+            default: "pending",
             index: true,
         },
 
-        score: Number,
+        // Snapshot of final score when completed
+        finalScore: { type: Number },
+        isPassed: { type: Boolean },
 
-        startedAt: Date,
-        completedAt: Date,
+        completedAt: { type: Date },
     },
     {
         timestamps: true,
-        virtuals: true,
-        toObject: true,
-        toJSON: true
+        toJSON: { virtuals: true },
+        toObject: { virtuals: true },
     }
 );
 
-ModuleAssignmentSchema.index(
-    { module: 1, learner: 1 },
-    { unique: true } // prevent duplicate assignment
-);
-
-ModuleAssignmentSchema.pre("save", function (next) {
-    if (!this.uid) this.uid = `ASSIGN_${Date.now()}`;
-    next();
-});
+// Prevent duplicate assignments for the same (module, learner) pair
+ModuleAssignmentSchema.index({ module: 1, learner: 1 }, { unique: true });
 
 ModuleAssignmentSchema.plugin(autopopulate);
 

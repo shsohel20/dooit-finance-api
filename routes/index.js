@@ -26,8 +26,11 @@ const notify = require("./notify");
 const leads = require("./leads");
 const clientRule = require("./clientRules");
 const policyHub = require("./policyHub");
-const trainingModule = require("./trainingModule");
 const riskassessment = require("./riskassessment");
+const trainingModule = require("./trainingModule");
+const assignmentRoutes = require("./trainingAssignment");
+const progressRoutes = require("./trainingProgress");
+const reportRoutes = require("./trainingReport");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -53,7 +56,18 @@ router.use("/report-notify", notify);
 router.use("/email", leads);
 router.use("/client-rule", clientRule);
 router.use("/policy-hub", policyHub);
-router.use("/training-modules", trainingModule);
 router.use("/risk-assessment", riskassessment);
+
+
+//Training module CRUD + quiz management + video progress
+router.use("/training-modules", trainingModule);
+// Standalone assignment endpoints  (assign, list-mine, list-by-me, detail, delete, status)
+router.use("/training-assignments", assignmentRoutes);
+
+// Learner progress + quiz submission + video watch + complete + retake
+router.use("/training-progress", progressRoutes);
+
+// Manager/admin reports
+router.use("/training-reports", reportRoutes);
 
 module.exports = router;

@@ -256,6 +256,6 @@ exports.getManagerModule = asyncHandler(async (req, res, next) => {
   res.json({
     data: modules,
     success: true,
-    message: "Module assigned successfully",
+    message: "Find Modules assigned by me",
   });
 });
