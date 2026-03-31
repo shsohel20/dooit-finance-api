@@ -8,7 +8,10 @@ const {
   updateClientRule,
   deleteClientRule,
   filterClientRuleSection,
+  exportClientRulesCsv,
+  importClientRulesCsv,
 } = require("../controllers/clientRuleController");
+const upload = require("../middleware/upload");
 
 const ClientRule = require("../models/ClientRule");
 const advancedResults = require("../middleware/advancedResults");
@@ -35,6 +38,10 @@ router.use(protect);
 
 // Create rule
 router.route("/new").post(createClientRule);
+
+// Import / Export
+router.get("/export", exportClientRulesCsv);
+router.post("/import", upload.single("file"), importClientRulesCsv);
 
 // CRUD by id
 router

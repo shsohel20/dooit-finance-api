@@ -38,6 +38,7 @@ const UserSchema = new mongoose.Schema(
       type: String,
       trim: true,
       unique: true,
+       sparse: true
       //required: [true, "Please add a  phone"],
     },
     userType: {

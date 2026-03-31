@@ -56,7 +56,7 @@ const ClientRuleSchema = new Schema(
 
         caseType: {
             type: String,
-            enum: ['Fraud', 'AML', 'Compliance'],
+            enum: ['Fraud', 'AML', 'Compliance', 'TF'],
             required: true,
         },
 
@@ -69,7 +69,7 @@ const ClientRuleSchema = new Schema(
 
         riskLabel: {
             type: String,
-            enum: ['Low', 'Medium', 'High'],
+            enum: ['Low', 'Medium', 'High', 'Critical', 'Info'],
             required: true,
         },
 

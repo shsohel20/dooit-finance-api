@@ -6,6 +6,7 @@ const TrainingModule = require("../models/TrainingModule");
 const TrainingModulePart = require("../models/TrainingModulePart");
 const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
 const ModuleAssignment = require("../models/ModuleAssignment");
+const axios = require("axios");
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -87,10 +88,76 @@ exports.deleteModule = asyncHandler(async (req, res, next) => {
 // PARTS
 //
 
+
+function convertISO8601(duration) {
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return 0;
+  const hours   = parseInt(match[1] || 0, 10);
+  const minutes = parseInt(match[2] || 0, 10);
+  const seconds = parseInt(match[3] || 0, 10);
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+async function getVideoMetadata(url) {
+  let provider = "self";
+  let durationSec = 0;
+  let videoId = null;
+
+  // YOUTUBE
+  if (url.includes("youtube.com") || url.includes("youtu.be")) {
+    provider = "youtube";
+
+    const match = url.match(
+      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/
+    );
+
+    videoId = match ? match[1] : null;
+
+    const api = `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoId}&key=${process.env.YOUTUBE_API_KEY}`;
+
+    const res = await axios.get(api);
+
+    const duration = res.data.items[0].contentDetails.duration;
+
+    durationSec = convertISO8601(duration);
+  }
+
+  // VIMEO
+  else if (url.includes("vimeo.com")) {
+    provider = "vimeo";
+
+    const match = url.match(/vimeo\.com\/(\d+)/);
+    videoId = match ? match[1] : null;
+
+    const res = await axios.get(
+      `https://vimeo.com/api/v2/video/${videoId}.json`
+    );
+
+    durationSec = res.data[0].duration;
+  }
+
+  // CLOUDINARY
+  else if (url.includes("cloudinary.com")) {
+    provider = "cloudinary";
+  }
+
+  // AWS S3
+  else if (url.includes("amazonaws.com") || url.includes("s3.")) {
+    provider = "aws";
+  }
+
+  return {
+    url,
+    provider,
+    videoId,
+    durationSec,
+  };
+}
 // @desc Create part
 // @route POST /api/v1/training-modules/:moduleId/parts
 exports.createPart = asyncHandler(async (req, res, next) => {
   const { moduleId } = req.params;
+  const { video } = req.body;
 
   if (!isValidId(moduleId))
     return next(new ErrorResponse("Invalid module id", 400));
@@ -98,8 +165,12 @@ exports.createPart = asyncHandler(async (req, res, next) => {
   const mod = await TrainingModule.findById(moduleId);
   if (!mod) return next(new ErrorResponse("Module not found", 404));
 
+
+  const videoMetaData = await getVideoMetadata(video?.url ?? "")
+
   const part = await TrainingModulePart.create({
     ...req.body,
+    video: videoMetaData,
     module: moduleId,
   });
 
