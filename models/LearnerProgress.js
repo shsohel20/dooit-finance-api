@@ -96,6 +96,7 @@ LearnerProgressSchema.index({ learner: 1, module: 1 }, { unique: true });
  * Virtual: progress status string
  */
 LearnerProgressSchema.virtual("status").get(function () {
+    if (this.startedAt) return "started";
     if (this.isPassed) return "passed";
     if (this.completedAt) return "failed"; // completed but not passed
     if (this.attempts.length > 0) return "in-progress";
