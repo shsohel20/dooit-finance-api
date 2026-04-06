@@ -257,22 +257,25 @@ exports.updateWatchProgress = asyncHandler(async (req, res, next) => {
     );
 
     const effectiveDuration = durationSec || part.video?.durationSec || 0;
-    const watchPercent =
-        effectiveDuration > 0
-            ? Math.min(100, Math.round((watchedSeconds / effectiveDuration) * 100))
-            : 0;
 
-    // Upsert watch record for this part
+    // 1. Resolve the final watchedSeconds first
     const existingIdx = progress.watchRecords.findIndex(
         (w) => String(w.part) === String(partId)
     );
 
+    const finalWatchedSeconds = Math.max(
+        watchedSeconds,
+        existingIdx >= 0 ? progress.watchRecords[existingIdx].watchedSeconds : 0
+    );
+
+    // 2. Then calculate watchPercent from the correct value
+    const watchPercent = effectiveDuration > 0
+        ? Math.min(100, Math.round((finalWatchedSeconds / effectiveDuration) * 100))
+        : 0;
+
     const record = {
         part: partId,
-        watchedSeconds: Math.max(
-            watchedSeconds,
-            existingIdx >= 0 ? progress.watchRecords[existingIdx].watchedSeconds : 0
-        ),
+        watchedSeconds: finalWatchedSeconds,
         durationSec: effectiveDuration,
         watchPercent,
         completed: watchPercent >= (part.minWatchPercent || 80),

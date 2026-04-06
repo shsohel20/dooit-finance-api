@@ -103,6 +103,26 @@ exports.createUser = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc   Get all users by role
+// @route  GET /api/v1/user/role/:role
+// @access Admin
+exports.getUsersByRole = asyncHandler(async (req, res) => {
+  const filter = { role: req.params.role };
+
+  console.log(req?.user?.client?._id)
+
+  filter.clientBelongs = req?.user?.client?._id || null;
+  filter.branchBelongs = req?.user?.branch?._id || null;
+
+  const users = await User.find(filter).select("-password");
+
+  res.status(200).json({
+    success: true,
+    count: users.length,
+    data: users,
+  });
+});
+
 // @desc   fetch single user
 // @route   /api/v1/user/:id
 // @access   Public

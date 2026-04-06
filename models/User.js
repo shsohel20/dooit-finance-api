@@ -6,6 +6,10 @@ const crypto = require("crypto");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const { Schema } = mongoose;
 const autopopulate = require("mongoose-autopopulate");
+const { roleEncryptionPlugin } = require("../utils/roleEncryptionPlugin");
+const { hashForSearch } = require("../utils/encryption");
+
+const rescriptProperty = ["name", "email", "phone", "userName"]
 
 const UserSchema = new mongoose.Schema(
   {
@@ -34,13 +38,16 @@ const UserSchema = new mongoose.Schema(
         "Please use a valid email",
       ],
     },
+    // HMAC-SHA256 hash of the email — stays constant whether data is
+    // encrypted or not, so login lookup always works.
+    emailHash: { type: String, index: true, select: false },
     phone: {
       type: String,
       trim: true,
       unique: true,
-       sparse: true
-      //required: [true, "Please add a  phone"],
+      sparse: true,
     },
+    isDataEncrypted: { type: Boolean, default: false },
     userType: {
       type: String,
       trim: true,
@@ -243,12 +250,23 @@ UserSchema.pre("save", async function (next) {
   next();
 });
 
-UserSchema.plugin(AutoIncrement, {
-  inc_field: "sequence",
-  id: "user_sequence", // unique counter id for this schema
-  start_seq: 1,
+// UserSchema.plugin(AutoIncrement, {
+//   inc_field: "sequence",
+//   id: "user_sequence", // unique counter id for this schema
+//   start_seq: 1,
+// });
+
+// Compute emailHash from plaintext email BEFORE the encryption plugin runs.
+// This hook must stay above plugin(roleEncryptionPlugin).
+UserSchema.pre("save", function (next) {
+  if (this.isModified("email") && this.email) {
+    this.emailHash = hashForSearch(this.email);
+  }
+  next();
 });
 
-UserSchema.plugin(autopopulate);
+// UserSchema.plugin(autopopulate);
+UserSchema.plugin(roleEncryptionPlugin, { paths: rescriptProperty });
+UserSchema.statics.restrictedProperty = rescriptProperty;
 
 module.exports = mongoose.model("Users", UserSchema);

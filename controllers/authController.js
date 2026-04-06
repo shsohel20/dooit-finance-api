@@ -6,6 +6,7 @@ const Otp = require("../models/Otp");
 const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
+const { hashForSearch } = require("../utils/encryption");
 
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
@@ -87,7 +88,7 @@ exports.register = asyncHandler(async (req, res, next) => {
   } else {
     clientUrl = req.header("Referer");
   }
-  const exitingUser = await User.findOne({ email });
+  const exitingUser = await User.findOne({ emailHash: hashForSearch(email) });
   if (exitingUser) {
     return next(new ErrorResponse("The e-mail address used previous!", 400));
   }
@@ -212,22 +213,29 @@ exports.login = asyncHandler(async (req, res, next) => {
     );
   }
 
-  //Check User
-  const user = await User.findOne({ email }).select("+password").populate([
-    {
-      path: "client", // virtual on User
-      // select: "name _id",
-    },
-    {
-      path: "customer", // virtual on User
-      // select: "name _id",
-    },
-    {
-      path: "branch", // virtual on User
-      // select: "name _id",
-      populate: { path: "client" },
-    },
-  ]);
+  const populateOptions = [
+    { path: "client" },
+    { path: "customer" },
+    { path: "branch", populate: { path: "client" } },
+  ];
+
+  // Primary lookup — works for all users once emailHash is set
+  let user = await User.findOne({ emailHash: hashForSearch(email) })
+    .select("+password +emailHash")
+    .populate(populateOptions);
+
+  // Fallback for existing users who pre-date emailHash (lazy migration).
+  // Only works when data is not encrypted — fine for legacy plain-text users.
+  if (!user) {
+    user = await User.findOne({ email, isDataEncrypted: { $ne: true } })
+      .select("+password +emailHash")
+      .populate(populateOptions);
+
+    // Backfill emailHash so this fallback is only needed once per user
+    if (user) {
+      await User.updateOne({ _id: user._id }, { emailHash: hashForSearch(email) });
+    }
+  }
 
   if (!user) {
     return next(new ErrorResponse("Invalid Credential.", 401));
@@ -414,7 +422,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   #swagger.responses[404] = { description: 'Email not found', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
-  const user = await User.findOne({ email: req.body.email });
+  const user = await User.findOne({ emailHash: hashForSearch(req.body.email) });
 
   if (!user) {
     return next(new ErrorResponse("The email address is not valid", 404));
@@ -706,7 +714,7 @@ exports.resendOtp = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Please provide an email.", 400));
   }
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user) {
     return next(new ErrorResponse("No user found with that email.", 404));
   }

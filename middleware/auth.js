@@ -3,6 +3,8 @@ const User = require("../models/User");
 const ErrorResponse = require("../utils/errorResponse");
 const asyncHandler = require("./async");
 const { generateQR } = require("../utils/qrService");
+const { runWithRole } = require("../utils/roleEncryptionPlugin");
+const PrivacyPermission = require("../models/PrivacyPermission");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -85,7 +87,14 @@ exports.protect = asyncHandler(async (req, res, next) => {
       },
       qr
     };
-    next();
+
+    let canReadDecrypted = false;
+    try {
+      canReadDecrypted = await PrivacyPermission.isGranted(u._id, u.role);
+    } catch (permErr) {
+      console.error("[privacy] isGranted failed, defaulting to false:", permErr.message);
+    }
+    runWithRole(req.user.role, canReadDecrypted, next);
   } catch (error) {
     console.log(error);
     return next(new ErrorResponse("Not authorize to access this route", 401));
