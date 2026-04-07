@@ -92,7 +92,7 @@ PrivacyPermission
 ├── client             : ObjectId → Client  (tenant scope — auto-set from req.user)
 ├── branch             : ObjectId → Branch  (tenant scope — auto-set from req.user)
 ├── name               : String             (human-readable label, required)
-├── roleNames          : [String]           (roles GRANTED access)
+├── roleIds          : [ObjectId → Roles] (roles GRANTED access)
 ├── restrictedUserIds  : [ObjectId → Users] (users BLOCKED even if their role matches)
 ├── grantedBy          : ObjectId → Users   (admin who created this permission, required)
 ├── isActive           : Boolean            (default true)
@@ -101,15 +101,15 @@ PrivacyPermission
 ```
 
 **Grant vs Restrict logic:**
-- `roleNames` → who is **allowed** (role-level grant)
-- `restrictedUserIds` → who is **explicitly blocked** even if their role is in `roleNames`
+- `roleIds` → who is **allowed** (role-level grant)
+- `restrictedUserIds` → who is **explicitly blocked** even if their role is in `roleIds`
 
 ### Field rules
 
 | Field | Meaning |
 |---|---|
 | `client` / `branch` | Tenant scope — permission only applies within this client/branch |
-| `roleNames: ['analyst', 'approval']` | Everyone with either role can read restricted fields |
+| `roleIds: ['<role-id-1>', '<role-id-2>']` | Everyone whose role matches one of these ObjectIds can read restricted fields |
 | `restrictedUserIds: [<id>]` | That specific user is blocked regardless of their role |
 | `isActive: false` | Permission suspended — no one currently granted via this document |
 | `expiresAt: <date>` | Permission auto-expires (checked at request time) |
@@ -123,7 +123,7 @@ PrivacyPermission
   "client": "<client-id>",
   "branch": "<branch-id>",
   "name": "Analyst read access",
-  "roleNames": ["analyst", "approval"],
+  "roleIds": ["<analyst-role-id>", "<approval-role-id>"],
   "restrictedUserIds": ["<suspended-analyst-id>"],
   "grantedBy": "<admin-id>",
   "isActive": true,
@@ -135,7 +135,7 @@ PrivacyPermission
   "client": "<client-id>",
   "branch": null,
   "name": "Client admin temporary access",
-  "roleNames": ["client-admin"],
+  "roleIds": ["<client-admin-role-id>"],
   "restrictedUserIds": [],
   "grantedBy": "<admin-id>",
   "isActive": true,
@@ -207,9 +207,10 @@ Request arrives
   ▼
 protect middleware
   ├─ verifies JWT, loads user (includes client._id, branch._id)
-  ├─ PrivacyPermission.isGranted(userId, role, { clientId, branchId })
+  ├─ Role.findOne({ name: u.role }) → roleDoc._id
+  ├─ PrivacyPermission.isGranted(userId, roleDoc._id, { clientId, branchId })
   │    ├─ finds active, non-expired permission where:
-  │    │    roleNames includes role
+  │    │    roleIds includes roleDoc._id
   │    │    client matches req.user.client._id  (when present)
   │    │    branch matches req.user.branch._id  (when present)
   │    ├─ checks restrictedUserIds — if user is listed → false
@@ -264,7 +265,7 @@ Base path: `/api/v1/privacy/permissions`
 | Method | Route | Description |
 |---|---|---|
 | `POST` | `/` | Create a permission (client/branch auto-set from token) |
-| `GET` | `/` | List all permissions (`?isActive=true&roleName=analyst`) |
+| `GET` | `/` | List all permissions (`?isActive=true&roleId=<role-id>`) |
 | `GET` | `/:id` | Get a single permission |
 | `PUT` | `/:id` | Update / toggle fields |
 | `DELETE` | `/:id` | Delete a permission |
@@ -275,7 +276,7 @@ automatically taken from the requesting admin's token.
 ```json
 {
   "name": "Analyst read access",
-  "roleNames": ["analyst", "approval"],
+  "roleIds": ["<analyst-role-id>", "<approval-role-id>"],
   "restrictedUserIds": ["<blocked-user-id>"],
   "expiresAt": null
 }
@@ -283,7 +284,7 @@ automatically taken from the requesting admin's token.
 
 **Updatable fields via `PUT /:id`**
 
-`name` · `roleNames` · `restrictedUserIds` · `isActive` · `expiresAt` · `client` · `branch`
+`name` · `roleIds` · `restrictedUserIds` · `isActive` · `expiresAt` · `client` · `branch`
 
 ---
 
@@ -412,7 +413,7 @@ if `restoredAt` is already set.
 | `Model.getEncryptedPaths()` | Plugin | Returns paths currently tracked by the encryption plugin |
 | `doc.decryptForRole(role)` | Plugin instance | Returns plain object with restricted fields decrypted for the given role |
 | `Model.decryptManyForRole(docs, role)` | Plugin static | Decrypts an array of docs for the given role |
-| `PrivacyPermission.isGranted(userId, role, { clientId, branchId })` | PrivacyPermission | `true` if the user's role has an active, tenant-matching grant and they are not in `restrictedUserIds` |
+| `PrivacyPermission.isGranted(userId, roleId, { clientId, branchId })` | PrivacyPermission | `true` if the role ObjectId has an active, tenant-matching grant and the user is not in `restrictedUserIds` |
 
 ---
 

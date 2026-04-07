@@ -35,10 +35,10 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Analyst read access\",\n  \"roleNames\": [\"analyst\", \"approval\"],\n  \"restrictedUserIds\": [],\n  \"expiresAt\": null\n}",
+              "raw": "{\n  \"name\": \"Analyst read access\",\n  \"roleIds\": [\"<analyst-role-id>\", \"<approval-role-id>\"],\n  \"restrictedUserIds\": [],\n  \"expiresAt\": null\n}",
               "options": { "raw": { "language": "json" } }
             },
-            "description": "Creates a new PrivacyPermission.\n\n`client` and `branch` are automatically taken from the admin's token — omit them from the body.\n\n`expiresAt` — ISO 8601 date string or `null` (never expires).\n`restrictedUserIds` — array of User ObjectIds that are blocked even if their role is in `roleNames`."
+            "description": "Creates a new PrivacyPermission.\n\n`client` and `branch` are automatically taken from the admin's token — omit them from the body.\n\n`expiresAt` — ISO 8601 date string or `null` (never expires).\n`restrictedUserIds` — array of User ObjectIds that are blocked even if their role is in `roleIds`."
           }
         },
 
@@ -54,7 +54,7 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Client admin temporary access\",\n  \"roleNames\": [\"client-admin\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"expiresAt\": \"2026-12-31T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"name\": \"Client admin temporary access\",\n  \"roleIds\": [\"<client-admin-role-id>\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"expiresAt\": \"2026-12-31T00:00:00.000Z\"\n}",
               "options": { "raw": { "language": "json" } }
             },
             "description": "Creates a permission that expires and blocks a specific user."
@@ -66,15 +66,15 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{baseUrl}}/privacy/permissions?isActive=true&roleName=analyst",
+              "raw": "{{baseUrl}}/privacy/permissions?isActive=true&roleId=<role-id>",
               "host": ["{{baseUrl}}"],
               "path": ["privacy", "permissions"],
               "query": [
                 { "key": "isActive", "value": "true",    "description": "Filter by active state (true | false). Omit to return all." },
-                { "key": "roleName", "value": "analyst",  "description": "Filter to permissions that include this role in roleNames." }
+                { "key": "roleId", "value": "<role-id>",  "description": "Filter to permissions that include this Role ObjectId in roleIds." }
               ]
             },
-            "description": "Returns all PrivacyPermission documents. Supports optional filters:\n- `?isActive=true` — only active/inactive\n- `?roleName=analyst` — only permissions that grant access to that role"
+            "description": "Returns all PrivacyPermission documents. Supports optional filters:\n- `?isActive=true` — only active/inactive\n- `?roleId=<role-id>` — only permissions that include this Role ObjectId in roleIds"
           }
         },
 
@@ -122,10 +122,10 @@
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Analyst read access (updated)\",\n  \"roleNames\": [\"analyst\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"isActive\": true,\n  \"expiresAt\": \"2027-06-30T00:00:00.000Z\"\n}",
+              "raw": "{\n  \"name\": \"Analyst read access (updated)\",\n  \"roleIds\": [\"<analyst-role-id>\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"isActive\": true,\n  \"expiresAt\": \"2027-06-30T00:00:00.000Z\"\n}",
               "options": { "raw": { "language": "json" } }
             },
-            "description": "Allowed update fields: name · roleNames · restrictedUserIds · isActive · expiresAt · client · branch"
+            "description": "Allowed update fields: name · roleIds · restrictedUserIds · isActive · expiresAt · client · branch"
           }
         },
 

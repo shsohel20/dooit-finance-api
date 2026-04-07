@@ -6,18 +6,18 @@ const PrivacyPermission = require("../models/PrivacyPermission");
 // @route  POST /api/v1/privacy/permissions
 // @access Admin
 exports.createPermission = asyncHandler(async (req, res, next) => {
-  const { name, roleNames, restrictedUserIds, expiresAt } = req.body;
+  const { name, roleIds, restrictedUserIds, expiresAt } = req.body;
 
   if (!name) {
     return next(new ErrorResponse("name is required", 400));
   }
-  if (!roleNames?.length) {
-    return next(new ErrorResponse("roleNames must be a non-empty array", 400));
+  if (!roleIds?.length) {
+    return next(new ErrorResponse("roleIds must be a non-empty array of Role ObjectIds", 400));
   }
 
   const permission = await PrivacyPermission.create({
     name,
-    roleNames,
+    roleIds,
     restrictedUserIds: restrictedUserIds ?? [],
     expiresAt: expiresAt ?? null,
     grantedBy: req.user.id,
@@ -37,13 +37,14 @@ exports.getPermissions = asyncHandler(async (req, res) => {
   if (req.query.isActive !== undefined) {
     filter.isActive = req.query.isActive === "true";
   }
-  if (req.query.roleName) {
-    filter.roleNames = req.query.roleName;
+  if (req.query.roleId) {
+    filter.roleIds = req.query.roleId;
   }
 
   const permissions = await PrivacyPermission.find(filter)
     .populate("grantedBy", "name email uid")
     .populate("restrictedUserIds", "name email uid")
+    .populate("roleIds", "name")
     .sort({ createdAt: -1 });
 
   res.status(200).json({ success: true, count: permissions.length, data: permissions });
@@ -55,7 +56,8 @@ exports.getPermissions = asyncHandler(async (req, res) => {
 exports.getPermission = asyncHandler(async (req, res, next) => {
   const permission = await PrivacyPermission.findById(req.params.id)
     .populate("grantedBy", "name email uid")
-    .populate("restrictedUserIds", "name email uid");
+    .populate("restrictedUserIds", "name email uid")
+    .populate("roleIds", "name");
 
   if (!permission) {
     return next(new ErrorResponse("Permission not found", 404));
@@ -68,7 +70,7 @@ exports.getPermission = asyncHandler(async (req, res, next) => {
 // @route  PUT /api/v1/privacy/permissions/:id
 // @access Admin
 exports.updatePermission = asyncHandler(async (req, res, next) => {
-  const allowed = ["name", "roleNames", "restrictedUserIds", "isActive", "expiresAt", "client", "branch"];
+  const allowed = ["name", "roleIds", "restrictedUserIds", "isActive", "expiresAt", "client", "branch"];
   const updates = Object.fromEntries(
     Object.entries(req.body).filter(([k]) => allowed.includes(k))
   );
@@ -83,7 +85,8 @@ exports.updatePermission = asyncHandler(async (req, res, next) => {
     { new: true, runValidators: true }
   )
     .populate("grantedBy", "name email uid")
-    .populate("restrictedUserIds", "name email uid");
+    .populate("restrictedUserIds", "name email uid")
+    .populate("roleIds", "name");
 
   if (!permission) {
     return next(new ErrorResponse("Permission not found", 404));

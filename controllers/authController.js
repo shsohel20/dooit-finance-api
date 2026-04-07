@@ -264,12 +264,46 @@ exports.getMe = asyncHandler(async (req, res, next) => {
   #swagger.responses[200] = { description: 'Current user', schema: { success: true, data: {  } } }
   #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
-  // const user = await User.findById(req.user.id);
+  const clientId = req.user.client?._id ?? null;
+  const branchId = req.user.branch?._id ?? null;
 
-  // console.log(req.user)
+  // Build scope conditions (same logic as privacyController.buildFilter)
+  const userScope = [];
+  const customerScope = [];
+  if (clientId) {
+    userScope.push({ clientBelongs: clientId });
+    customerScope.push({ "relations.client": clientId });
+  }
+  if (branchId) {
+    userScope.push({ branchBelongs: branchId });
+    customerScope.push({ "relations.branch": branchId });
+  }
+
+  const userFilter = userScope.length ? { $or: userScope } : {};
+  const customerFilter = customerScope.length ? { $or: customerScope } : {};
+
+  let encryptionStatus = false;
+  try {
+    const [totalUsers, encryptedUsers, totalCustomers, encryptedCustomers] = await Promise.all([
+      User.countDocuments(userFilter),
+      User.countDocuments({ ...userFilter, isDataEncrypted: true }),
+      Customer.countDocuments(customerFilter),
+      Customer.countDocuments({ ...customerFilter, isDataEncrypted: true }),
+    ]);
+
+    const allEncrypted =
+      totalUsers > 0 && encryptedUsers === totalUsers &&
+      totalCustomers > 0 && encryptedCustomers === totalCustomers;
+
+    encryptionStatus = allEncrypted;
+  } catch (err) {
+    console.error("[getMe] encryptionStatus failed:", err.message);
+  }
+
   res.status(200).json({
     success: true,
     data: req.user,
+    encryptionStatus,
   });
 });
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {

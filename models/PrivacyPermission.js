@@ -9,7 +9,7 @@ const { Schema } = mongoose;
  * maintained in the privacy config (config/privacyFields.js).
  *
  * Grant logic:
- *   - roleNames         → roles that are allowed to see decrypted data
+ *   - roleIds           → Role ObjectIds that are allowed to see decrypted data
  *   - restrictedUserIds → specific users blocked even if their role is granted
  */
 const PrivacyPermissionSchema = new Schema(
@@ -24,13 +24,13 @@ const PrivacyPermissionSchema = new Schema(
     },
 
     // One or more roles granted read access to decrypted fields
-    roleNames: {
-      type: [String],
+    roleIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "Roles" }],
       default: [],
     },
 
     // Specific users explicitly blocked from this permission,
-    // even if their role is in roleNames above.
+    // even if their role is in roleIds above.
     restrictedUserIds: {
       type: [{ type: Schema.Types.ObjectId, ref: "Users" }],
       default: [],
@@ -61,7 +61,7 @@ const PrivacyPermissionSchema = new Schema(
   }
 );
 
-PrivacyPermissionSchema.index({ roleNames: 1 });
+PrivacyPermissionSchema.index({ roleIds: 1 });
 PrivacyPermissionSchema.index({ restrictedUserIds: 1 });
 PrivacyPermissionSchema.index({ isActive: 1 });
 
@@ -72,14 +72,16 @@ PrivacyPermissionSchema.index({ isActive: 1 });
  * Returns false → user gets "***" (no active permission, or explicitly restricted)
  *
  * Usage (in protect middleware):
- *   const canRead = await PrivacyPermission.isGranted(userId, roleName);
+ *   const roleDoc = await Role.findOne({ name: u.role }).select('_id').lean();
+ *   const canRead = await PrivacyPermission.isGranted(userId, roleDoc?._id);
  */
-PrivacyPermissionSchema.statics.isGranted = async function (userId, roleName, { clientId, branchId } = {}) {
+PrivacyPermissionSchema.statics.isGranted = async function (userId, roleId, { clientId, branchId } = {}) {
+  if (!roleId) return false;
   const now = new Date();
 
   const query = {
     isActive: true,
-    roleNames: roleName,
+    roleIds: roleId,
     $or: [{ expiresAt: null }, { expiresAt: { $gt: now } }],
   };
 

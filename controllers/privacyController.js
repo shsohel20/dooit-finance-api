@@ -287,6 +287,25 @@ exports.bulkUpdateUserEncryption = asyncHandler(async (req, res, next) => {
 
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
+
+  // Pre-check: skip if all users in scope are already encrypted
+  if (encrypted) {
+    const scopeFilter = buildFilter(false, clientId, branchId, "user");
+    const [total, alreadyEncrypted] = await Promise.all([
+      User.countDocuments(scopeFilter),
+      User.countDocuments({ ...scopeFilter, isDataEncrypted: true }),
+    ]);
+    if (total > 0 && alreadyEncrypted === total) {
+      return res.status(200).json({
+        success: true,
+        alreadyEncrypted: true,
+        message: `All ${total} user(s) are already encrypted — no action taken`,
+        processed: 0,
+        failed: 0,
+      });
+    }
+  }
+
   const filter = buildFilter(encrypted, clientId, branchId, "user");
   const users = await User.find(filter).select("_id isDataEncrypted");
 
@@ -390,6 +409,25 @@ exports.bulkUpdateCustomerEncryption = asyncHandler(async (req, res, next) => {
 
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
+
+  // Pre-check: skip if all customers in scope are already encrypted
+  if (encrypted) {
+    const scopeFilter = buildFilter(false, clientId, branchId, "customer");
+    const [total, alreadyEncrypted] = await Promise.all([
+      Customer.countDocuments(scopeFilter),
+      Customer.countDocuments({ ...scopeFilter, isDataEncrypted: true }),
+    ]);
+    if (total > 0 && alreadyEncrypted === total) {
+      return res.status(200).json({
+        success: true,
+        alreadyEncrypted: true,
+        message: `All ${total} customer(s) are already encrypted — no action taken`,
+        processed: 0,
+        failed: 0,
+      });
+    }
+  }
+
   const filter = buildFilter(encrypted, clientId, branchId, "customer");
   const customers = await Customer.find(filter).select("_id isDataEncrypted");
 
@@ -435,6 +473,31 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
 
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
+
+  // Pre-check: skip if all users AND all customers in scope are already encrypted
+  if (encrypted) {
+    const userScope     = buildFilter(false, clientId, branchId, "user");
+    const customerScope = buildFilter(false, clientId, branchId, "customer");
+    const [totalUsers, encUsers, totalCustomers, encCustomers] = await Promise.all([
+      User.countDocuments(userScope),
+      User.countDocuments({ ...userScope,     isDataEncrypted: true }),
+      Customer.countDocuments(customerScope),
+      Customer.countDocuments({ ...customerScope, isDataEncrypted: true }),
+    ]);
+    const usersAllDone     = totalUsers     > 0 && encUsers     === totalUsers;
+    const customersAllDone = totalCustomers > 0 && encCustomers === totalCustomers;
+    if (usersAllDone && customersAllDone) {
+      return res.status(200).json({
+        success: true,
+        alreadyEncrypted: true,
+        message: "All data is already encrypted — no action taken",
+        results: {
+          users:     { processed: 0, failed: 0, alreadyEncrypted: true },
+          customers: { processed: 0, failed: 0, alreadyEncrypted: true },
+        },
+      });
+    }
+  }
 
   const [users, customers] = await Promise.all([
     User.find(buildFilter(encrypted, clientId, branchId, "user")).select("_id isDataEncrypted"),
