@@ -415,7 +415,7 @@ exports.grantRetake = asyncHandler(async (req, res, next) => {
     await LearnerProgress.findOneAndUpdate(
         { learner: learnerId, module: moduleId },
         {
-            $inc: { attemptRound: 1, "assignment.retakesGranted": 0 },
+            $inc: { attemptRound: 1 },
             $set: {
                 currentPartIndex: 0,
                 isPassed: false,
