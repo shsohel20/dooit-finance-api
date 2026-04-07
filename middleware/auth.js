@@ -1,8 +1,11 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Role = require("../models/Role");
 const ErrorResponse = require("../utils/errorResponse");
 const asyncHandler = require("./async");
 const { generateQR } = require("../utils/qrService");
+const { runWithRole } = require("../utils/roleEncryptionPlugin");
+const PrivacyPermission = require("../models/PrivacyPermission");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -85,7 +88,15 @@ exports.protect = asyncHandler(async (req, res, next) => {
       },
       qr
     };
-    next();
+
+    let canReadDecrypted = false;
+    try {
+      const roleDoc = await Role.findOne({ name: u.role }).select("_id").lean();
+      canReadDecrypted = await PrivacyPermission.isGranted(u._id, roleDoc?._id);
+    } catch (permErr) {
+      console.error("[privacy] isGranted failed, defaulting to false:", permErr.message);
+    }
+    runWithRole(req.user.role, canReadDecrypted, next);
   } catch (error) {
     console.log(error);
     return next(new ErrorResponse("Not authorize to access this route", 401));
