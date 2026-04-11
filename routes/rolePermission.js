@@ -9,6 +9,7 @@ const {
   removePermissions,
   addRestrictedUsers,
   removeRestrictedUsers,
+  getAllPermission,
 } = require("../controllers/rolePermissionController");
 
 const { protect, authorize } = require("../middleware/auth");
@@ -41,5 +42,10 @@ router.route("/:roleId/permissions/remove").patch(removePermissions);
 // PATCH  /api/v1/role-permissions/:roleId/unrestrict  → remove restricted users
 router.route("/:roleId/restrict").patch(addRestrictedUsers);
 router.route("/:roleId/unrestrict").patch(removeRestrictedUsers);
+
+//GET All Permissions for Modules
+
+router
+  .route("/permissions/all").get(getAllPermission)
 
 module.exports = router;

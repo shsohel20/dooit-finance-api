@@ -4,6 +4,7 @@
     "description": "CRUD and management endpoints for RolePermission — keyed by Role ObjectId.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
+  
   "variable": [
     {
       "key": "URL",
@@ -57,14 +58,14 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"role\": \"<ROLE_OBJECT_ID>\",\n  \"permissions\": [\n    \"USER.ADD\",\n    \"USER.EDIT\",\n    \"USER.DELETE\",\n    \"USER.GET\",\n    \"CUSTOMER.ADD\",\n    \"CUSTOMER.EDIT\",\n    \"CUSTOMER.DELETE\",\n    \"CUSTOMER.GET\",\n    \"ROLE.ADD\",\n    \"ROLE.EDIT\",\n    \"ROLE.DELETE\",\n    \"ROLE.GET\",\n    \"PRIVACY.ENCRYPT\",\n    \"PRIVACY.DECRYPT\"\n  ],\n  \"restrictedUserIds\": [],\n  \"expiresAt\": null\n}"
+          "raw": "{\n  \"role\": \"<ROLE_OBJECT_ID>\",\n  \"permissions\": [\n    \"USER.ADD\",\n    \"USER.EDIT\",\n    \"USER.DELETE\",\n    \"USER.GET\",\n    \"CUSTOMER.ADD\",\n    \"CUSTOMER.EDIT\",\n    \"CUSTOMER.DELETE\",\n    \"CUSTOMER.GET\",\n    \"ROLE.ADD\",\n    \"ROLE.EDIT\",\n    \"ROLE.DELETE\",\n    \"ROLE.GET\",\n    \"PRIVACY.ENCRYPT\",\n    \"PRIVACY.DECRYPT\",\n    \"PRIVACY.ENCRYPTVIEW\"\n  ],\n  \"restrictedUsers\": [\n    {\n      \"user\": \"<USER_OBJECT_ID>\",\n      \"modules\": [],\n      \"options\": []\n    }\n  ],\n  \"expiresAt\": null\n}"
         },
         "url": {
           "raw": "{{URL}}/api/v1/role-permissions",
           "host": ["{{URL}}"],
           "path": ["api", "v1", "role-permissions"]
         },
-        "description": "Create a new role permission. Auto-saves `role._id` to {{roleId}}.\n\n**Required:** `role`\n**Optional:** `permissions`, `restrictedUserIds`, `expiresAt`"
+        "description": "Create a new role permission. Auto-saves `role._id` to {{roleId}}.\n\n**Required:** `role`\n**Optional:** `permissions`, `restrictedUsers`, `expiresAt`\n\n`PRIVACY.ENCRYPTVIEW` — user can see encrypted fields as plaintext.\n`PRIVACY.ENCRYPT` / `PRIVACY.DECRYPT` — user can call bulk encrypt/decrypt API."
       },
       "response": []
     },
@@ -114,7 +115,7 @@
           "host": ["{{URL}}"],
           "path": ["api", "v1", "role-permissions", "{{roleId}}"]
         },
-        "description": "Update a role permission by Role ObjectId.\n\n**Allowed fields:** `permissions`, `restrictedUserIds`, `isActive`, `expiresAt`, `client`, `branch`"
+        "description": "Update a role permission by Role ObjectId.\n\n**Allowed fields:** `permissions`, `restrictedUsers`, `isActive`, `expiresAt`, `client`, `branch`"
       },
       "response": []
     },
@@ -143,7 +144,7 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"permissions\": [\n    \"BRANCH.ADD\",\n    \"BRANCH.EDIT\",\n    \"BRANCH.DELETE\",\n    \"BRANCH.GET\"\n  ]\n}"
+              "raw": "{\n  \"permissions\": [\n    \"BRANCH.ADD\",\n    \"BRANCH.EDIT\",\n    \"BRANCH.DELETE\",\n    \"BRANCH.GET\",\n    \"PRIVACY.ENCRYPTVIEW\"\n  ]\n}"
             },
             "url": {
               "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/permissions/add",
@@ -180,7 +181,7 @@
       "name": "Restricted Users Management",
       "item": [
         {
-          "name": "Restrict Users",
+          "name": "Restrict User (module / option)",
           "request": {
             "method": "PATCH",
             "header": [
@@ -188,19 +189,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"userIds\": [\n    \"<USER_OBJECT_ID_1>\",\n    \"<USER_OBJECT_ID_2>\"\n  ]\n}"
+              "raw": "{\n  \"user\": \"<USER_OBJECT_ID>\",\n  \"modules\": [\"PRIVACY\"],\n  \"options\": [\"USER.ADD\"]\n}"
             },
             "url": {
               "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/restrict",
               "host": ["{{URL}}"],
               "path": ["api", "v1", "role-permissions", "{{roleId}}", "restrict"]
             },
-            "description": "Block specific users from this role's permission grant. Uses `$addToSet`."
+            "description": "Block a specific user from selected modules and/or specific permission options within this role.\n\n**Body:**\n- `user` (required) — User ObjectId\n- `modules` — Array of module names to block entirely (e.g. `[\"PRIVACY\", \"USER\"]`). Blocks all `MODULE.*` permissions.\n- `options` — Array of specific permission strings to block (e.g. `[\"USER.ADD\", \"PRIVACY.ENCRYPTVIEW\"]`). Blocks individual actions without blocking the whole module.\n\nPass both `modules: []` and `options: []` to block the user from **ALL** permissions in this role.\nIf the user already has a restriction entry it is replaced (upsert behaviour).\n\n**Examples:**\n```json\n// Block from everything\n{ \"user\": \"<id>\", \"modules\": [], \"options\": [] }\n\n// Block entire PRIVACY module\n{ \"user\": \"<id>\", \"modules\": [\"PRIVACY\"], \"options\": [] }\n\n// Block only USER.ADD and USER.DELETE (keep rest of USER module)\n{ \"user\": \"<id>\", \"modules\": [], \"options\": [\"USER.ADD\", \"USER.DELETE\"] }\n\n// Block entire USER module + PRIVACY.ENCRYPTVIEW specifically\n{ \"user\": \"<id>\", \"modules\": [\"USER\"], \"options\": [\"PRIVACY.ENCRYPTVIEW\"] }\n```"
           },
           "response": []
         },
         {
-          "name": "Unrestrict Users",
+          "name": "Unrestrict User",
           "request": {
             "method": "PATCH",
             "header": [
@@ -208,14 +209,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"userIds\": [\n    \"<USER_OBJECT_ID_1>\"\n  ]\n}"
+              "raw": "{\n  \"user\": \"<USER_OBJECT_ID>\"\n}"
             },
             "url": {
               "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/unrestrict",
               "host": ["{{URL}}"],
               "path": ["api", "v1", "role-permissions", "{{roleId}}", "unrestrict"]
             },
-            "description": "Remove users from the restricted list, restoring their role's access. Uses `$pull`."
+            "description": "Fully remove a user from the restricted list, restoring their full role access. Uses `$pull`."
           },
           "response": []
         }

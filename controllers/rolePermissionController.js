@@ -2,18 +2,32 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const RolePermission = require("../models/RolePermission");
 const Role = require("../models/Role");
+const permissionList = require("../_data/permissionjson.json");
 
 const populate = (q) =>
   q
     .populate("role", "name description")
     .populate("grantedBy", "name email uid")
-    .populate("restrictedUserIds", "name email uid");
+    .populate("restrictedUsers.user", "name email uid");
+
+
+
+// @desc   Get all available permission definitions
+// @route  GET /api/v1/role-permissions/permissions
+// @access Admin
+exports.getAllPermission = asyncHandler(async (_req, res) => {
+  res.status(200).json({
+    success: true,
+    count: permissionList.length,
+    data: permissionList
+  });
+});
 
 // @desc   Create a role permission
 // @route  POST /api/v1/role-permissions
 // @access Admin
 exports.createRolePermission = asyncHandler(async (req, res, next) => {
-  const { role, permissions, restrictedUserIds, expiresAt } = req.body;
+  const { role, permissions, restrictedUsers, expiresAt } = req.body;
 
   if (!role) {
     return next(new ErrorResponse("role (Role ObjectId) is required", 400));
@@ -47,7 +61,7 @@ exports.createRolePermission = asyncHandler(async (req, res, next) => {
   const rolePermission = await RolePermission.create({
     role,
     permissions: permissions ?? [],
-    restrictedUserIds: restrictedUserIds ?? [],
+    restrictedUsers: restrictedUsers ?? [],
     expiresAt: expiresAt ?? null,
     grantedBy: req.user.id,
     client: clientId,
@@ -102,7 +116,7 @@ exports.getRolePermission = asyncHandler(async (req, res, next) => {
 exports.updateRolePermission = asyncHandler(async (req, res, next) => {
   const allowed = [
     "permissions",
-    "restrictedUserIds",
+    "restrictedUsers",
     "isActive",
     "expiresAt",
     "client",
@@ -196,20 +210,36 @@ exports.removePermissions = asyncHandler(async (req, res, next) => {
   res.status(200).json({ success: true, data: rolePermission });
 });
 
-// @desc   Add restricted users to a role permission
+// @desc   Add or update restricted users on a role permission
 // @route  PATCH /api/v1/role-permissions/:roleId/restrict
 // @access Admin
+//
+// Body: { user: ObjectId, modules: [String], options: [String] }
+//   modules: [], options: []          → blocked from ALL permissions in this role
+//   modules: ["USER","RFI"]           → blocked from all USER.* and RFI.* permissions
+//   options: ["USER.ADD","PRIVACY.ENCRYPTVIEW"] → blocked from specific permission strings only
+//
+// If the user already exists in restrictedUsers their entry is replaced.
 exports.addRestrictedUsers = asyncHandler(async (req, res, next) => {
-  const { userIds } = req.body;
+  const { user, modules, options } = req.body;
 
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    return next(new ErrorResponse("userIds must be a non-empty array", 400));
+  if (!user) {
+    return next(new ErrorResponse("user (ObjectId) is required", 400));
+  }
+  if (!Array.isArray(modules)) {
+    return next(new ErrorResponse("modules must be an array (can be empty to block all)", 400));
+  }
+  if (!Array.isArray(options)) {
+    return next(new ErrorResponse("options must be an array of specific permission strings", 400));
   }
 
+  // Remove existing entry for this user then push the new one (upsert behaviour)
   const rolePermission = await populate(
     RolePermission.findOneAndUpdate(
       { role: req.params.roleId },
-      { $addToSet: { restrictedUserIds: { $each: userIds } } },
+      {
+        $pull: { restrictedUsers: { user } },
+      },
       { new: true }
     )
   );
@@ -218,23 +248,32 @@ exports.addRestrictedUsers = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Role permission not found", 404));
   }
 
+  // Push the new/updated entry
+  rolePermission.restrictedUsers.push({ user, modules, options });
+  await rolePermission.save();
+
+  // Re-populate after save
+  await rolePermission.populate("restrictedUsers.user", "name email uid");
+
   res.status(200).json({ success: true, data: rolePermission });
 });
 
-// @desc   Remove restricted users from a role permission
+// @desc   Remove a restricted user from a role permission
 // @route  PATCH /api/v1/role-permissions/:roleId/unrestrict
 // @access Admin
+//
+// Body: { user: ObjectId }
 exports.removeRestrictedUsers = asyncHandler(async (req, res, next) => {
-  const { userIds } = req.body;
+  const { user } = req.body;
 
-  if (!Array.isArray(userIds) || userIds.length === 0) {
-    return next(new ErrorResponse("userIds must be a non-empty array", 400));
+  if (!user) {
+    return next(new ErrorResponse("user (ObjectId) is required", 400));
   }
 
   const rolePermission = await populate(
     RolePermission.findOneAndUpdate(
       { role: req.params.roleId },
-      { $pull: { restrictedUserIds: { $in: userIds } } },
+      { $pull: { restrictedUsers: { user } } },
       { new: true }
     )
   );
