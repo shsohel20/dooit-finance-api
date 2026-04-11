@@ -7,6 +7,22 @@ const { encrypt, decrypt } = require("../utils/encryption");
 const { Types } = require("mongoose");
 
 /**
+ * Check that the requesting user holds the required privacy permission string.
+ * Returns an ErrorResponse if not, otherwise returns null (ok to proceed).
+ *
+ * @param {boolean} shouldEncrypt - true = PRIVACY.ENCRYPT, false = PRIVACY.DECRYPT
+ * @param {string[]} userPerms    - req.user.permissions
+ * @returns {ErrorResponse|null}
+ */
+function checkPrivacyPermission(shouldEncrypt, userPerms = []) {
+  const required = shouldEncrypt ? "PRIVACY.ENCRYPT" : "PRIVACY.DECRYPT";
+  if (!userPerms.includes(required)) {
+    return new ErrorResponse(`Missing permission: ${required}`, 403);
+  }
+  return null;
+}
+
+/**
  * Resolve a dot-notation path on a plain object.
  * e.g. getDeep({ a: { b: 1 } }, "a.b") → 1
  */
@@ -71,6 +87,50 @@ function buildFilter(encrypt, clientId, branchId, modelType) {
     if (branchId) scope.push({ "relations.branch": branchId });
     applyScopeOr(scope);
   }
+
+  return base;
+}
+
+/**
+ * Build a Customer filter scoped by customer.user.
+ *
+ * customer.user references a Users document. To scope bulk operations to the
+ * admin's client/branch, we first resolve the User _ids in that scope, then
+ * filter customers whose .user field is in that set.
+ *
+ * @param {boolean} encrypt
+ * @param {*}       clientId
+ * @param {*}       branchId
+ * @returns {Promise<object>} MongoDB filter for Customer collection
+ */
+async function buildCustomerFilter(encrypt, clientId, branchId) {
+  const base = encrypt ? { isDataEncrypted: { $ne: true } } : {};
+
+  const orConditions = [];
+  if (clientId) orConditions.push({ 'relations.client': clientId });
+  if (branchId) orConditions.push({ 'relations.branch': branchId });
+  if (orConditions.length === 1) Object.assign(base, orConditions[0]);
+  else if (orConditions.length > 1) base['$or'] = orConditions;
+
+  return base;
+}
+
+
+/**
+ * Build a User filter scoped to users who have a linked Customer document.
+ * Only users where Customer.user === user._id are targeted in bulk operations.
+ *
+ * @param {boolean} encrypt
+ * @param {*}       clientId
+ * @param {*}       branchId
+ * @returns {Promise<object>} MongoDB filter for User collection
+ */
+async function buildUserFilter(encrypt) {
+  const base = encrypt ? { isDataEncrypted: { $ne: true } } : {};
+
+  // Only target users referenced by a Customer document
+  const linkedUserIds = await Customer.distinct('user', { user: { $ne: null } });
+  base['_id'] = { '$in': linkedUserIds };
 
   return base;
 }
@@ -256,6 +316,9 @@ exports.updateUserEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
+  const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
+  if (permErr) return next(permErr);
+
   const result = await setEncryption(User, req.params.id, encrypted, {
     modelType: "user",
     performedBy: req.user.id,
@@ -285,12 +348,15 @@ exports.bulkUpdateUserEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
+  const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
+  if (permErr) return next(permErr);
+
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
 
   // Pre-check: skip if all users in scope are already encrypted
   if (encrypted) {
-    const scopeFilter = buildFilter(false, clientId, branchId, "user");
+    const scopeFilter = await buildUserFilter(false);
     const [total, alreadyEncrypted] = await Promise.all([
       User.countDocuments(scopeFilter),
       User.countDocuments({ ...scopeFilter, isDataEncrypted: true }),
@@ -306,7 +372,7 @@ exports.bulkUpdateUserEncryption = asyncHandler(async (req, res, next) => {
     }
   }
 
-  const filter = buildFilter(encrypted, clientId, branchId, "user");
+  const filter = await buildUserFilter(encrypted);
   const users = await User.find(filter).select("_id isDataEncrypted");
 
   let processed = 0;
@@ -378,6 +444,9 @@ exports.updateCustomerEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
+  const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
+  if (permErr) return next(permErr);
+
   const result = await setEncryption(Customer, req.params.id, encrypted, {
     modelType: "customer",
     performedBy: req.user.id,
@@ -407,12 +476,15 @@ exports.bulkUpdateCustomerEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
+  const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
+  if (permErr) return next(permErr);
+
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
 
   // Pre-check: skip if all customers in scope are already encrypted
   if (encrypted) {
-    const scopeFilter = buildFilter(false, clientId, branchId, "customer");
+    const scopeFilter = await buildCustomerFilter(false, clientId, branchId);
     const [total, alreadyEncrypted] = await Promise.all([
       Customer.countDocuments(scopeFilter),
       Customer.countDocuments({ ...scopeFilter, isDataEncrypted: true }),
@@ -428,7 +500,7 @@ exports.bulkUpdateCustomerEncryption = asyncHandler(async (req, res, next) => {
     }
   }
 
-  const filter = buildFilter(encrypted, clientId, branchId, "customer");
+  const filter = await buildCustomerFilter(encrypted, clientId, branchId);
   const customers = await Customer.find(filter).select("_id isDataEncrypted");
 
   let processed = 0;
@@ -471,13 +543,18 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
+  
+
+  const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
+  if (permErr) return next(permErr);
+
   const clientId = req?.user?.client?._id ?? null;
   const branchId = req?.user?.branch?._id ?? null;
 
   // Pre-check: skip if all users AND all customers in scope are already encrypted
   if (encrypted) {
-    const userScope     = buildFilter(false, clientId, branchId, "user");
-    const customerScope = buildFilter(false, clientId, branchId, "customer");
+    const userScope     = await buildUserFilter(false);
+    const customerScope = await buildCustomerFilter(false, clientId, branchId);
     const [totalUsers, encUsers, totalCustomers, encCustomers] = await Promise.all([
       User.countDocuments(userScope),
       User.countDocuments({ ...userScope,     isDataEncrypted: true }),
@@ -500,9 +577,11 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
   }
 
   const [users, customers] = await Promise.all([
-    User.find(buildFilter(encrypted, clientId, branchId, "user")).select("_id isDataEncrypted"),
-    Customer.find(buildFilter(encrypted, clientId, branchId, "customer")).select("_id isDataEncrypted"),
+    User.find(await buildUserFilter(encrypted)).select("_id isDataEncrypted"),
+    Customer.find(await buildCustomerFilter(encrypted, clientId, branchId)).select("_id isDataEncrypted"),
   ]);
+
+  console.log(customers)
 
   const results = { users: { processed: 0, failed: 0 }, customers: { processed: 0, failed: 0 } };
 
@@ -580,6 +659,9 @@ exports.getSnapshot = asyncHandler(async (req, res, next) => {
 // @route  POST /api/v1/privacy/snapshots/:id/restore
 // @access Admin
 exports.restoreSnapshot = asyncHandler(async (req, res, next) => {
+  const permErr = checkPrivacyPermission(false, req.user.permissions); // restore = decrypt
+  if (permErr) return next(permErr);
+
   const snapshot = await PrivacySnapshot.findById(req.params.id);
   if (!snapshot) return next(new ErrorResponse("Snapshot not found", 404));
 
@@ -652,6 +734,9 @@ exports.getSnapshotVersions = asyncHandler(async (req, res, next) => {
 //         When version is omitted, the LATEST unrestored snapshot per document is used.
 // @access Admin
 exports.bulkRestoreSnapshots = asyncHandler(async (req, res, next) => {
+  const permErr = checkPrivacyPermission(false, req.user.permissions); // restore = decrypt
+  if (permErr) return next(permErr);
+
   const { modelType, operation, version } = req.body;
 
   if (!modelType || !["user", "customer"].includes(modelType)) {

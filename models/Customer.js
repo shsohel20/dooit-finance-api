@@ -215,12 +215,7 @@ const CustomerSchema = new Schema(
     // 🔐 controls READ behavior only
     isDataEncrypted: { type: Boolean, default: false },
 
-    // Users blocked from seeing this document's decrypted fields,
-    // regardless of their role or global PrivacyPermission grants.
-    restrictedUsers: {
-      type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Users" }],
-      default: [],
-    },
+ 
 
   },
   {

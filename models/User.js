@@ -33,10 +33,9 @@ const UserSchema = new mongoose.Schema(
       type: String,
       unique: true,
       required: [true, "Please add a  email"],
-      match: [
-        /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/,
-        "Please use a valid email",
-      ],
+      // match validator intentionally removed — the stored value is AES-256-GCM
+      // ciphertext when encrypted, which would fail any email regex. Validate
+      // email format at the controller/input layer instead.
     },
     // HMAC-SHA256 hash of the email — stays constant whether data is
     // encrypted or not, so login lookup always works.

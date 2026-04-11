@@ -28,6 +28,7 @@ const clientRule = require("./clientRules");
 const policyHub = require("./policyHub");
 const riskassessment = require("./riskassessment");
 const privacy = require("./privacy");
+const rolePermission = require("./rolePermission");
 const trainingModule = require("./trainingModule");
 const assignmentRoutes = require("./trainingAssignment");
 const progressRoutes = require("./trainingProgress");
@@ -59,7 +60,7 @@ router.use("/client-rule", clientRule);
 router.use("/policy-hub", policyHub);
 router.use("/risk-assessment", riskassessment);
 router.use("/privacy", privacy);
-
+router.use("/role-permissions", rolePermission);
 
 //Training module CRUD + quiz management + video progress
 router.use("/training-modules", trainingModule);

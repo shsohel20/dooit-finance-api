@@ -1,0 +1,225 @@
+{
+  "info": {
+    "name": "Role Permission",
+    "description": "CRUD and management endpoints for RolePermission — keyed by Role ObjectId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "roleId",
+      "value": "",
+      "type": "string",
+      "description": "Role ObjectId — used as the URL param for all single-resource requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Create Role Permission",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const res = pm.response.json();",
+              "if (res.success && res.data?.role?._id) {",
+              "  pm.collectionVariables.set('roleId', res.data.role._id);",
+              "  console.log('roleId set:', res.data.role._id);",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"role\": \"<ROLE_OBJECT_ID>\",\n  \"permissions\": [\n    \"USER.ADD\",\n    \"USER.EDIT\",\n    \"USER.DELETE\",\n    \"USER.GET\",\n    \"CUSTOMER.ADD\",\n    \"CUSTOMER.EDIT\",\n    \"CUSTOMER.DELETE\",\n    \"CUSTOMER.GET\",\n    \"ROLE.ADD\",\n    \"ROLE.EDIT\",\n    \"ROLE.DELETE\",\n    \"ROLE.GET\",\n    \"PRIVACY.ENCRYPT\",\n    \"PRIVACY.DECRYPT\"\n  ],\n  \"restrictedUserIds\": [],\n  \"expiresAt\": null\n}"
+        },
+        "url": {
+          "raw": "{{URL}}/api/v1/role-permissions",
+          "host": ["{{URL}}"],
+          "path": ["api", "v1", "role-permissions"]
+        },
+        "description": "Create a new role permission. Auto-saves `role._id` to {{roleId}}.\n\n**Required:** `role`\n**Optional:** `permissions`, `restrictedUserIds`, `expiresAt`"
+      },
+      "response": []
+    },
+    {
+      "name": "Get All Role Permissions",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{URL}}/api/v1/role-permissions",
+          "host": ["{{URL}}"],
+          "path": ["api", "v1", "role-permissions"],
+          "query": [
+            { "key": "isActive", "value": "true", "description": "Filter by active status (true | false)", "disabled": true },
+            { "key": "role", "value": "", "description": "Filter by Role ObjectId", "disabled": true }
+          ]
+        },
+        "description": "List all role permissions.\n\nOptional query params: `isActive=true|false`, `role=<roleId>`"
+      },
+      "response": []
+    },
+    {
+      "name": "Get Role Permission by roleId",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}",
+          "host": ["{{URL}}"],
+          "path": ["api", "v1", "role-permissions", "{{roleId}}"]
+        },
+        "description": "Get the permission document for a specific Role ObjectId."
+      },
+      "response": []
+    },
+    {
+      "name": "Update Role Permission by roleId",
+      "request": {
+        "method": "PUT",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"isActive\": true,\n  \"expiresAt\": null\n}"
+        },
+        "url": {
+          "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}",
+          "host": ["{{URL}}"],
+          "path": ["api", "v1", "role-permissions", "{{roleId}}"]
+        },
+        "description": "Update a role permission by Role ObjectId.\n\n**Allowed fields:** `permissions`, `restrictedUserIds`, `isActive`, `expiresAt`, `client`, `branch`"
+      },
+      "response": []
+    },
+    {
+      "name": "Delete Role Permission by roleId",
+      "request": {
+        "method": "DELETE",
+        "url": {
+          "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}",
+          "host": ["{{URL}}"],
+          "path": ["api", "v1", "role-permissions", "{{roleId}}"]
+        },
+        "description": "Permanently delete the permission document for a Role ObjectId."
+      },
+      "response": []
+    },
+    {
+      "name": "Permissions Management",
+      "item": [
+        {
+          "name": "Add Permissions",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"BRANCH.ADD\",\n    \"BRANCH.EDIT\",\n    \"BRANCH.DELETE\",\n    \"BRANCH.GET\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/permissions/add",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "role-permissions", "{{roleId}}", "permissions", "add"]
+            },
+            "description": "Add permission strings to the role. Uses `$addToSet` — no duplicates."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Permissions",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [\n    \"BRANCH.DELETE\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/permissions/remove",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "role-permissions", "{{roleId}}", "permissions", "remove"]
+            },
+            "description": "Remove permission strings from the role. Uses `$pull`."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Restricted Users Management",
+      "item": [
+        {
+          "name": "Restrict Users",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\n    \"<USER_OBJECT_ID_1>\",\n    \"<USER_OBJECT_ID_2>\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/restrict",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "role-permissions", "{{roleId}}", "restrict"]
+            },
+            "description": "Block specific users from this role's permission grant. Uses `$addToSet`."
+          },
+          "response": []
+        },
+        {
+          "name": "Unrestrict Users",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"userIds\": [\n    \"<USER_OBJECT_ID_1>\"\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/role-permissions/{{roleId}}/unrestrict",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "role-permissions", "{{roleId}}", "unrestrict"]
+            },
+            "description": "Remove users from the restricted list, restoring their role's access. Uses `$pull`."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

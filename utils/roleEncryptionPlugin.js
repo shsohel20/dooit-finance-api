@@ -20,7 +20,7 @@ function looksEncrypted(val) {
  * Called once per request (in the protect middleware).
  *
  * @param {string}  role             - authenticated user's role string
- * @param {boolean} canReadDecrypted - result of PrivacyPermission.isGranted()
+ * @param {boolean} canReadDecrypted - result of RolePermission.isGranted()
  * @param {Function} fn              - next() callback
  */
 function runWithRole(role, canReadDecrypted, fn) {
@@ -83,8 +83,13 @@ function setNestedValue(obj, path, value) {
  *   3. Apply the plugin:
  *        MySchema.plugin(roleEncryptionPlugin);
  *
- *   4. In protect middleware, resolve permission and pass to runWithRole:
- *        const canRead = await PrivacyPermission.isGranted(userId, role);
+ *   4. In protect middleware, resolve permission + permissions in parallel, then pass to runWithRole:
+ *        const roleDoc = await Role.findOne({ name: u.role }).select('_id').lean();
+ *        const [canRead, permissions] = await Promise.all([
+ *          RolePermission.isGranted(u._id, roleDoc?._id, { clientId, branchId }),
+ *          RolePermission.getPermissions(roleDoc?._id),
+ *        ]);
+ *        req.user.permissions = permissions;
  *        runWithRole(role, canRead, next);
  */
 function roleEncryptionPlugin(schema, options = {}) {
@@ -122,7 +127,7 @@ function roleEncryptionPlugin(schema, options = {}) {
 
   // ── Auto-decrypt on read ──────────────────────────────────────────────────
   // Reads canReadDecrypted from AsyncLocalStorage set by protect middleware.
-  // If the user has no active PrivacyPermission grant, fields are masked "***".
+  // If the user has no active RolePermission grant, fields are masked "***".
 
   function autoDecryptDoc(doc) {
     if (!doc) return;
@@ -146,7 +151,9 @@ function roleEncryptionPlugin(schema, options = {}) {
       }
 
       if (doc.set) {
-        doc.set(path, result);
+        // Use { strict: false } to bypass field validators (e.g. email regex)
+        // that would reject ciphertext or the "***" mask string.
+        doc.set(path, result, { strict: false });
       } else {
         setNestedValue(doc, path, result);
       }
@@ -168,17 +175,18 @@ function roleEncryptionPlugin(schema, options = {}) {
   // ── Instance method: explicit decrypt for a given role ────────────────────
   // Used in admin-only controller operations (e.g. privacyController) where
   // you need to force-decrypt regardless of the request context.
+  // Uses looksEncrypted() per field — NOT the isDataEncrypted flag, which can
+  // be corrupted (flag=false on actually-encrypted data).
   schema.methods.decryptForRole = function () {
     const obj = this.toObject({ virtuals: true, getters: false });
-    if (!obj.isDataEncrypted) return obj;
 
     secretPaths.forEach(({ path }) => {
       const val = getNestedValue(obj, path);
-      if (!val || typeof val !== "string") return;
+      if (!looksEncrypted(val)) return;
       try {
         setNestedValue(obj, path, decrypt(val));
       } catch {
-        // leave as-is
+        // leave as-is if decrypt fails
       }
     });
 
