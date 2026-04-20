@@ -52,11 +52,17 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
     );
   }
 
-  //customer.isDataEncrypted = true;
+  const userRole = req.user?.role;
+  const data = customer.decryptForRole(userRole);
+
+  // also decrypt the populated user document if it carries encrypted fields
+  if (customer.user && typeof customer.user.decryptForRole === "function") {
+    data.user = customer.user.decryptForRole(userRole);
+  }
 
   res.status(200).json({
     success: true,
-    data: customer,
+    data,
   });
 });
 

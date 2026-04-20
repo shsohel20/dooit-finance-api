@@ -360,6 +360,11 @@ const advancedResults =
           finalResults = await pagedQuery.exec();
         }
 
+        // Role-based decryption — runs when the model uses roleEncryptionPlugin
+        if (typeof model.decryptManyForRole === "function") {
+          finalResults = model.decryptManyForRole(finalResults, req.user?.role);
+        }
+
         // Build pagination object
         const pagination = {};
         if (endIndex < totalRecords) {

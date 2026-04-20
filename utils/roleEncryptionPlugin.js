@@ -1,0 +1,211 @@
+const { AsyncLocalStorage } = require("async_hooks");
+const { encrypt, decrypt } = require("./encryption");
+
+// ── Per-request context ────────────────────────────────────────────────────
+// Stores { role, canReadDecrypted } for the lifetime of each async request.
+const _roleStorage = new AsyncLocalStorage();
+
+/**
+ * Detect AES-256-GCM encrypted format: <32-hex iv>:<32-hex authTag>:<hex data>
+ * Used in both autoDecryptDoc (to detect real state) and pre-save (to prevent double-encryption).
+ */
+function looksEncrypted(val) {
+  if (!val || typeof val !== "string") return false;
+  const parts = val.split(":");
+  return parts.length === 3 && parts[0].length === 32 && parts[1].length === 32;
+}
+
+/**
+ * Bind role + decrypt permission to the current async context.
+ * Called once per request (in the protect middleware).
+ *
+ * @param {string}  role             - authenticated user's role string
+ * @param {boolean} canReadDecrypted - result of RolePermission.isGranted()
+ * @param {Function} fn              - next() callback
+ */
+function runWithRole(role, canReadDecrypted, fn) {
+  _roleStorage.run({ role, canReadDecrypted }, fn);
+}
+
+function _getStore() {
+  return _roleStorage.getStore() ?? { role: null, canReadDecrypted: false };
+}
+
+/**
+ * Walk the schema tree and collect every path that has
+ * fieldMeta.isDataSecret === true.
+ */
+function collectSecretPaths(schema, prefix = "") {
+  const paths = [];
+  schema.eachPath((pathname, schematype) => {
+    const fullPath = prefix ? `${prefix}.${pathname}` : pathname;
+
+    if (schematype.schema) {
+      collectSecretPaths(schematype.schema, fullPath).forEach((p) =>
+        paths.push(p)
+      );
+      return;
+    }
+
+    const meta = schematype.options?.fieldMeta;
+    if (meta?.isDataSecret === true) {
+      paths.push({ path: fullPath });
+    }
+  });
+  return paths;
+}
+
+function getNestedValue(obj, path) {
+  return path.split(".").reduce((acc, key) => acc?.[key], obj);
+}
+
+function setNestedValue(obj, path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  const target = keys.reduce((acc, key) => {
+    if (acc[key] == null) acc[key] = {};
+    return acc[key];
+  }, obj);
+  target[last] = value;
+}
+
+/**
+ * Mongoose plugin — role-based field encryption.
+ *
+ * Usage:
+ *   1. Mark sensitive fields in the schema:
+ *        email: { type: String, fieldMeta: fieldMeta(String, true) }
+ *
+ *   2. Declare restrictedProperty on the model file (developer config):
+ *        const restrictedProperty = ["email", "phone"];
+ *        MySchema.statics.restrictedProperty = restrictedProperty;
+ *
+ *   3. Apply the plugin:
+ *        MySchema.plugin(roleEncryptionPlugin);
+ *
+ *   4. In protect middleware, resolve permission + permissions in parallel, then pass to runWithRole:
+ *        const roleDoc = await Role.findOne({ name: u.role }).select('_id').lean();
+ *        const [canRead, permissions] = await Promise.all([
+ *          RolePermission.isGranted(u._id, roleDoc?._id, { clientId, branchId }),
+ *          RolePermission.getPermissions(roleDoc?._id),
+ *        ]);
+ *        req.user.permissions = permissions;
+ *        runWithRole(role, canRead, next);
+ */
+function roleEncryptionPlugin(schema, options = {}) {
+  // Prefer developer-declared restrictedProperty paths (passed as plugin option).
+  // Fall back to scanning fieldMeta annotations for backward compatibility.
+  const secretPaths = options.paths?.length
+    ? options.paths.map((p) => ({ path: p }))
+    : collectSecretPaths(schema);
+
+  if (secretPaths.length === 0) return;
+
+  const hasEncryptedFlag = !!schema.path("isDataEncrypted");
+
+  // ── Encrypt before every .save() ──────────────────────────────────────────
+  schema.pre("save", function (next) {
+    try {
+      if (hasEncryptedFlag && this.isDataEncrypted) return next();
+
+      let didEncrypt = false;
+      secretPaths.forEach(({ path }) => {
+        const val = this.get(path);
+        // Skip if already encrypted — prevents double-encryption after admin decrypts to DB
+        if (val && typeof val === "string" && !looksEncrypted(val)) {
+          this.set(path, encrypt(val));
+          didEncrypt = true;
+        }
+      });
+
+      if (hasEncryptedFlag && didEncrypt) this.isDataEncrypted = true;
+      next();
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ── Auto-decrypt on read ──────────────────────────────────────────────────
+  // Reads canReadDecrypted from AsyncLocalStorage set by protect middleware.
+  // If the user has no active RolePermission grant, fields are masked "***".
+
+  function autoDecryptDoc(doc) {
+    if (!doc) return;
+
+    const { canReadDecrypted } = _getStore();
+
+    secretPaths.forEach(({ path }) => {
+      const val = doc.get ? doc.get(path) : getNestedValue(doc, path);
+      // Check actual value format — do NOT trust isDataEncrypted flag (it can be corrupted)
+      if (!looksEncrypted(val)) return;
+
+      let result;
+      if (canReadDecrypted) {
+        try {
+          result = decrypt(val);
+        } catch {
+          result = val; // leave as-is if decrypt fails
+        }
+      } else {
+        result = "***";
+      }
+
+      if (doc.set) {
+        // Use { strict: false } to bypass field validators (e.g. email regex)
+        // that would reject ciphertext or the "***" mask string.
+        doc.set(path, result, { strict: false });
+      } else {
+        setNestedValue(doc, path, result);
+      }
+    });
+  }
+
+  schema.post("init", function () {
+    autoDecryptDoc(this);
+  });
+
+  schema.post("find", function (docs) {
+    docs.forEach(autoDecryptDoc);
+  });
+
+  schema.post("findOne", function (doc) {
+    if (doc) autoDecryptDoc(doc);
+  });
+
+  // ── Instance method: explicit decrypt for a given role ────────────────────
+  // Used in admin-only controller operations (e.g. privacyController) where
+  // you need to force-decrypt regardless of the request context.
+  // Uses looksEncrypted() per field — NOT the isDataEncrypted flag, which can
+  // be corrupted (flag=false on actually-encrypted data).
+  schema.methods.decryptForRole = function () {
+    const obj = this.toObject({ virtuals: true, getters: false });
+
+    secretPaths.forEach(({ path }) => {
+      const val = getNestedValue(obj, path);
+      if (!looksEncrypted(val)) return;
+      try {
+        setNestedValue(obj, path, decrypt(val));
+      } catch {
+        // leave as-is if decrypt fails
+      }
+    });
+
+    return obj;
+  };
+
+  // ── Static: decrypt an array of docs or lean objects ─────────────────────
+  schema.statics.decryptMany = function (docs) {
+    return docs.map((doc) =>
+      typeof doc.decryptForRole === "function"
+        ? doc.decryptForRole()
+        : doc
+    );
+  };
+
+  // ── Static: returns the list of encrypted field paths ─────────────────────
+  schema.statics.getEncryptedPaths = function () {
+    return secretPaths.map((p) => p.path);
+  };
+}
+
+module.exports = { roleEncryptionPlugin, runWithRole };

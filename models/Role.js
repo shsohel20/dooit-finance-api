@@ -9,9 +9,6 @@ const RoleSchema = new mongoose.Schema(
       required: [true, "Please add Role name"],
     },
 
-    permissions: {
-      type: Array,
-    },
     isActive: {
       type: Boolean,
       default: true,

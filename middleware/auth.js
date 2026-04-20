@@ -1,8 +1,11 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const Role = require("../models/Role");
 const ErrorResponse = require("../utils/errorResponse");
 const asyncHandler = require("./async");
 const { generateQR } = require("../utils/qrService");
+const { runWithRole } = require("../utils/roleEncryptionPlugin");
+const RolePermission = require("../models/RolePermission");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -85,7 +88,22 @@ exports.protect = asyncHandler(async (req, res, next) => {
       },
       qr
     };
-    next();
+
+    let canReadDecrypted = false;
+    let permissions = [];
+    try {
+      const roleDoc = await Role.findOne({ name: { $regex: new RegExp(`^${u.role}$`, "i") } }).select("_id").lean();
+      const roleId = roleDoc?._id;
+
+      ;[canReadDecrypted, permissions] = await Promise.all([
+        RolePermission.isGranted(u._id, roleId, { clientId, branchId }),
+        RolePermission.getPermissions(roleId, u._id),
+      ]);
+    } catch (permErr) {
+      console.error("[auth] RolePermission lookup failed:", permErr.message);
+    }
+    req.user.permissions = permissions;
+    runWithRole(req.user.role, canReadDecrypted, next);
   } catch (error) {
     console.log(error);
     return next(new ErrorResponse("Not authorize to access this route", 401));
@@ -112,13 +130,30 @@ exports.verifyUser = asyncHandler(async (req, res, next) => {
 });
 
 ///Grant Access to specific roles
-
 exports.authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
       return next(
         new ErrorResponse(
           `User role ${req.user.role} is not authorized to access`,
+          403
+        )
+      );
+    }
+    next();
+  };
+};
+
+// Grant access only if the user's RolePermission includes ALL of the listed permission strings.
+// req.user.permissions is populated by the protect middleware.
+exports.authorizePermission = (...perms) => {
+  return (req, res, next) => {
+    const userPerms = req.user.permissions ?? [];
+    const missing = perms.filter((p) => !userPerms.includes(p));
+    if (missing.length > 0) {
+      return next(
+        new ErrorResponse(
+          `Missing permission(s): ${missing.join(", ")}`,
           403
         )
       );

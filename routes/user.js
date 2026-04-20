@@ -10,6 +10,7 @@ const {
   getUserBySlug,
   getUsersPost,
   resetPassword,
+  getUsersByRole,
 } = require("../controllers/userController");
 
 const User = require("../models/User");
@@ -29,6 +30,7 @@ router
   .get(advancedResults(User), getUsers);
 
 router.route("/new").post(createUser);
+router.route("/role/:role").get(getUsersByRole);
 router.route("/update-user-password/:id").put(updateUserPassword);
 router.route("/reset-password/:id").put(resetPassword);
 

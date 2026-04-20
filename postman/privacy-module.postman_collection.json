@@ -1,0 +1,571 @@
+{
+  "info": {
+    "name": "Privacy Module",
+    "description": "Field-level encryption management, permission CRUD, and snapshot restore for the dooit-api privacy module.\n\n**Base URL:** `{{baseUrl}}` → e.g. `http://localhost:5000/api/v1`\n\nAll requests require:\n- `Authorization: Bearer {{token}}`\n- Admin role\n\n**Variables to set before running:**\n| Variable | Example |\n|---|---|\n| `baseUrl` | `http://localhost:5000/api/v1` |\n| `token` | `<admin JWT>` |\n| `userId` | `<User ObjectId>` |\n| `customerId` | `<Customer ObjectId>` |\n| `permissionId` | `<PrivacyPermission ObjectId>` |\n| `snapshotId` | `<PrivacySnapshot ObjectId>` |",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",      "value": "http://localhost:5000/api/v1", "type": "string" },
+    { "key": "token",        "value": "",  "type": "string" },
+    { "key": "userId",       "value": "",  "type": "string" },
+    { "key": "customerId",   "value": "",  "type": "string" },
+    { "key": "permissionId", "value": "",  "type": "string" },
+    { "key": "snapshotId",   "value": "",  "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+
+    {
+      "name": "Permissions",
+      "description": "CRUD for PrivacyPermission documents.\n\nclient and branch are auto-set from the requesting admin's JWT — do not include them in the create body.",
+      "item": [
+
+        {
+          "name": "Create Permission",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Analyst read access\",\n  \"roleIds\": [\"<analyst-role-id>\", \"<approval-role-id>\"],\n  \"restrictedUserIds\": [],\n  \"expiresAt\": null\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a new PrivacyPermission.\n\n`client` and `branch` are automatically taken from the admin's token — omit them from the body.\n\n`expiresAt` — ISO 8601 date string or `null` (never expires).\n`restrictedUserIds` — array of User ObjectIds that are blocked even if their role is in `roleIds`."
+          }
+        },
+
+        {
+          "name": "Create Permission — with expiry and blocked user",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Client admin temporary access\",\n  \"roleIds\": [\"<client-admin-role-id>\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"expiresAt\": \"2026-12-31T00:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a permission that expires and blocks a specific user."
+          }
+        },
+
+        {
+          "name": "List Permissions",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions?isActive=true&roleId=<role-id>",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions"],
+              "query": [
+                { "key": "isActive", "value": "true",    "description": "Filter by active state (true | false). Omit to return all." },
+                { "key": "roleId", "value": "<role-id>",  "description": "Filter to permissions that include this Role ObjectId in roleIds." }
+              ]
+            },
+            "description": "Returns all PrivacyPermission documents. Supports optional filters:\n- `?isActive=true` — only active/inactive\n- `?roleId=<role-id>` — only permissions that include this Role ObjectId in roleIds"
+          }
+        },
+
+        {
+          "name": "Get Permission",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions/{{permissionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions", "{{permissionId}}"]
+            },
+            "description": "Returns a single PrivacyPermission by ID."
+          }
+        },
+
+        {
+          "name": "Update Permission — toggle active",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions/{{permissionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions", "{{permissionId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Suspend a permission without deleting it."
+          }
+        },
+
+        {
+          "name": "Update Permission — modify roles and expiry",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions/{{permissionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions", "{{permissionId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Analyst read access (updated)\",\n  \"roleIds\": [\"<analyst-role-id>\"],\n  \"restrictedUserIds\": [\"{{userId}}\"],\n  \"isActive\": true,\n  \"expiresAt\": \"2027-06-30T00:00:00.000Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Allowed update fields: name · roleIds · restrictedUserIds · isActive · expiresAt · client · branch"
+          }
+        },
+
+        {
+          "name": "Update Permission — re-scope to different branch",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions/{{permissionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions", "{{permissionId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"<new-branch-id>\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Move a permission to a different branch within the same client."
+          }
+        },
+
+        {
+          "name": "Delete Permission",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/permissions/{{permissionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "permissions", "{{permissionId}}"]
+            },
+            "description": "Permanently deletes the permission. Use `isActive: false` instead if you want to suspend without deleting."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "User Encryption",
+      "description": "Check and manage encryption state for individual users.",
+      "item": [
+
+        {
+          "name": "Get User Encryption Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/user/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "user", "{{userId}}"]
+            },
+            "description": "Returns the real encryption state of a user's restricted fields.\n\n`flagMismatch: true` means the `isDataEncrypted` DB flag disagrees with actual stored values — the endpoint auto-repairs the flag."
+          }
+        },
+
+        {
+          "name": "Encrypt User",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/user/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "user", "{{userId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Encrypts the user's restricted fields (name, email) using AES-256-GCM.\n\nA `pre_encrypt` snapshot is saved automatically. Response includes `snapshotId` for rollback."
+          }
+        },
+
+        {
+          "name": "Decrypt User",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/user/{{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "user", "{{userId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypts the user's restricted fields back to plaintext.\n\nA `pre_decrypt` snapshot is saved automatically."
+          }
+        },
+
+        {
+          "name": "Bulk Encrypt Users",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/users/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "users", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Encrypts all users scoped to the admin's client and branch.\n\nOnly targets documents where `isDataEncrypted` is not already `true`. Snapshots are created per document."
+          }
+        },
+
+        {
+          "name": "Bulk Decrypt Users",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/users/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "users", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypts all users in the admin's tenant. Skips documents already in plaintext."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Customer Encryption",
+      "description": "Check and manage encryption state for individual customers.",
+      "item": [
+
+        {
+          "name": "Get Customer Encryption Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/customer/{{customerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "customer", "{{customerId}}"]
+            },
+            "description": "Returns the real encryption state of a customer's KYC restricted fields.\n\nIncludes `kycStatus`, `isDataEncrypted`, `flagInDb`, `flagMismatch`, and `encryptedFields`."
+          }
+        },
+
+        {
+          "name": "Encrypt Customer",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/customer/{{customerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "customer", "{{customerId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Encrypts the customer's KYC fields (given_name, surname, email, phone, identificationNo)."
+          }
+        },
+
+        {
+          "name": "Decrypt Customer",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/customer/{{customerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "customer", "{{customerId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypts the customer's KYC fields back to plaintext."
+          }
+        },
+
+        {
+          "name": "Bulk Encrypt Customers",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/customers/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "customers", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Encrypts all customers in the admin's client/branch scope."
+          }
+        },
+
+        {
+          "name": "Bulk Decrypt Customers",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/customers/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "customers", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypts all customers in the admin's client/branch scope."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Bulk — All",
+      "description": "Single call to encrypt or decrypt all users AND customers in the admin's tenant.",
+      "item": [
+
+        {
+          "name": "Bulk Encrypt — Users and Customers",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/all/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "all", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Encrypts all users AND customers in the admin's tenant in a single request.\n\nResponse includes separate `processed` and `failed` counts for each model type."
+          }
+        },
+
+        {
+          "name": "Bulk Decrypt — Users and Customers",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/all/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "all", "bulk"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"encrypted\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Decrypts all users AND customers in the admin's tenant in a single request."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Snapshots",
+      "description": "Versioned audit trail and rollback for encrypt/decrypt operations.\n\nEvery encrypt/decrypt call auto-creates a snapshot numbered sequentially per document (v1, v2, …). Use single or bulk restore to roll documents back.\n\n**version** — auto-incremented per (modelType, documentId). The first snapshot for a document is version 1.",
+      "item": [
+
+        {
+          "name": "List Snapshots — all",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots"]
+            },
+            "description": "Returns up to 200 snapshots (newest first). No filters applied."
+          }
+        },
+
+        {
+          "name": "List Snapshots — filter by model, operation, version",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots?modelType=customer&operation=pre_encrypt&version=2&isRestored=false",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots"],
+              "query": [
+                { "key": "modelType",  "value": "customer",    "description": "user | customer" },
+                { "key": "operation",  "value": "pre_encrypt", "description": "pre_encrypt | pre_decrypt" },
+                { "key": "version",    "value": "2",           "description": "Exact version number to filter on" },
+                { "key": "isRestored", "value": "false",       "description": "true = only restored | false = only unrestored" }
+              ]
+            },
+            "description": "Filter snapshots by model type, operation, version, and restore state."
+          }
+        },
+
+        {
+          "name": "List Snapshots — filter by document",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots?documentId={{userId}}&modelType=user",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots"],
+              "query": [
+                { "key": "documentId", "value": "{{userId}}", "description": "ObjectId of the document whose history you want" },
+                { "key": "modelType",  "value": "user",       "description": "user | customer" }
+              ]
+            },
+            "description": "Returns all snapshots for a specific document (all versions)."
+          }
+        },
+
+        {
+          "name": "Get Version History — single document",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/versions?modelType=user&documentId={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "versions"],
+              "query": [
+                { "key": "modelType",  "value": "user",       "description": "user | customer  (required)" },
+                { "key": "documentId", "value": "{{userId}}", "description": "ObjectId of the document  (required)" }
+              ]
+            },
+            "description": "Returns the full version timeline for a single document — sorted oldest to newest.\n\nEach entry shows: `version`, `operation`, `performedBy`, `restoredAt`, `restoredBy`, `createdAt`.\n\nUse this to decide which version to restore to."
+          }
+        },
+
+        {
+          "name": "Get Snapshot",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/{{snapshotId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "{{snapshotId}}"]
+            },
+            "description": "Returns a single snapshot by `_id`, including captured field values, version number, operation type, and restore metadata."
+          }
+        },
+
+        {
+          "name": "Restore Snapshot — single",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/{{snapshotId}}/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "{{snapshotId}}", "restore"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Restores the target document to the state captured in this snapshot.\n\n- `pre_encrypt` snapshot → writes plaintext back → `isDataEncrypted: false`\n- `pre_decrypt` snapshot → writes ciphertext back → `isDataEncrypted: true`\n\nA snapshot can only be restored once. Returns `400` if already restored."
+          }
+        },
+
+        {
+          "name": "Bulk Restore — latest snapshot per document",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/bulk-restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "bulk-restore"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"modelType\": \"user\",\n  \"operation\": \"pre_encrypt\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Restores every matching document to its **latest** unrestored snapshot.\n\nWhen `version` is omitted the most recent unrestored snapshot per document is selected automatically.\n\nResponse includes `restored`, `failed`, and an `errors` array (only present when failures occurred)."
+          }
+        },
+
+        {
+          "name": "Bulk Restore — exact version",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/bulk-restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "bulk-restore"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"modelType\": \"customer\",\n  \"operation\": \"pre_encrypt\",\n  \"version\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Restores all unrestored snapshots that are exactly at **version 1** for all matching customers.\n\nUseful when you want to roll every document back to its very first pre-encrypt state."
+          }
+        },
+
+        {
+          "name": "Bulk Restore — all models, no version filter",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/privacy/snapshots/bulk-restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["privacy", "snapshots", "bulk-restore"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"modelType\": \"user\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Restores all users to their latest unrestored snapshot, regardless of operation type."
+          }
+        }
+
+      ]
+    }
+
+  ]
+}
