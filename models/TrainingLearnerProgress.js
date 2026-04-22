@@ -11,6 +11,7 @@ const AttemptSchema = new Schema(
         selectedAnswer: { type: String, required: true }, // key value e.g. "A"
         isCorrect: { type: Boolean, required: true },
         pointsEarned: { type: Number, default: 0 },
+        possiblePoints: { type: Number, default: 1 }, // max points this question could earn
         attemptRound: { type: Number, default: 1 }, // which retake round this belongs to
     },
     { timestamps: true, _id: true }
@@ -31,10 +32,10 @@ const WatchRecordSchema = new Schema(
 );
 
 /**
- * LearnerProgress — one document per (learner, module) pair
+ * TrainingLearnerProgress — one document per (learner, module) pair
  * Tracks all attempts, watch records, scores, and completion state.
  */
-const LearnerProgressSchema = new Schema(
+const TrainingLearnerProgressSchema = new Schema(
     {
         learner: {
             type: Schema.Types.ObjectId,
@@ -90,23 +91,23 @@ const LearnerProgressSchema = new Schema(
 );
 
 // Compound unique index — one progress doc per learner+module
-LearnerProgressSchema.index({ learner: 1, module: 1 }, { unique: true });
+TrainingLearnerProgressSchema.index({ learner: 1, module: 1 }, { unique: true });
 
 /**
  * Virtual: progress status string
  */
-LearnerProgressSchema.virtual("status").get(function () {
-    if (this.startedAt) return "started";
+TrainingLearnerProgressSchema.virtual("status").get(function () {
     if (this.isPassed) return "passed";
-    if (this.completedAt) return "failed"; // completed but not passed
-    if (this.attempts.length > 0) return "in-progress";
+    if (this.completedAt) return "failed";
+    if (this.attempts?.length > 0) return "in-progress";
+    if (this.startedAt) return "started";
     return "not-started";
 });
 
 /**
  * Virtual: current-round attempts only
  */
-LearnerProgressSchema.virtual("currentAttempts").get(function () {
+TrainingLearnerProgressSchema.virtual("currentAttempts").get(function () {
     return this.attempts.filter((a) => a.attemptRound === this.attemptRound);
 });
 
@@ -114,16 +115,13 @@ LearnerProgressSchema.virtual("currentAttempts").get(function () {
  * Helper: recalculate score from current-round attempts
  * Call this after bulk-inserting attempts, before saving.
  */
-LearnerProgressSchema.methods.recalculateScore = function () {
+TrainingLearnerProgressSchema.methods.recalculateScore = function () {
     const current = this.attempts.filter((a) => a.attemptRound === this.attemptRound);
     const totalPoints = current.reduce((sum, a) => sum + (a.pointsEarned || 0), 0);
-    const maxPoints = current.reduce(
-        (sum) => sum + 1, // default 1 point per question; update if you use weighted points
-        0
-    );
+    const maxPoints = current.reduce((sum, a) => sum + (a.possiblePoints || 1), 0);
     this.totalPoints = totalPoints;
     this.maxPoints = maxPoints;
     this.score = maxPoints > 0 ? Math.round((totalPoints / maxPoints) * 100) : 0;
 };
 
-module.exports = mongoose.model("LearnerProgress", LearnerProgressSchema);
+module.exports = mongoose.model("TrainingLearnerProgress", TrainingLearnerProgressSchema);

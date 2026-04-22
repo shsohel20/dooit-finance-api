@@ -1,8 +1,8 @@
 "use strict";
 
 const mongoose = require("mongoose");
-const CountryRisk = require("./models/CountryRisk");
-const RiskFactorOption = require("./models/RiskFactorOption");
+const CountryRisk = require("../models/CountryRisk");
+const RiskFactorOption = require("../models/RiskFactorOption");
 
 const {
     UHRC,
@@ -10,7 +10,7 @@ const {
     MRC,
     LRC,
     FACTORS,
-} = require("./utils/riskAssessment");
+} = require("../utils/riskAssessment");
 
 const MONGO = process.env.MONGO_URI || "mongodb://admin:StrongAdminPassword!123@31.97.71.194:27017/dooit-wallet?authSource=admin";
 

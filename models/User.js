@@ -52,7 +52,7 @@ const UserSchema = new mongoose.Schema(
       trim: true,
       // unique: true,
       required: [true, "Please add a  userType"],
-      default: "user",
+      default: "user", // user, customer, client, branch, dooit 
     },
 
     role: {

@@ -3,7 +3,7 @@ const ErrorResponse = require("../utils/errorResponse");
 
 const TrainingModule = require("../models/TrainingModule");
 const ModuleAssignment = require("../models/ModuleAssignment");
-const LearnerProgress = require("../models/LearnerProgress");
+const TrainingLearnerProgress = require("../models/TrainingLearnerProgress");
 
 // ─── GET /reports/overview ────────────────────────────────────────────────────
 // @desc  High-level KPI snapshot for the dashboard
@@ -14,6 +14,16 @@ exports.getOverview = asyncHandler(async (req, res, next) => {
 
     // Scoped assignment filter
     const assignmentFilter = isAdmin ? {} : { assignedBy: managerId };
+
+    // For managers: resolve their assignment IDs first so progress counts are scoped
+    let assignmentIds = null;
+    if (!isAdmin) {
+        const myAssignments = await ModuleAssignment.find(assignmentFilter).select("_id");
+        assignmentIds = myAssignments.map((a) => a._id);
+    }
+
+    const progressFilter = (extra) =>
+        isAdmin ? extra : { ...extra, assignment: { $in: assignmentIds } };
 
     const [
         totalModules,
@@ -27,16 +37,8 @@ exports.getOverview = asyncHandler(async (req, res, next) => {
         TrainingModule.countDocuments({ status: "published" }),
         ModuleAssignment.countDocuments(assignmentFilter),
         ModuleAssignment.countDocuments({ ...assignmentFilter, status: "completed" }),
-        LearnerProgress.countDocuments(
-            isAdmin
-                ? { isPassed: true, completedAt: { $ne: null } }
-                : { isPassed: true, completedAt: { $ne: null } } // narrow by module later if needed
-        ),
-        LearnerProgress.countDocuments(
-            isAdmin
-                ? { isPassed: false, completedAt: { $ne: null } }
-                : { isPassed: false, completedAt: { $ne: null } }
-        ),
+        TrainingLearnerProgress.countDocuments(progressFilter({ isPassed: true, completedAt: { $ne: null } })),
+        TrainingLearnerProgress.countDocuments(progressFilter({ isPassed: false, completedAt: { $ne: null } })),
     ]);
 
     const completionRate =
@@ -49,9 +51,8 @@ exports.getOverview = asyncHandler(async (req, res, next) => {
             ? Math.round((passedAssignments / completedAssignments) * 100)
             : 0;
 
-    // Avg score across all completed progress docs
-    const avgScoreAgg = await LearnerProgress.aggregate([
-        { $match: { completedAt: { $ne: null } } },
+    const avgScoreAgg = await TrainingLearnerProgress.aggregate([
+        { $match: progressFilter({ completedAt: { $ne: null } }) },
         { $group: { _id: null, avg: { $avg: "$score" } } },
     ]);
     const avgScore = avgScoreAgg[0]?.avg
@@ -147,7 +148,7 @@ exports.getLearnerReport = asyncHandler(async (req, res, next) => {
         }
     }
 
-    const records = await LearnerProgress.find(filter)
+    const records = await TrainingLearnerProgress.find(filter)
         .populate("learner", "name email")
         .populate("module", "title uid")
         .lean();
@@ -186,7 +187,7 @@ exports.getSingleModuleReport = asyncHandler(async (req, res, next) => {
     if (!mod) return next(new ErrorResponse("Module not found", 404));
 
     // All progress for this module
-    const progressDocs = await LearnerProgress.find({ module: moduleId })
+    const progressDocs = await TrainingLearnerProgress.find({ module: moduleId })
         .populate("learner", "name email")
         .lean();
 

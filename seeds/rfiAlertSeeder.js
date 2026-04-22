@@ -1,23 +1,23 @@
 const axios = require("axios");
-const Alert = require("./models/Alert");
+const Alert = require("../models/Alert");
 
 const BASE_URL = "http://4.227.188.44:8000";
 
-const seedGfsAlert = async (alertUid) => {
+const seedRfiAlert = async (alertUid) => {
   try {
-    // 1️⃣ Prevent duplicate GFS
+    // 1️⃣ Prevent duplicate RFI
     const alreadyDone = await Alert.findOne({
       uid: alertUid,
-      "metadata.gfsReport": { $exists: true },
+      "metadata.rfiReport": { $exists: true },
     });
 
     if (alreadyDone) {
-      console.log(`⏭ GFS skipped (already exists): ${alertUid}`);
+      console.log(`⏭ RFI skipped (already exists): ${alertUid}`);
       return alreadyDone;
     }
 
-    // 2️⃣ Call GFS API
-    const { data } = await axios.post(`${BASE_URL}/gfs_report`, {
+    // 2️⃣ Call RFI API
+    const { data } = await axios.post(`${BASE_URL}/rfi_report`, {
       uid: alertUid,
     });
 
@@ -29,39 +29,40 @@ const seedGfsAlert = async (alertUid) => {
 
         activity: [
           {
-            title: "GFS Analysis",
+            title: "RFI Generated",
             details:
               data.summary ||
-              "Global Financial Screening (GFS) report generated",
+              "Request for Information (RFI) generated for this alert.",
           },
         ],
 
         activityNote: [
           {
             note:
+              data.request_details ||
               data.recommendation ||
-              "GFS screening completed. Review required if matches detected.",
+              "RFI issued. Awaiting customer response.",
           },
         ],
 
         metadata: {
           ...((await Alert.findOne({ uid: alertUid }))?.metadata || {}),
-          gfsReport: data,
-          gfsGeneratedAt: new Date(),
+          rfiReport: data,
+          rfiGeneratedAt: new Date(),
         },
       },
       { new: true }
     );
 
-    console.log("✅ GFS stored:", alert.uid);
+    console.log("✅ RFI stored:", alert.uid);
     return alert;
   } catch (error) {
     console.error(
-      `❌ GFS Error (${alertUid}):`,
+      `❌ RFI Error (${alertUid}):`,
       error.response?.data || error.message
     );
     throw error;
   }
 };
 
-module.exports = seedGfsAlert;
+module.exports = seedRfiAlert;

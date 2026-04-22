@@ -16,12 +16,14 @@ const {
   updatePart,
   getQuestion,
   deletePart,
-  getManagerModule,  // GET  /assigned-by-me (kept for backward compat)
+  assignModuleAccess,
+  getModuleAccess,
+  deleteModuleAccess,
 } = require("../controllers/trainingModuleController");
 
-// Assignment controller (replaces the old inline assignModule in trainingModuleController)
 const {
   assignModule,
+  getAssignedByMe,
 } = require("../controllers/trainingAssignmentController");
 
 // Progress controller (retake + per-module learner view)
@@ -43,8 +45,7 @@ router
   .get(advancedResults(TrainingModule), getModules)
   .post(authorize("admin", "manager"), createModule);
 
-// Backward-compat: manager's assigned list
-router.get("/assigned-by-me", authorize("admin", "manager"), getManagerModule);
+router.get("/assigned-by-me", authorize("admin", "manager"), getAssignedByMe);
 
 router
   .route("/:id")
@@ -74,6 +75,18 @@ router
   .get(getQuestion)
   .put(authorize("admin", "manager"), updateQuestion)
   .delete(authorize("admin", "manager"), deleteQuestion);
+
+// ── Module Access (admin assigns module to client/branch/role scopes) ─────────
+router
+  .route("/:moduleId/access")
+  .post(authorize("admin"), assignModuleAccess)
+  .get(authorize("admin", "manager"), getModuleAccess);
+
+router.delete(
+  "/access/:accessId",
+  authorize("admin"),
+  deleteModuleAccess
+);
 
 // ── Assignments (module-scoped) ────────────────────────────────────────────────
 // POST /api/v1/training-modules/:moduleId/assign

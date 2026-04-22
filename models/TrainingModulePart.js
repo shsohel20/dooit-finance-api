@@ -13,7 +13,7 @@ const TrainingModulePartSchema = new Schema(
       //   autopopulate: { select: "title uid" },
     },
 
-    title: { type: String, required: true, unique: true, trim: true },
+    title: { type: String, required: true, trim: true },
 
     description: { type: String, trim: true },
 
@@ -47,6 +47,9 @@ const TrainingModulePartSchema = new Schema(
     toObject: { virtuals: true },
   },
 );
+
+// Title unique per module, not globally
+TrainingModulePartSchema.index({ module: 1, title: 1 }, { unique: true });
 
 TrainingModulePartSchema.pre("save", function (next) {
   if (this.isNew && !this.uid) {

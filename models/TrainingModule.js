@@ -9,8 +9,6 @@ const autopopulate = require("mongoose-autopopulate");
 const TrainingModuleSchema = new Schema(
   {
     uid: { type: String, unique: true, index: true }, // MOD_xxx
-    client: { type: Schema.Types.ObjectId, ref: "Client", index: true },
-    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true },
 
     title: { type: String, required: true, trim: true, index: true },
 
@@ -19,13 +17,6 @@ const TrainingModuleSchema = new Schema(
     description: { type: String, trim: true },
 
     createdBy: {
-      type: Schema.Types.ObjectId,
-      ref: "Users",
-      index: true,
-      autopopulate: { select: "name email" },
-    },
-
-    manager: {
       type: Schema.Types.ObjectId,
       ref: "Users",
       index: true,
@@ -86,6 +77,15 @@ TrainingModuleSchema.index({
 /**
  * Virtuals
  */
+
+/**
+ * Virtual populate access rules (client/branch/role scopes assigned by admin)
+ */
+TrainingModuleSchema.virtual("access", {
+  ref: "TrainingModuleAccess",
+  localField: "_id",
+  foreignField: "module",
+});
 
 /**
  * Virtual populate parts

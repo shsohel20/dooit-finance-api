@@ -1,11 +1,11 @@
 {
   "info": {
     "name": "Privacy Module",
-    "description": "Field-level encryption management, permission CRUD, and snapshot restore for the dooit-api privacy module.\n\n**Base URL:** `{{baseUrl}}` → e.g. `http://localhost:5000/api/v1`\n\nAll requests require:\n- `Authorization: Bearer {{token}}`\n- Admin role\n\n**Variables to set before running:**\n| Variable | Example |\n|---|---|\n| `baseUrl` | `http://localhost:5000/api/v1` |\n| `token` | `<admin JWT>` |\n| `userId` | `<User ObjectId>` |\n| `customerId` | `<Customer ObjectId>` |\n| `permissionId` | `<PrivacyPermission ObjectId>` |\n| `snapshotId` | `<PrivacySnapshot ObjectId>` |",
+    "description": "Field-level encryption management, permission CRUD, and snapshot restore for the dooit-api privacy module.\n\n**Base URL:** `{{baseUrl}}` → e.g. `http://localhost:6830/api/v1`\n\nAll requests require:\n- `Authorization: Bearer {{token}}`\n- Admin role\n\n**Variables to set before running:**\n| Variable | Example |\n|---|---|\n| `baseUrl` | `http://localhost:6830/api/v1` |\n| `token` | `<admin JWT>` |\n| `userId` | `<User ObjectId>` |\n| `customerId` | `<Customer ObjectId>` |\n| `permissionId` | `<PrivacyPermission ObjectId>` |\n| `snapshotId` | `<PrivacySnapshot ObjectId>` |",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    { "key": "baseUrl",      "value": "http://localhost:5000/api/v1", "type": "string" },
+    { "key": "baseUrl",      "value": "http://localhost:6830/api/v1", "type": "string" },
     { "key": "token",        "value": "",  "type": "string" },
     { "key": "userId",       "value": "",  "type": "string" },
     { "key": "customerId",   "value": "",  "type": "string" },

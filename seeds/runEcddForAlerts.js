@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const seedEcddAlert = require("./ecddAlertSeeder");
-const Alert = require("./models/Alert");
+const Alert = require("../models/Alert");
 
 // optional: connect if this is a standalone script
 // await mongoose.connect(process.env.MONGO_URI);

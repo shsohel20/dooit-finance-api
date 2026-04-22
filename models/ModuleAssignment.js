@@ -48,6 +48,13 @@ const ModuleAssignmentSchema = new Schema(
             index: true,
         },
 
+        // Role the learner held at assignment time (snapshot for audit/reports)
+        roleId: {
+            type: Schema.Types.ObjectId,
+            ref: "Roles",
+            index: true,
+        },
+
         // Snapshot of final score when completed
         finalScore: { type: Number },
         isPassed: { type: Boolean },
