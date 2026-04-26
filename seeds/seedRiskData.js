@@ -1,8 +1,11 @@
 "use strict";
+require("dotenv").config({ path: "./config/config.env" });
 
 const mongoose = require("mongoose");
 const CountryRisk = require("../models/CountryRisk");
 const RiskFactorOption = require("../models/RiskFactorOption");
+const { connectDB } = require("../config/db");
+require("colors");
 
 const {
     UHRC,
@@ -12,10 +15,11 @@ const {
     FACTORS,
 } = require("../utils/riskAssessment");
 
-const MONGO = process.env.MONGO_URI || "mongodb://admin:StrongAdminPassword!123@31.97.71.194:27017/dooit-wallet?authSource=admin";
+// const MONGO = process.env.MONGO_URI || "mongodb://admin:StrongAdminPassword!123@31.97.71.194:27017/dooit-wallet?authSource=admin";
 
 async function run() {
-    await mongoose.connect(MONGO);
+    await connectDB();
+    console.log("Connected to MongoDB");
 
     console.log("connected");
 
