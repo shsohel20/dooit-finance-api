@@ -3,13 +3,13 @@ const mongoose = require("mongoose");
 const colors = require("colors");
 const dotenv = require("dotenv");
 // Load env vars
-dotenv.config({ path: "./config/config.env" });
+dotenv.config({ path: "../config/config.env" });
 
-const User = require("./models/User");
-const Role = require("./models/Role");
-const Counter = require("./models/Counter");
-const Customer = require("./models/Customer");
-const Client = require("./models/Client");
+const User = require("../models/User");
+const Role = require("../models/Role");
+const Counter = require("../models/Counter");
+const Customer = require("../models/Customer");
+const Client = require("../models/Client");
 const runEcddForAlerts = require("./runEcddForAlerts");
 const runSmrForAlerts = require("./runSmrForAlerts");
 const runRfiForAlerts = require("./runRfiForAlerts");

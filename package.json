@@ -7,7 +7,14 @@
   "scripts": {
     "start": "NODE_ENV=production node server",
     "dev": "nodemon server.js",
-    "doc": "node swagger.js"
+    "doc": "node swagger.js",
+    "test": "jest --testPathPatterns=tests/training --runInBand --forceExit",
+    "test:watch": "jest --testPathPatterns=tests/training --runInBand --watch"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testTimeout": 30000,
+    "silent": true
   },
   "author": "SH Sohel",
   "license": "MIT",
@@ -58,7 +65,10 @@
     "xss-filters": "^1.2.7"
   },
   "devDependencies": {
+    "jest": "^30.3.0",
+    "mongodb-memory-server": "^11.0.1",
     "nodemon": "^3.1.10",
+    "supertest": "^7.2.2",
     "swagger-autogen": "^2.23.7"
   }
 }

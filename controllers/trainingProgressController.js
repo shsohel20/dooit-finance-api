@@ -2,11 +2,13 @@ const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 
-const LearnerProgress = require("../models/LearnerProgress");
+const TrainingLearnerProgress = require("../models/TrainingLearnerProgress");
 const ModuleAssignment = require("../models/ModuleAssignment");
 const TrainingModule = require("../models/TrainingModule");
 const TrainingModulePart = require("../models/TrainingModulePart");
 const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
+const TrainingModuleAccess = require("../models/TrainingModuleAccess");
+const Roles = require("../models/Role");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -18,13 +20,13 @@ function isValidId(id) {
  * Upsert progress doc — find or create for (learner, module)
  */
 async function findOrCreateProgress(learnerId, moduleId, assignmentId) {
-    let progress = await LearnerProgress.findOne({
+    let progress = await TrainingLearnerProgress.findOne({
         learner: learnerId,
         module: moduleId,
     });
 
     if (!progress) {
-        progress = await LearnerProgress.create({
+        progress = await TrainingLearnerProgress.create({
             learner: learnerId,
             module: moduleId,
             assignment: assignmentId || undefined,
@@ -52,7 +54,7 @@ exports.getMyProgress = asyncHandler(async (req, res, next) => {
     if (!isValidId(moduleId))
         return next(new ErrorResponse("Invalid module id", 400));
 
-    const progress = await LearnerProgress.findOne({
+    const progress = await TrainingLearnerProgress.findOne({
         learner: req.user._id,
         module: moduleId,
     });
@@ -67,7 +69,7 @@ exports.getMyProgress = asyncHandler(async (req, res, next) => {
 // @desc  Get all my progress records (learner dashboard)
 // @route GET /api/v1/progress
 exports.getAllMyProgress = asyncHandler(async (req, res, next) => {
-    const records = await LearnerProgress.find({ learner: req.user._id })
+    const records = await TrainingLearnerProgress.find({ learner: req.user._id })
         .populate("module", "title uid status stats partsCount")
         .lean();
 
@@ -94,9 +96,30 @@ exports.startModule = asyncHandler(async (req, res, next) => {
     });
 
     if (!assignment)
-        return next(
-            new ErrorResponse("You are not assigned to this module", 403)
-        );
+        return next(new ErrorResponse("You are not assigned to this module", 403));
+
+    // ── Role-gate: verify learner's role is still permitted ───────────────────
+    const accessRules = await TrainingModuleAccess.find({ module: moduleId, status: "active" })
+        .select("roles")
+        .lean();
+
+    if (accessRules.length > 0) {
+        const openToAll = accessRules.some((a) => a.roles.length === 0);
+
+        if (!openToAll) {
+            const roleDoc = await Roles.findOne({ name: req.user.role, isActive: true })
+                .select("_id")
+                .lean();
+
+            const permitted = roleDoc && accessRules.some((a) =>
+                a.roles.some((r) => String(r) === String(roleDoc._id))
+            );
+
+            if (!permitted)
+                return next(new ErrorResponse("Your role does not have access to this module", 403));
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const progress = await findOrCreateProgress(
         req.user._id,
@@ -170,6 +193,7 @@ exports.submitAttempts = asyncHandler(async (req, res, next) => {
                 JSON.stringify(selected.sort()) === JSON.stringify(correct);
         }
 
+        const possiblePoints = question.points || 1;
         newAttempts.push({
             part: partId,
             question: questionId,
@@ -177,7 +201,8 @@ exports.submitAttempts = asyncHandler(async (req, res, next) => {
                 ? selectedAnswer.join(",")
                 : String(selectedAnswer),
             isCorrect,
-            pointsEarned: isCorrect ? question.points || 1 : 0,
+            pointsEarned: isCorrect ? possiblePoints : 0,
+            possiblePoints,
             attemptRound: progress.attemptRound,
         });
     }
@@ -256,7 +281,7 @@ exports.updateWatchProgress = asyncHandler(async (req, res, next) => {
         assignment._id
     );
 
-    const effectiveDuration = durationSec || part.video?.durationSec || 0;
+    const effectiveDuration = durationSec ?? part.video?.durationSec ?? 0;
 
     // 1. Resolve the final watchedSeconds first
     const existingIdx = progress.watchRecords.findIndex(
@@ -301,7 +326,7 @@ exports.completeModule = asyncHandler(async (req, res, next) => {
     if (!isValidId(moduleId))
         return next(new ErrorResponse("Invalid module id", 400));
 
-    const progress = await LearnerProgress.findOne({
+    const progress = await TrainingLearnerProgress.findOne({
         learner: req.user._id,
         module: moduleId,
     });
@@ -397,7 +422,7 @@ exports.grantRetake = asyncHandler(async (req, res, next) => {
 
     // Check maxAttempts
     if (assignment.maxAttempts > 0) {
-        const progress = await LearnerProgress.findOne({
+        const progress = await TrainingLearnerProgress.findOne({
             learner: learnerId,
             module: moduleId,
         });
@@ -412,10 +437,10 @@ exports.grantRetake = asyncHandler(async (req, res, next) => {
     }
 
     // Reset progress for new round
-    await LearnerProgress.findOneAndUpdate(
+    await TrainingLearnerProgress.findOneAndUpdate(
         { learner: learnerId, module: moduleId },
         {
-            $inc: { attemptRound: 1, "assignment.retakesGranted": 0 },
+            $inc: { attemptRound: 1 },
             $set: {
                 currentPartIndex: 0,
                 isPassed: false,
@@ -431,10 +456,12 @@ exports.grantRetake = asyncHandler(async (req, res, next) => {
 
     await ModuleAssignment.findByIdAndUpdate(assignment._id, {
         $inc: { retakesGranted: 1 },
-        status: "in-progress",
-        finalScore: null,
-        isPassed: null,
-        completedAt: null,
+        $set: {
+            status: "in-progress",
+            finalScore: null,
+            isPassed: null,
+            completedAt: null,
+        },
     });
 
     // Update module stats
@@ -480,7 +507,7 @@ exports.getProgressReport = asyncHandler(async (req, res, next) => {
             Object.assign(filter, { attempts: { $size: 0 } });
     }
 
-    const records = await LearnerProgress.find(filter)
+    const records = await TrainingLearnerProgress.find(filter)
         .populate("learner", "name email")
         .populate("module", "title uid")
         .populate("assignment", "dueDate maxAttempts status")
@@ -514,7 +541,7 @@ exports.getModuleLearnerProgress = asyncHandler(async (req, res, next) => {
     if (!isValidId(moduleId))
         return next(new ErrorResponse("Invalid module id", 400));
 
-    const records = await LearnerProgress.find({ module: moduleId })
+    const records = await TrainingLearnerProgress.find({ module: moduleId })
         .populate("learner", "name email")
         .lean();
 

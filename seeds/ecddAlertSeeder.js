@@ -1,5 +1,5 @@
 const axios = require("axios");
-const Alert = require("./models/Alert");
+const Alert = require("../models/Alert");
 
 const BASE_URL = "http://4.227.188.44:8000";
 

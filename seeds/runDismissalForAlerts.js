@@ -1,4 +1,4 @@
-const Alert = require("./models/Alert");
+const Alert = require("../models/Alert");
 const seedDismissalAlert = require("./dismissalAlertSeeder");
 const dismissalTypes = require("./dismissalTypes");
 

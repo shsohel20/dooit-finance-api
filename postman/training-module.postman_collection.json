@@ -1,0 +1,874 @@
+{
+  "info": {
+    "name": "Training Module",
+    "description": "Full training module API — module CRUD, parts, questions, org-scoping access, learner assignments, progress tracking, and reports.\n\n**Base URL:** `{{baseUrl}}` → e.g. `http://localhost:6830/api/v1`\n\nAll requests require `Authorization: Bearer {{token}}`.\n\n**Variables to set before running:**\n| Variable | Example |\n|---|---|\n| `baseUrl` | `http://localhost:6830/api/v1` |\n| `token` | `<JWT>` |\n| `moduleId` | `<TrainingModule ObjectId>` |\n| `partId` | `<TrainingModulePart ObjectId>` |\n| `questionId` | `<TrainingModuleQuestion ObjectId>` |\n| `accessId` | `<TrainingModuleAccess ObjectId>` |\n| `assignmentId` | `<ModuleAssignment ObjectId>` |\n| `clientId` | `<Client ObjectId>` |\n| `branchId` | `<Branch ObjectId>` |\n| `roleId` | `<Roles ObjectId>` |\n| `learnerId` | `<User ObjectId>` |",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",      "value": "http://localhost:6830/api/v1", "type": "string" },
+    { "key": "token",        "value": "", "type": "string" },
+    { "key": "moduleId",     "value": "", "type": "string" },
+    { "key": "partId",       "value": "", "type": "string" },
+    { "key": "questionId",   "value": "", "type": "string" },
+    { "key": "accessId",     "value": "", "type": "string" },
+    { "key": "assignmentId", "value": "", "type": "string" },
+    { "key": "clientId",     "value": "", "type": "string" },
+    { "key": "branchId",     "value": "", "type": "string" },
+    { "key": "roleId",       "value": "", "type": "string" },
+    { "key": "learnerId",    "value": "", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+
+    {
+      "name": "Modules",
+      "description": "Create and manage training module definitions.\n\nModules are content-only — client/branch/role scoping is managed separately via Module Access. Only published modules can be assigned to learners.",
+      "item": [
+
+        {
+          "name": "Create Module — minimal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Workplace Safety Basics\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a draft module with title only.\n\nRequired: `title`\nAuto-generated: `uid` (MOD_timestamp), `slug` (from title), `status` defaults to `draft`"
+          }
+        },
+
+        {
+          "name": "Create Module — full",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Workplace Safety Basics\",\n  \"description\": \"Introduction to workplace safety procedures and regulations.\",\n  \"status\": \"draft\",\n  \"metadata\": {}\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a module with all optional fields.\n\n`status` — `draft` | `published` | `archived` (default: `draft`)\n`metadata` — free-form Mixed field for any extra data\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "List Modules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules?status=published&select=title,uid,status,stats&sort=-createdAt&page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules"],
+              "query": [
+                { "key": "status",  "value": "published",         "description": "draft | published | archived" },
+                { "key": "select",  "value": "title,uid,status,stats", "description": "Comma-separated fields to return" },
+                { "key": "sort",    "value": "-createdAt",         "description": "Prefix - for descending" },
+                { "key": "page",    "value": "1" },
+                { "key": "limit",   "value": "20" }
+              ]
+            },
+            "description": "Returns a paginated list of modules via advancedResults middleware.\nSupports filter, select, sort, page, and limit query params."
+          }
+        },
+
+        {
+          "name": "Get Module",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}"]
+            },
+            "description": "Returns one module with populated virtuals: `parts`, `partsCount`, `questionsCount`, `avgQuestionsPerPart`, `isPublished`, `access`."
+          }
+        },
+
+        {
+          "name": "Update Module — publish",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"published\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Publishes the module so it can be assigned to learners."
+          }
+        },
+
+        {
+          "name": "Update Module — title and description",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Workplace Safety Basics — Revised\",\n  \"description\": \"Updated description with new content.\",\n  \"status\": \"published\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Send only the fields you want to change.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Delete Module",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}"]
+            },
+            "description": "Permanently deletes a module.\n\nRoles: admin only"
+          }
+        },
+
+        {
+          "name": "Modules Assigned By Me",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/assigned-by-me",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "assigned-by-me"]
+            },
+            "description": "Returns all assignments created by the authenticated user with per-learner progress breakdown.\n\nRoles: admin, manager"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Module Access (Scoping)",
+      "description": "Admin assigns a module to one or more (client / branch / role) combinations.\n\nThis controls which organisations see the module and auto-creates ModuleAssignment records for all matching active users.\n\n`roles: []` on a scope means all roles within that client/branch are permitted.",
+      "item": [
+
+        {
+          "name": "Assign Access — single scope, all roles",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/access",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "access"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"branch\": \"{{branchId}}\",\n  \"roles\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "`roles: []` — open to all roles within this client/branch.\n\nSide effect: every active user matching `clientBelongs` + `branchBelongs` is automatically inserted as a `ModuleAssignment` (pending, duplicates skipped).\n\nResponse includes `autoAssigned` count.\n\nRoles: admin only"
+          }
+        },
+
+        {
+          "name": "Assign Access — single scope, specific roles",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/access",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "access"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"branch\": \"{{branchId}}\",\n  \"roles\": [\"{{roleId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "`roles` — array of `Roles` ObjectIds. Only users whose `User.role` maps to one of these role names will be auto-assigned.\n\nRoles: admin only"
+          }
+        },
+
+        {
+          "name": "Assign Access — multiple scopes (bulk)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/access",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "access"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"client\": \"{{clientId}}\",\n    \"branch\": \"{{branchId}}\",\n    \"roles\": [\"{{roleId}}\"]\n  },\n  {\n    \"client\": \"{{clientId}}\",\n    \"roles\": []\n  }\n]",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Pass an array to assign multiple scopes in one call.\n\nDuplicate scopes (same module + client + branch) are silently skipped.\n\nResponse: `{ inserted, skipped, autoAssigned }`\n- `inserted` — new TrainingModuleAccess docs created\n- `skipped` — duplicate scopes ignored\n- `autoAssigned` — ModuleAssignment docs auto-created for matching users"
+          }
+        },
+
+        {
+          "name": "Get Module Access Rules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/access",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "access"]
+            },
+            "description": "Lists all client/branch/role scopes assigned to this module.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Delete Access Rule",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/access/{{accessId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "access", "{{accessId}}"]
+            },
+            "description": "Removes a single access scope. Set `accessId` to the `_id` returned by the GET endpoint.\n\nRoles: admin only"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Parts",
+      "description": "Parts are the content units inside a module — each has a video and a set of questions.\n\nPart titles must be unique within the same module (allowed to repeat across different modules).",
+      "item": [
+
+        {
+          "name": "Create Part — YouTube video",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/parts",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "parts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Part 1 — Introduction\",\n  \"description\": \"Overview of core concepts.\",\n  \"video\": {\n    \"url\": \"https://www.youtube.com/watch?v=dQw4w9WgXcQ\"\n  },\n  \"minWatchPercent\": 80,\n  \"passAllRequired\": true,\n  \"maxRetries\": 2,\n  \"estimatedTimeMin\": 10,\n  \"order\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a part. `video.provider` and `video.durationSec` are auto-fetched for YouTube and Vimeo URLs.\n\nRequired: `title`\n\n`minWatchPercent` — learner must watch this % before attempting questions (default 80)\n`passAllRequired` — all questions must be answered correctly (default true)\n`maxRetries` — 0 = unlimited retries (default 0)\n`estimatedTimeMin` — display hint only (default 5)\n`order` — display order within module (default 0)\n\nTitle must be unique within the same module.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Create Part — self-hosted video",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/parts",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "parts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Part 2 — Practical Demonstration\",\n  \"video\": {\n    \"url\": \"https://res.cloudinary.com/demo/video/upload/safety_demo.mp4\"\n  },\n  \"minWatchPercent\": 100,\n  \"order\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "For Cloudinary or AWS S3 URLs, provider is detected automatically but `durationSec` defaults to 0 (no external API call)."
+          }
+        },
+
+        {
+          "name": "List Parts by Module",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/parts",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "parts"]
+            },
+            "description": "Returns all parts for a module sorted by `order` ascending. Each part includes its populated `questions` array."
+          }
+        },
+
+        {
+          "name": "Get Part",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}"]
+            },
+            "description": "Returns a single part with its populated `questions` array."
+          }
+        },
+
+        {
+          "name": "Update Part — change video URL",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Part 1 — Introduction (Revised)\",\n  \"video\": {\n    \"url\": \"https://vimeo.com/123456789\"\n  },\n  \"order\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "When `video.url` is provided, metadata (provider, durationSec) is re-fetched automatically.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Update Part — settings only",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"minWatchPercent\": 60,\n  \"passAllRequired\": false,\n  \"maxRetries\": 0,\n  \"estimatedTimeMin\": 15\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Update part settings without touching the video."
+          }
+        },
+
+        {
+          "name": "Delete Part",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}"]
+            },
+            "description": "Permanently deletes the part.\n\nRoles: admin, manager"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Questions",
+      "description": "Questions belong to a part. Option identifier is `key` (A/B/C/D) — not `label`. `correctAnswers` is an array of `key` values.",
+      "item": [
+
+        {
+          "name": "Create Question — single choice",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}", "questions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"What is the minimum PPE required on a construction site?\",\n  \"type\": \"single\",\n  \"options\": [\n    { \"key\": \"A\", \"text\": \"Hard hat only\" },\n    { \"key\": \"B\", \"text\": \"Hard hat, vest, and steel-capped boots\" },\n    { \"key\": \"C\", \"text\": \"No PPE required\" },\n    { \"key\": \"D\", \"text\": \"Gloves only\" }\n  ],\n  \"correctAnswers\": [\"B\"],\n  \"explanation\": \"Full PPE is always required on construction sites.\",\n  \"points\": 2,\n  \"order\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Creates a question and appends it to the part's `questions` array.\n\nRequired: `text`\n\n`type` — `single` | `multiple` | `boolean` (default: `single`)\n`options[].key` — the identifier referenced in `correctAnswers` (A, B, C, D …)\n`options[].text` — display text shown to the learner\n`correctAnswers` — array of `key` values that are correct\n`explanation` — shown to learner after submission (optional)\n`points` — score value for a correct answer (default 1)\n`order` — display order within the part (default 0)\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Create Question — multiple choice",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}", "questions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Which of the following are valid fire evacuation steps? (select all that apply)\",\n  \"type\": \"multiple\",\n  \"options\": [\n    { \"key\": \"A\", \"text\": \"Sound the alarm\" },\n    { \"key\": \"B\", \"text\": \"Use the lift\" },\n    { \"key\": \"C\", \"text\": \"Proceed to the assembly point\" },\n    { \"key\": \"D\", \"text\": \"Call the fire department\" }\n  ],\n  \"correctAnswers\": [\"A\", \"C\", \"D\"],\n  \"explanation\": \"Never use the lift during a fire evacuation.\",\n  \"points\": 3,\n  \"order\": 2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "For `type: \"multiple\"`, `correctAnswers` contains all correct `key` values. When submitting answers, `selectedAnswer` should be a comma-separated string or an array."
+          }
+        },
+
+        {
+          "name": "Create Question — boolean (true/false)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/parts/{{partId}}/questions",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "parts", "{{partId}}", "questions"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"You must wear a hard hat at all times on site.\",\n  \"type\": \"boolean\",\n  \"options\": [\n    { \"key\": \"true\",  \"text\": \"True\" },\n    { \"key\": \"false\", \"text\": \"False\" }\n  ],\n  \"correctAnswers\": [\"true\"],\n  \"points\": 1,\n  \"order\": 3\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Boolean questions use `key: \"true\"` and `key: \"false\"` as the option identifiers."
+          }
+        },
+
+        {
+          "name": "Get Question",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "questions", "{{questionId}}"]
+            }
+          }
+        },
+
+        {
+          "name": "Update Question — change correct answer",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "questions", "{{questionId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correctAnswers\": [\"B\"],\n  \"explanation\": \"Updated explanation.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "`correctAnswers` must reference existing `key` values in the question's `options` array.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Update Question — change points and order",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "questions", "{{questionId}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"points\": 5,\n  \"order\": 1\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Send only the fields you want to change."
+          }
+        },
+
+        {
+          "name": "Delete Question",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/questions/{{questionId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "questions", "{{questionId}}"]
+            },
+            "description": "Deletes the question document and removes its ObjectId from the parent part's `questions` array.\n\nRoles: admin, manager"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Learner Assignments",
+      "description": "Manager assigns a published module to specific learners.\n\nBase: `{{baseUrl}}/training-assignments`",
+      "item": [
+
+        {
+          "name": "Assign Module to Learners — minimal",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/{{moduleId}}/assign",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "{{moduleId}}", "assign"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"learnerIds\": [\"{{learnerId}}\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Assigns a published module to one learner with no due date and unlimited attempts.\n\nModule must have `status: \"published\"`.\nDuplicate assignments are silently skipped (`skipped` count returned).\nLearners whose role is not permitted by any access rule are counted as `roleBlocked`.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Assign Module to Learners — full",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/{{moduleId}}/assign",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "{{moduleId}}", "assign"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"learnerIds\": [\"<userId-1>\", \"<userId-2>\", \"<userId-3>\"],\n  \"dueDate\": \"2026-12-31T00:00:00.000Z\",\n  \"maxAttempts\": 3\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "`learnerIds` — non-empty array of User ObjectIds (required)\n`dueDate` — ISO 8601 date, optional\n`maxAttempts` — 0 = unlimited (default 0)\n\nResponse:\n```\n{ inserted, skipped, roleBlocked, message }\n```\n- `inserted` — new assignments created\n- `skipped` — already assigned\n- `roleBlocked` — learners rejected due to role not in access rules"
+          }
+        },
+
+        {
+          "name": "My Assignments (Learner)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/mine",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "mine"]
+            },
+            "description": "Returns all modules assigned to the authenticated learner, enriched with a live progress snapshot per module."
+          }
+        },
+
+        {
+          "name": "Assignments Created by Me (Manager)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/by-me",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "by-me"]
+            },
+            "description": "Returns all assignments the authenticated manager created with per-learner progress breakdown.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "All Assignments (Admin)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments?status=pending",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments"],
+              "query": [
+                { "key": "moduleId",  "value": "",        "description": "Filter by module ObjectId", "disabled": true },
+                { "key": "learnerId", "value": "",        "description": "Filter by learner ObjectId", "disabled": true },
+                { "key": "status",    "value": "pending", "description": "pending | in-progress | completed | overdue" }
+              ]
+            },
+            "description": "Admin sees all assignments. Managers see only assignments they created.\n\nSupports `moduleId`, `learnerId`, `status` query filters.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Get Assignment",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/{{assignmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "{{assignmentId}}"]
+            },
+            "description": "Returns a single assignment. Accessible by the assigned learner, the assigner, or an admin."
+          }
+        },
+
+        {
+          "name": "Update Assignment Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/{{assignmentId}}/status",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "{{assignmentId}}", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"overdue\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Updates assignment status. Typically called by a scheduled job to mark overdue.\n\n`status` — `pending` | `in-progress` | `completed` | `overdue`\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Delete Assignment (Revoke)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/training-assignments/{{assignmentId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-assignments", "{{assignmentId}}"]
+            },
+            "description": "Revokes the assignment and decrements `stats.assignedCount` on the module.\n\nOnly the assigner or an admin can revoke.\n\nRoles: admin, manager"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Learner Progress",
+      "description": "Learner-facing progress tracking — start a module, record video watch time, submit answers, complete.\n\nLearner routes: `{{baseUrl}}/training-progress`\nAdmin/manager routes: `{{baseUrl}}/training-modules/:moduleId/...`",
+      "item": [
+
+        {
+          "name": "Start Module",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}/start",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}", "start"]
+            },
+            "description": "Starts or resumes a module for the authenticated learner. Creates a `TrainingLearnerProgress` document if one does not exist.\n\nRequires an active `ModuleAssignment` (status `pending` or `in-progress`) for this learner.\nAlso verifies the learner's role is still permitted by the module's access rules.\n\nReturns the full progress document. Check `currentPartIndex` to resume at the correct part."
+          }
+        },
+
+        {
+          "name": "Get My Progress for Module",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}"]
+            },
+            "description": "Returns the authenticated learner's progress for one module.\n\nReturns `{ data: null }` if the learner has not started yet."
+          }
+        },
+
+        {
+          "name": "Get All My Progress",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-progress",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress"]
+            },
+            "description": "Returns all progress records for the authenticated learner across every assigned module."
+          }
+        },
+
+        {
+          "name": "Update Watch Progress",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}/watch",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}", "watch"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partId\": \"{{partId}}\",\n  \"watchedSeconds\": 85,\n  \"durationSec\": 100\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Records how many seconds the learner has watched for a part.\n\n`partId` — ObjectId of the part being watched (required)\n`watchedSeconds` — seconds watched so far (required)\n`durationSec` — total video duration in seconds (required)\n\nBehaviour:\n- `watchPercent` = `(watchedSeconds / durationSec) * 100`, clamped 0–100\n- Watch records are **upserted** — the highest `watchedSeconds` is always kept\n- `completed: true` is set when `watchPercent >= part.minWatchPercent`\n\nCall this periodically as the learner watches (e.g. every 10 seconds).\n\nResponse returns the updated watch record for this part."
+          }
+        },
+
+        {
+          "name": "Submit Answers — single/boolean question",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}/attempts",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}", "attempts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partId\": \"{{partId}}\",\n  \"answers\": [\n    { \"questionId\": \"{{questionId}}\", \"selectedAnswer\": \"B\" }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Submits answers for one part in the current attempt round.\n\n`partId` — ObjectId of the part (required)\n`answers` — non-empty array of answer objects (required)\n`answers[].questionId` — ObjectId of the question\n`answers[].selectedAnswer` — the option `key` the learner selected (e.g. `\"B\"`)\n\nResponse:\n```\n{\n  results: [{ questionId, selectedAnswer, isCorrect, pointsEarned }],\n  partScore: 0–100,\n  passed: boolean,\n  overallScore: 0–100,\n  currentPartIndex: number\n}\n```"
+          }
+        },
+
+        {
+          "name": "Submit Answers — multiple choice question",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}/attempts",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}", "attempts"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partId\": \"{{partId}}\",\n  \"answers\": [\n    { \"questionId\": \"{{questionId}}\", \"selectedAnswer\": [\"A\", \"C\", \"D\"] }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "For `type: \"multiple\"` questions, `selectedAnswer` can be an array of key strings or a comma-separated string.\n\nAll selected keys must match `correctAnswers` exactly (order-independent) to be marked correct."
+          }
+        },
+
+        {
+          "name": "Complete Module",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/{{moduleId}}/complete",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "{{moduleId}}", "complete"]
+            },
+            "description": "Finalises the module attempt. Calculates total score, sets `isPassed` (score >= passThreshold), and stamps `completedAt`.\n\nCan only be called once per attempt round — returns `400` if already completed this round.\n\nResponse:\n```\n{ score, isPassed, passThreshold, completedAt }\n```"
+          }
+        },
+
+        {
+          "name": "Progress Report (Admin/Manager)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-progress/report?status=passed",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-progress", "report"],
+              "query": [
+                { "key": "moduleId",  "value": "",       "description": "Filter by module ObjectId", "disabled": true },
+                { "key": "learnerId", "value": "",       "description": "Filter by learner ObjectId", "disabled": true },
+                { "key": "status",    "value": "passed", "description": "passed | failed | in-progress | not-started" }
+              ]
+            },
+            "description": "Aggregated progress report across all learners. Managers see only their own assignments' learners.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Per-Learner Progress for Module (Admin/Manager)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/learners",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "learners"]
+            },
+            "description": "Returns one row per learner for the given module with status, score, and attempt counts.\n\nRoles: admin, manager"
+          }
+        },
+
+        {
+          "name": "Grant Retake",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/training-modules/{{moduleId}}/retake",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-modules", "{{moduleId}}", "retake"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"learnerId\": \"{{learnerId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Grants the learner one additional attempt. Increments `attemptRound` and resets `currentPartIndex`, `score`, `isPassed`, `completedAt`, and `passedAt`.\n\n`learnerId` — ObjectId of the learner (required)\n\nErrors:\n- `400` — max attempts reached (`assignment.maxAttempts > 0`)\n- `404` — no assignment found for this learner\n\nRoles: admin, manager"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Reports",
+      "description": "Training analytics and KPI dashboards. All endpoints require admin or manager role.\n\nBase: `{{baseUrl}}/training-reports`",
+      "item": [
+
+        {
+          "name": "Overview — KPI Snapshot",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-reports/overview",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-reports", "overview"]
+            },
+            "description": "Returns system-wide KPI snapshot:\n\n`totalModules` — all modules\n`publishedModules` — published modules\n`totalAssignments` — all assignments\n`completionRate` — % assignments with a completed progress doc\n`passRate` — % of completions that passed\n`avgScore` — average score across all completed modules\n\nManagers see data scoped to their own assignments only."
+          }
+        },
+
+        {
+          "name": "Per-Module Analytics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-reports/modules",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-reports", "modules"]
+            },
+            "description": "Returns a table of all modules with aggregated stats: assignment count, completion count, pass count, and average score."
+          }
+        },
+
+        {
+          "name": "Per-Learner Progress Table",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-reports/learners",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-reports", "learners"]
+            },
+            "description": "Returns one row per learner showing all assigned modules and their completion/pass status."
+          }
+        },
+
+        {
+          "name": "Single Module Deep-Dive",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/training-reports/module/{{moduleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["training-reports", "module", "{{moduleId}}"]
+            },
+            "description": "Returns a detailed report for one module:\n\n`summary` — totalLearners, completed, passed, avgScore\n`questionBreakdown` — per-question correct/incorrect counts and difficulty score"
+          }
+        }
+
+      ]
+    }
+
+  ]
+}

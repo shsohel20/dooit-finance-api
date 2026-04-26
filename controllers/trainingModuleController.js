@@ -6,6 +6,9 @@ const TrainingModule = require("../models/TrainingModule");
 const TrainingModulePart = require("../models/TrainingModulePart");
 const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
 const ModuleAssignment = require("../models/ModuleAssignment");
+const TrainingModuleAccess = require("../models/TrainingModuleAccess");
+const User = require("../models/User");
+const Roles = require("../models/Role");
 const axios = require("axios");
 
 function isValidId(id) {
@@ -19,10 +22,7 @@ function isValidId(id) {
 // @desc Create module
 // @route POST /api/v1/training-modules
 exports.createModule = asyncHandler(async (req, res, next) => {
-  const client = req?.user?.client?._id;
-  const branch = req?.user?.branch?._id;
-
-  const { title, description, manager, status } = req.body;
+  const { title, description, status } = req.body;
 
   if (!title) {
     return next(new ErrorResponse("title is required", 400));
@@ -31,14 +31,141 @@ exports.createModule = asyncHandler(async (req, res, next) => {
   const module = await TrainingModule.create({
     title,
     description,
-    manager,
     status,
-    client,
-    branch,
     createdBy: req.user._id,
   });
 
   res.status(201).json({ success: true, data: module });
+});
+
+// @desc  Admin assigns module to client / branch / role scope(s)
+// @route POST /api/v1/training-modules/:moduleId/access
+exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
+  const { moduleId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+
+  const mod = await TrainingModule.findById(moduleId);
+  if (!mod) return next(new ErrorResponse("Module not found", 404));
+
+  // Accept a single object or an array of scope objects
+  const scopes = Array.isArray(req.body) ? req.body : [req.body];
+
+  const docs = scopes.map(({ client, branch, roles }) => ({
+    module: moduleId,
+    client: client || undefined,
+    branch: branch || undefined,
+    roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
+    assignedBy: req.user._id,
+  }));
+
+  let inserted = 0;
+  try {
+    const result = await TrainingModuleAccess.insertMany(docs, {
+      ordered: false,
+      rawResult: true,
+    });
+    inserted = result.insertedCount ?? 0;
+  } catch (err) {
+    if (err.name === "MongoBulkWriteError" || err.result) {
+      inserted = err.result?.insertedCount ?? err.insertedCount ?? 0;
+    } else {
+      return next(err);
+    }
+  }
+
+  // ── Auto-assign matching learners ──────────────────────────────────────────
+  // Fetch all Roles once (small collection) to build both direction maps
+  const allRoles = await Roles.find({}).select("_id name").lean();
+  const roleIdToName = {};
+  const roleNameToId = {};
+  for (const r of allRoles) {
+    roleIdToName[String(r._id)] = r.name;
+    roleNameToId[r.name] = String(r._id);
+  }
+
+  let autoAssigned = 0;
+
+  for (const scope of docs) {
+    // Build the user filter matching this scope
+    const userFilter = { isActive: true };
+    if (scope.client)  userFilter.clientBelongs = scope.client;
+    if (scope.branch)  userFilter.branchBelongs = scope.branch;
+
+    if (scope.roles && scope.roles.length > 0) {
+      const roleNames = scope.roles
+        .map((rid) => roleIdToName[String(rid)])
+        .filter(Boolean);
+      if (roleNames.length) userFilter.role = { $in: roleNames };
+    }
+    // roles: [] means open to all roles within this client/branch — no role filter
+
+    const matchedUsers = await User.find(userFilter).select("_id role").lean();
+    if (!matchedUsers.length) continue;
+
+    const assignDocs = matchedUsers.map((u) => ({
+      module: moduleId,
+      learner: u._id,
+      assignedBy: req.user._id,
+      status: "pending",
+      roleId: roleNameToId[u.role] ? new mongoose.Types.ObjectId(roleNameToId[u.role]) : undefined,
+    }));
+
+    try {
+      const ar = await ModuleAssignment.insertMany(assignDocs, {
+        ordered: false,
+        rawResult: true,
+      });
+      autoAssigned += ar.insertedCount ?? 0;
+    } catch (err) {
+      if (err.name === "MongoBulkWriteError" || err.result) {
+        autoAssigned += err.result?.insertedCount ?? err.insertedCount ?? 0;
+      }
+      // silently skip duplicate assignments
+    }
+  }
+
+  if (autoAssigned > 0) {
+    await TrainingModule.findByIdAndUpdate(moduleId, {
+      $inc: { "stats.assignedCount": autoAssigned },
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
+  res.status(201).json({
+    success: true,
+    inserted,
+    skipped: docs.length - inserted,
+    autoAssigned,
+  });
+});
+
+// @desc  Get all access rules for a module
+// @route GET /api/v1/training-modules/:moduleId/access
+exports.getModuleAccess = asyncHandler(async (req, res, next) => {
+  const { moduleId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+
+  const access = await TrainingModuleAccess.find({ module: moduleId });
+
+  res.status(200).json({ success: true, count: access.length, data: access });
+});
+
+// @desc  Remove a single access rule
+// @route DELETE /api/v1/training-modules/access/:accessId
+exports.deleteModuleAccess = asyncHandler(async (req, res, next) => {
+  const { accessId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(accessId))
+    return next(new ErrorResponse("Invalid access id", 400));
+
+  const access = await TrainingModuleAccess.findByIdAndDelete(accessId);
+  if (!access) return next(new ErrorResponse("Access rule not found", 404));
+
+  res.status(200).json({ success: true });
 });
 
 // @desc Get all modules
@@ -224,16 +351,14 @@ exports.updatePart = asyncHandler(async (req, res, next) => {
 
   res.status(200).json({ success: true, data: part });
 });
-// @desc Update single part
-// @route D /api/v1/training-modules/parts/:partId
+// @desc Delete single part
+// @route DELETE /api/v1/training-modules/parts/:partId
 exports.deletePart = asyncHandler(async (req, res, next) => {
   if (!isValidId(req.params.partId))
     return next(new ErrorResponse("Invalid part id", 400));
 
   const part = await TrainingModulePart.findByIdAndDelete(req.params.partId);
   if (!part) return next(new ErrorResponse("Part not found", 404));
-
-  await part.deleteOne();
 
   res.status(200).json({ success: true, data: part });
 });
@@ -297,46 +422,3 @@ exports.deleteQuestion = asyncHandler(async (req, res, next) => {
   res.status(200).json({ success: true });
 });
 
-
-//@desc Module Assign: Manager
-//@route POST /api/v1/:moduleId/assign
-exports.assignModule = asyncHandler(async (req, res, next) => {
-  const { moduleId } = req.params;
-  const { learnerIds, dueDate, maxAttempts } = req.body;
-
-  const managerId = req.user._id;
-
-  const assignments = learnerIds.map(userId => ({
-    module: moduleId,
-    learner: userId,
-    assignedBy: managerId,
-    dueDate,
-    maxAttempts,
-  }));
-
-  await ModuleAssignment.insertMany(assignments, {
-    ordered: false, // skip duplicates
-  });
-
-  // update module stats
-  await TrainingModule.findByIdAndUpdate(moduleId, {
-    $inc: { "stats.assignedCount": learnerIds.length },
-  });
-
-  res.json({
-    success: true,
-    message: "Module assigned successfully",
-  });
-});
-
-//@desc : Get Manager Assigned List
-//@route GET /api/v1/assigned-by-me
-exports.getManagerModule = asyncHandler(async (req, res, next) => {
-  const modules = await ModuleAssignment.find({ assignedBy: req.user._id });
-
-  res.json({
-    data: modules,
-    success: true,
-    message: "Find Modules assigned by me",
-  });
-});

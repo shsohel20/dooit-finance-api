@@ -3,8 +3,8 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 
-const PolicyHub = require("./models/PolicyHub");
-const PolicyHubVersion = require("./models/PolicyHubVersion");
+const PolicyHub = require("../models/PolicyHub");
+const PolicyHubVersion = require("../models/PolicyHubVersion");
 
 async function migrate() {
   try {

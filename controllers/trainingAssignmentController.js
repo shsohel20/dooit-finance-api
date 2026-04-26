@@ -3,8 +3,11 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 
 const ModuleAssignment = require("../models/ModuleAssignment");
-const LearnerProgress = require("../models/LearnerProgress");
+const TrainingLearnerProgress = require("../models/TrainingLearnerProgress");
 const TrainingModule = require("../models/TrainingModule");
+const TrainingModuleAccess = require("../models/TrainingModuleAccess");
+const User = require("../models/User");
+const Roles = require("../models/Role");
 
 function isValidId(id) {
     return mongoose.Types.ObjectId.isValid(id);
@@ -27,22 +30,92 @@ exports.assignModule = asyncHandler(async (req, res, next) => {
     if (mod.status !== "published")
         return next(new ErrorResponse("Only published modules can be assigned", 400));
 
-    const docs = learnerIds.map((uid) => ({
+    // ── Role-gate: check TrainingModuleAccess rules ───────────────────────────
+    const accessRules = await TrainingModuleAccess.find({ module: moduleId, status: "active" })
+        .select("roles")
+        .lean();
+
+    // learner _id -> Roles ObjectId map (populated only when access rules exist)
+    const learnerRoleIdMap = {};
+    const roleBlocked = [];
+    let eligibleIds = learnerIds;
+
+    if (accessRules.length > 0) {
+        const openToAll = accessRules.some((a) => a.roles.length === 0);
+
+        if (!openToAll) {
+            // Fetch learner role strings in one query
+            const learnerUsers = await User.find({ _id: { $in: learnerIds } })
+                .select("_id role")
+                .lean();
+
+            const uniqueRoleNames = [...new Set(learnerUsers.map((u) => u.role).filter(Boolean))];
+
+            // Resolve role name -> ObjectId
+            const roleDocs = await Roles.find({ name: { $in: uniqueRoleNames }, isActive: true })
+                .select("_id name")
+                .lean();
+
+            const roleNameToId = {};
+            for (const r of roleDocs) roleNameToId[r.name] = String(r._id);
+
+            // Build learner -> roleId map
+            for (const u of learnerUsers) {
+                learnerRoleIdMap[String(u._id)] = roleNameToId[u.role] || null;
+            }
+
+            // Collect all allowed role ObjectIds across all access rules
+            const allowedRoleIds = new Set(
+                accessRules.flatMap((a) => a.roles.map((r) => String(r)))
+            );
+
+            // Split into eligible vs blocked
+            eligibleIds = [];
+            for (const uid of learnerIds) {
+                const roleId = learnerRoleIdMap[String(uid)];
+                if (roleId && allowedRoleIds.has(roleId)) {
+                    eligibleIds.push(uid);
+                } else {
+                    roleBlocked.push(uid);
+                }
+            }
+
+            if (eligibleIds.length === 0) {
+                return res.status(403).json({
+                    success: false,
+                    message: "None of the learners have a role permitted by this module's access rules.",
+                    roleBlocked: roleBlocked.length,
+                });
+            }
+        }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    const docs = eligibleIds.map((uid) => ({
         module: moduleId,
         learner: uid,
         assignedBy: req.user._id,
         dueDate: dueDate || undefined,
         maxAttempts: maxAttempts || 0,
         status: "pending",
+        roleId: learnerRoleIdMap[String(uid)] || undefined,
     }));
 
     // ordered:false skips duplicate-key errors (already assigned)
-    const result = await ModuleAssignment.insertMany(docs, {
+    let insertedCount = 0;
+    try {
+      const result = await ModuleAssignment.insertMany(docs, {
         ordered: false,
         rawResult: true,
-    });
-
-    const insertedCount = result.insertedCount || 0;
+      });
+      insertedCount = result.insertedCount ?? 0;
+    } catch (err) {
+      if (err.name === "MongoBulkWriteError" || err.result) {
+        insertedCount = err.result?.insertedCount ?? err.insertedCount ?? 0;
+      } else {
+        return next(err);
+      }
+    }
 
     await TrainingModule.findByIdAndUpdate(moduleId, {
         $inc: { "stats.assignedCount": insertedCount },
@@ -51,7 +124,8 @@ exports.assignModule = asyncHandler(async (req, res, next) => {
     res.status(201).json({
         success: true,
         inserted: insertedCount,
-        skipped: learnerIds.length - insertedCount,
+        skipped: eligibleIds.length - insertedCount,
+        roleBlocked: roleBlocked.length,
         message: `Module assigned to ${insertedCount} learner(s).`,
     });
 });
@@ -68,7 +142,7 @@ exports.getMyAssignments = asyncHandler(async (req, res, next) => {
     // Enrich with progress snapshot
     const enriched = await Promise.all(
         assignments.map(async (a) => {
-            const progress = await LearnerProgress.findOne({
+            const progress = await TrainingLearnerProgress.findOne({
                 learner: req.user._id,
                 module: a.module?._id,
             }).lean();
@@ -110,7 +184,7 @@ exports.getAssignedByMe = asyncHandler(async (req, res, next) => {
     // Enrich each record with live progress
     const enriched = await Promise.all(
         assignments.map(async (a) => {
-            const progress = await LearnerProgress.findOne({
+            const progress = await TrainingLearnerProgress.findOne({
                 learner: a.learner?._id,
                 module: a.module?._id,
             })
