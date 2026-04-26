@@ -351,6 +351,22 @@ exports.getIndividualRiskAssessments = asyncHandler(async (req, res, next) => {
   res.status(200).json(res.advancedResults);
 });
 
+exports.getIndividualRiskAssessment = asyncHandler(async (req, res) => {
+  const doc = await IndividualRiskAssessment.findById(req.params.id)
+    .populate("customer", "uid personalKyc")
+    .populate("assessedBy", "name email")
+    .lean();
+  if (!doc) return res.status(404).json({ success: false, message: "Assessment not found" });
+  res.json({ success: true, data: doc });
+});
+
+exports.updateIndividualRiskAssessment = asyncHandler(async (req, res) => {
+  const allowed = { notes: req.body.notes };
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, allowed, { new: true });
+  if (!doc) return res.status(404).json({ success: false, message: "Assessment not found" });
+  res.json({ success: true, data: doc });
+});
+
 
 //// Risk dynamic model manipulation 
 
