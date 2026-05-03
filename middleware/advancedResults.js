@@ -246,10 +246,10 @@ const { isObjEmpty } = require("../utils");
 const advancedResults =
   (model, populate = null, filterSection = null) =>
     async (req, res, next) => {
-      const client = req?.user?.client?._id || req?.user?.clientBelongs || null;
+      const client = req?.user?.client?._id || req?.user?.clientBelongs || req.query?.client || null;
 
 
-      const branch = req?.user?.branch?._id || req?.user?.branchBelongs || null;;
+      const branch = req?.user?.branch?._id || req?.user?.branchBelongs || req.query?.branch || null;;
       try {
         // Copy req.query
         const reqQuery = {
