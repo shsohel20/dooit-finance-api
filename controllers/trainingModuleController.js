@@ -90,8 +90,8 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
   for (const scope of docs) {
     // Build the user filter matching this scope
     const userFilter = { isActive: true };
-    if (scope.client)  userFilter.clientBelongs = scope.client;
-    if (scope.branch)  userFilter.branchBelongs = scope.branch;
+    if (scope.client) userFilter.clientBelongs = scope.client;
+    if (scope.branch) userFilter.branchBelongs = scope.branch;
 
     if (scope.roles && scope.roles.length > 0) {
       const roleNames = scope.roles
@@ -109,7 +109,9 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
       learner: u._id,
       assignedBy: req.user._id,
       status: "pending",
-      roleId: roleNameToId[u.role] ? new mongoose.Types.ObjectId(roleNameToId[u.role]) : undefined,
+      roleId: roleNameToId[u.role]
+        ? new mongoose.Types.ObjectId(roleNameToId[u.role])
+        : undefined,
     }));
 
     try {
@@ -140,16 +142,156 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
     autoAssigned,
   });
 });
+exports.assignUpdateModuleAccess = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  const { moduleId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(moduleId)) {
+    return next(new ErrorResponse("Invalid module id", 400));
+  }
+
+  // Build scope filter
+  const query = { module: moduleId };
+  if (client) query.client = client;
+  if (branch) query.branch = branch;
+
+  // ✅ FIX: use findOne instead of findById
+  const mod = await TrainingModule.findById(moduleId);
+  if (!mod) {
+    return next(new ErrorResponse("Module not found", 404));
+  }
+
+  // Accept single or array
+  const scopes = Array.isArray(req.body) ? req.body : [req.body];
+
+  // Normalize scopes
+  const docs = scopes.map(({ client, branch, roles }) => ({
+    module: moduleId,
+    client: client || undefined,
+    branch: branch || undefined,
+    roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
+    assignedBy: req.user._id,
+  }));
+
+  // 🔥 STEP 1: Remove old access for this scope (true update behavior)
+  await TrainingModuleAccess.deleteMany(query);
+
+  // 🔥 STEP 2: Insert new access
+  let inserted = 0;
+  try {
+    const result = await TrainingModuleAccess.insertMany(docs, {
+      ordered: false,
+      rawResult: true,
+    });
+    inserted = result.insertedCount ?? 0;
+  } catch (err) {
+    if (err.name === "MongoBulkWriteError" || err.result) {
+      inserted = err.result?.insertedCount ?? err.insertedCount ?? 0;
+    } else {
+      return next(err);
+    }
+  }
+
+  // ── Auto-assign learners ─────────────────────────────
+
+  const allRoles = await Roles.find({}).select("_id name").lean();
+
+  const roleIdToName = {};
+  const roleNameToId = {};
+
+  for (const r of allRoles) {
+    roleIdToName[String(r._id)] = r.name;
+    roleNameToId[r.name] = String(r._id);
+  }
+
+  let autoAssigned = 0;
+
+  for (const scope of docs) {
+    const userFilter = { isActive: true };
+
+    if (scope.client) userFilter.clientBelongs = scope.client;
+    if (scope.branch) userFilter.branchBelongs = scope.branch;
+
+    if (scope.roles && scope.roles.length > 0) {
+      const roleNames = scope.roles
+        .map((rid) => roleIdToName[String(rid)])
+        .filter(Boolean);
+
+      if (roleNames.length) {
+        userFilter.role = { $in: roleNames };
+      }
+    }
+
+    const matchedUsers = await User.find(userFilter).select("_id role").lean();
+
+    if (!matchedUsers.length) continue;
+
+    const assignDocs = matchedUsers.map((u) => ({
+      module: moduleId,
+      learner: u._id,
+      assignedBy: req.user._id,
+      status: "pending",
+      roleId: roleNameToId[u.role]
+        ? new mongoose.Types.ObjectId(roleNameToId[u.role])
+        : undefined,
+    }));
+
+    try {
+      const ar = await ModuleAssignment.insertMany(assignDocs, {
+        ordered: false,
+        rawResult: true,
+      });
+      autoAssigned += ar.insertedCount ?? 0;
+    } catch (err) {
+      if (err.name === "MongoBulkWriteError" || err.result) {
+        autoAssigned += err.result?.insertedCount ?? err.insertedCount ?? 0;
+      }
+    }
+  }
+
+  // Update stats
+  if (autoAssigned > 0) {
+    await TrainingModule.findByIdAndUpdate(moduleId, {
+      $inc: { "stats.assignedCount": autoAssigned },
+    });
+  }
+
+  res.status(200).json({
+    success: true,
+    inserted,
+    skipped: docs.length - inserted,
+    autoAssigned,
+  });
+});
 
 // @desc  Get all access rules for a module
 // @route GET /api/v1/training-modules/:moduleId/access
 exports.getModuleAccess = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   const { moduleId } = req.params;
+
+  const query = {
+    client,
+    branch,
+    module: moduleId,
+  };
+
+  Object.keys(query).forEach((key) => {
+    if (
+      query[key] == null ||
+      query[key] == undefined ||
+      query[key]?.length == 0
+    ) {
+      delete query[key];
+    }
+  });
 
   if (!mongoose.Types.ObjectId.isValid(moduleId))
     return next(new ErrorResponse("Invalid module id", 400));
 
-  const access = await TrainingModuleAccess.find({ module: moduleId });
+  const access = await TrainingModuleAccess.find(query);
 
   res.status(200).json({ success: true, count: access.length, data: access });
 });
@@ -215,7 +357,6 @@ exports.deleteModule = asyncHandler(async (req, res, next) => {
 // PARTS
 //
 
-
 function convertISO8601(duration) {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
@@ -235,7 +376,7 @@ async function getVideoMetadata(url) {
     provider = "youtube";
 
     const match = url.match(
-      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/
+      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/,
     );
 
     videoId = match ? match[1] : null;
@@ -257,7 +398,7 @@ async function getVideoMetadata(url) {
     videoId = match ? match[1] : null;
 
     const res = await axios.get(
-      `https://vimeo.com/api/v2/video/${videoId}.json`
+      `https://vimeo.com/api/v2/video/${videoId}.json`,
     );
 
     durationSec = res.data[0].duration;
@@ -292,8 +433,7 @@ exports.createPart = asyncHandler(async (req, res, next) => {
   const mod = await TrainingModule.findById(moduleId);
   if (!mod) return next(new ErrorResponse("Module not found", 404));
 
-
-  const videoMetaData = await getVideoMetadata(video?.url ?? "")
+  const videoMetaData = await getVideoMetadata(video?.url ?? "");
 
   const part = await TrainingModulePart.create({
     ...req.body,
@@ -333,13 +473,12 @@ exports.updatePart = asyncHandler(async (req, res, next) => {
 
   const { video } = req.body;
 
-  const videoMetaData = await getVideoMetadata(video?.url ?? "")
+  const videoMetaData = await getVideoMetadata(video?.url ?? "");
 
   const reqBody = {
     ...req.body,
     video: videoMetaData,
-  }
-
+  };
 
   const part = await TrainingModulePart.findByIdAndUpdate(
     req.params.partId,
@@ -421,4 +560,3 @@ exports.deleteQuestion = asyncHandler(async (req, res, next) => {
 
   res.status(200).json({ success: true });
 });
-
