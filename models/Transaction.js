@@ -93,11 +93,11 @@ const TransactionSchema = new Schema(
     channel: { type: String, trim: true, index: true }, // Mobile App, Branch, Online
 
     // Sender / Beneficiary / Intermediary
-    sender: { type: PartySchema, default: {} }, // TX_011 .. TX_014
+    sender: { type: PartySchema, default: {} }, // TX_011 .. TX_014  // Sometimes Customer for Incoming and Outgoing
     beneficiary: { type: PartySchema, default: {} }, // TX_015 .. TX_018
     intermediary: { type: PartySchema, default: {} }, // TX_019
 
-    receiver: { type: PartySchema, default: {} }, // TX_011 .. TX_014
+    receiver: { type: PartySchema, default: {} }, // TX_011 .. TX_014 // Sometimes Customer for Incoming and Outgoing
 
     // TX_020 purpose / TX_021 remittance code
     purpose: { type: String, trim: true },

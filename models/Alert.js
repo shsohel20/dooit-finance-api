@@ -1,114 +1,211 @@
-const mongoose = require("mongoose");
-
-const uniqueValidator = require("mongoose-unique-validator");
-const mongoosePaginate = require("mongoose-paginate-v2");
-const AutoIncrement = require("mongoose-sequence")(mongoose);
-const slugify = require("slugify");
-const autopopulate = require("mongoose-autopopulate");
+const mongoose = require('mongoose');
+const uniqueValidator = require('mongoose-unique-validator');
+const mongoosePaginate = require('mongoose-paginate-v2');
+// const AutoIncrement = require('mongoose-sequence')(mongoose);
 
 const { Schema } = mongoose;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-schemas
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Append-only timeline entry: analyst notes, system events, status changes.
+// _id is intentionally off — entries are append-only; never individually updated.
 const ActivitySchema = new Schema(
   {
-    title: { type: String, trim: true },
-    details: { type: String, trim: true },
-    uploadedAt: { type: Date, default: Date.now },
-  },
-  { _id: false }
-);
-const ActivityNoteSchema = new Schema(
-  {
-    note: { type: String, trim: true },
-    uploadedAt: { type: Date, default: Date.now },
+    type: {
+      type: String,
+      enum: ['activity', 'note'],
+      default: 'activity',
+    },
+    title: { type: String, trim: true, default: null },
+    message: { type: String, trim: true, default: null },
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'Users',
+      default: null,
+    },
+    createdAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
 
-/**
- * Main Client schema
- */
+// Lightweight embedded audit trail — who changed what on this alert.
+const EmbeddedAuditSchema = new Schema(
+  {
+    action: { type: String, trim: true, required: true },
+    performedBy: { type: Schema.Types.ObjectId, ref: 'Users', default: null },
+    timestamp: { type: Date, default: Date.now },
+    oldValue: { type: Schema.Types.Mixed, default: null },
+    newValue: { type: Schema.Types.Mixed, default: null },
+    remark: { type: String, trim: true, default: null },
+  },
+  { _id: false }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alert schema
+// ─────────────────────────────────────────────────────────────────────────────
+
 const AlertSchema = new Schema(
   {
-    uid: String, //Case Id
-    sequence: { type: Number, index: true }, // auto incremented
-    customer: {
-      type: mongoose.Schema.ObjectId,
-      ref: "Customer",
+    // ── Identity ─────────────────────────────────────────────────────────
+    uid: { type: String, unique: true, sparse: true, index: true },
+    sequence: { type: Number, index: true },
+
+    // ── Rule snapshot ────────────────────────────────────────────────────
+    // ruleRef is the live reference; ruleId/ruleName/ruleVersion are a
+    // snapshot so that deleted/updated rules don't corrupt alert history.
+    ruleRef: { type: Schema.Types.ObjectId, ref: 'RuleEngine', default: null, index: true },
+    ruleId: { type: String, trim: true, index: true, default: null },
+    ruleName: { type: String, trim: true, default: null },
+    ruleVersion: { type: Number, default: null },  // Number, matches RuleEngine.version
+
+    // Serialized rule metadata at fire time — used to explain WHY the
+    // rule fired (matched conditions, logic tree snapshot, etc.)
+    ruleMeta: { type: Schema.Types.Mixed, default: {} },
+    explanation: { type: String, trim: true, default: null },
+
+    // ── Classification ───────────────────────────────────────────────────
+    // Inherited from the rule that fired, but stored on the alert so it
+    // is queryable even after the rule is updated or deleted.
+    caseType: { type: String, trim: true, default: null, index: true },  // Fraud | AML | TF | Compliance
+
+    // ── Risk ─────────────────────────────────────────────────────────────
+    riskScore: { type: Number, min: 0, max: 100, default: 0 },
+    riskLabel: {
+      type: String,
+      enum: ['Low', 'Medium', 'High', 'Critical', 'Info'],
+      default: 'Low',
     },
-    analyst: {
-      type: mongoose.Schema.ObjectId,
-      ref: "Users",
+
+    // ── Priority ─────────────────────────────────────────────────────────
+    // Separate from riskLabel: an analyst can raise/lower operational
+    // priority without changing the risk classification.
+    priority: {
+      type: String,
+      enum: ['low', 'medium', 'high'],
+      default: 'medium',
+      index: true,
     },
-    transaction: {
-      type: mongoose.Schema.ObjectId,
-      ref: "Transaction",
-      default: null
-    },
 
-    client: { type: Schema.Types.ObjectId, ref: "Client", index: true, default: null, },
-    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
+    // ── Who / what ───────────────────────────────────────────────────────
+    customer: { type: Schema.Types.ObjectId, ref: 'Customer', default: null, index: true },
+    analyst: { type: Schema.Types.ObjectId, ref: 'Users', default: null, index: true },
+    transaction: { type: Schema.Types.ObjectId, ref: 'Transaction', default: null },
 
-    caseType: String,
+    // ── Multi-tenant ─────────────────────────────────────────────────────
+    client: { type: Schema.Types.ObjectId, ref: 'Client', default: null, index: true },
+    branch: { type: Schema.Types.ObjectId, ref: 'Branch', default: null, index: true },
 
-    riskScore: Number,
-    riskLabel: String,
-    activity: { type: [ActivitySchema], default: [] },
-    activityNote: { type: [ActivityNoteSchema], default: [] },
-
-    // operational
+    // ── Lifecycle ────────────────────────────────────────────────────────
+    // new              → just generated by the rule engine
+    // under_review     → analyst is actively reviewing
+    // escalated_to_case → promoted to an investigation Case
+    // dismissed        → reviewed, ruled not suspicious
+    // false_positive   → confirmed non-risk
     status: {
       type: String,
-      enum: ["Pending", "Active", "Inactive", "Blocked"],
-      default: "Pending",
+      enum: ['new', 'under_review', 'escalated_to_case', 'dismissed', 'false_positive'],
+      default: 'new',
+      index: true,
     },
-    createdBy: { type: Schema.Types.ObjectId, ref: "Users", index: true, default: null },
-    // flexible fields
-    settings: { type: Schema.Types.Mixed, default: {} },
+    statusReason: { type: String, trim: true, default: null },
+    closedAt: { type: Date, default: null },
+
+    // ── Case linkage ─────────────────────────────────────────────────────
+    linkedCase: { type: Schema.Types.ObjectId, ref: 'Case', default: null, index: true },
+
+    // ── SLA ──────────────────────────────────────────────────────────────
+    slaDeadline: { type: Date, default: null },
+    slaStatus: {
+      type: String,
+      enum: ['on_time', 'at_risk', 'breached'],
+      default: 'on_time',
+    },
+
+    // ── Deduplication ────────────────────────────────────────────────────
+    // Set by the rule engine: e.g. hash(ruleId + customerId + txnId).
+    // Prevents duplicate alerts for the same event.
+    deduplicationKey: {
+      type: String,
+      trim: true,
+      sparse: true,
+      unique: true,
+      index: true,
+    },
+
+    // ── Activity timeline ────────────────────────────────────────────────
+    // Append-only log of analyst notes and system events.
+    activity: { type: [ActivitySchema], default: [] },
+
+    // ── Embedded audit trail ─────────────────────────────────────────────
+    // Lightweight field-level change log. For richer audit, use a
+    // separate AuditLog collection pointing to this alert.
+    auditLogs: { type: [EmbeddedAuditSchema], default: [] },
+
+    // ── Meta ─────────────────────────────────────────────────────────────
+    createdBy: { type: Schema.Types.ObjectId, ref: 'Users', default: null, index: true },
     metadata: { type: Schema.Types.Mixed, default: {} },
+
+    // ── Soft delete ──────────────────────────────────────────────────────
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date, default: null },
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
+    collection: 'alerts',
   }
 );
 
-/**
- * Indexes
- */
-AlertSchema.index({ user: 1 });
+// ─────────────────────────────────────────────────────────────────────────────
+// Indexes
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Virtuals
- */
+AlertSchema.index({ client: 1, status: 1, createdAt: -1 });
+AlertSchema.index({ client: 1, isDeleted: 1, status: 1 });
+AlertSchema.index({ customer: 1, status: 1 });
+AlertSchema.index({ ruleId: 1, createdAt: -1 });
+AlertSchema.index({ 'riskScore': -1 });
 
-// AlertSchema.post("save", async function (doc, next) {
-//   if (!doc.uid && doc.sequence) {
-//     const padded = String(doc.sequence).padStart(3, "0");
-//     doc.uid = `#CA_${padded}`;
-//     await doc.constructor.updateOne({ _id: doc._id }, { uid: doc.uid });
-//   }
-//   next();
-// });
-AlertSchema.pre("save", async function (next) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Virtuals
+// ─────────────────────────────────────────────────────────────────────────────
+
+AlertSchema.virtual('isOverdue').get(function () {
+  if (!this.slaDeadline) return false;
+  return (
+    !['dismissed', 'false_positive', 'escalated_to_case'].includes(this.status) &&
+    new Date() > this.slaDeadline
+  );
+});
+
+
+
+
+AlertSchema.pre('save', async function (next) {
   if (this.isNew && !this.uid) {
-    this.uid = `CA_${Date.now()}`;
+    try {
+      const Counter = require('./Counter');
+      const counter = await Counter.findByIdAndUpdate(
+        'alert_sequence',
+        { $inc: { sequence: 1 } },
+        { new: true, upsert: true }
+      );
+      this.sequence = counter.sequence;
+      this.uid = `AL-${String(counter.sequence).padStart(7, '0')}`;
+    } catch (err) {
+      return next(err);
+    }
   }
   next();
 });
 
-/**
- * Plugins
- */
-AlertSchema.plugin(uniqueValidator, { message: "{PATH} must be unique." });
+AlertSchema.plugin(uniqueValidator, { message: '{PATH} must be unique.' });
 AlertSchema.plugin(mongoosePaginate);
 
-AlertSchema.plugin(AutoIncrement, {
-  inc_field: "sequence",
-  id: "alert_sequence", // unique counter id for this schema
-  start_seq: 1,
-});
+// ─────────────────────────────────────────────────────────────────────────────
 
-const Alert = mongoose.model("Alert", AlertSchema);
-
-module.exports = Alert;
+module.exports = mongoose.model('Alert', AlertSchema);

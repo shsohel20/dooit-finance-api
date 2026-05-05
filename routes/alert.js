@@ -11,6 +11,9 @@ const {
   filterAlertSection,
   assignAnalyst,
   getDummyEccdData,
+  reviewAlert,
+  dismissAlert,
+  escalateAlertToCase,
 } = require("../controllers/alertController");
 
 const Alert = require("../models/Alert");
@@ -45,6 +48,16 @@ router.route("/dummy").post(createDummyAlert);
 router.route("/:id").get(getAlert).put(updateAlert).delete(deleteAlert);
 
 router.route("/:id/assign-analyst").put(assignAnalyst);
+
+// ── AML alert lifecycle ───────────────────────────────────────────────────────
+// Analyst picks up an alert for review
+router.route("/:id/review").put(reviewAlert);
+
+// Dismiss an alert (dismissed | false_positive)
+router.route("/:id/dismiss").put(dismissAlert);
+
+// Promote an alert to a full investigation case
+router.route("/:id/escalate").post(authorize("admin", "compliance_officer"), escalateAlertToCase);
 
 router.route("/:caseNumber/eccd-dummy").get(getDummyEccdData);
 

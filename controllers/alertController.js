@@ -2,37 +2,48 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Alert = require("../models/Alert");
+const Case = require("../models/Case");
+const AuditLog = require("../models/AuditLog");
 const Customer = require("../models/Customer");
 const User = require("../models/User");
 const Transaction = require("../models/Transaction");
 
-/**
- * Basic filter helper for alert searching by uid or caseType
- */
-exports.filterAlertSection = (doc, requestBody, req) => {
-  if (!doc.uid || !requestBody.uid) return false;
-  return doc.uid.toLowerCase().includes(requestBody.uid.toLowerCase().trim());
+// Maps Alert.riskLabel → Case.priority
+const mapRiskToPriority = (riskLabel) => {
+  const r = (riskLabel || "").toLowerCase();
+  if (r === "critical") return "critical";
+  if (r === "high") return "high";
+  if (r === "medium") return "medium";
+  if (r === "low") return "low";
+  return "medium";
 };
+
+// Maps Alert.caseType → Case.type enum
+const mapAlertTypeToCase = (caseType) => {
+  const t = (caseType || "").toLowerCase().replace(/\s+/g, "_");
+  if (t === "sar") return "SAR";
+  if (t === "pep") return "PEP";
+  if (t === "transaction_monitoring") return "transaction_monitoring";
+  return "other";
+};
+
+const VALID_CASE_TYPES = ["Fraud", "AML", "Compliance", "TF"];
+const sanitizeCaseType = (val) => (VALID_CASE_TYPES.includes(val) ? val : null);
 
 // @desc   Get all alerts
 // @route  GET /api/v1/alerts
-// @access Public
+// @access Private
 exports.getAlerts = asyncHandler(async (req, res, next) => {
-  console.log(req?.user?.client?._id || null);
-  console.log(req?.user?.branch?._id || null);
   /*
   #swagger.tags = ['Alert']
   #swagger.summary = 'Get All Alerts'
-  #swagger.responses[200] = { description: 'Success' }
-  #swagger.responses[400] = { description: 'Bad Request' }
-  #swagger.responses[401] = { description: 'Unauthorized' }
   */
   res.status(200).json(res.advancedResults);
 });
 
 // @desc   Get all alerts via POST
 // @route  POST /api/v1/alerts/search
-// @access Public
+// @access Private
 exports.getAlertsPost = asyncHandler(async (req, res, next) => {
   /*
     #swagger.tags = ['Alert']
@@ -43,75 +54,79 @@ exports.getAlertsPost = asyncHandler(async (req, res, next) => {
 
 // @desc   Create single alert
 // @route  POST /api/v1/alerts
-// @access Public
+// @access Private
 exports.createAlert = asyncHandler(async (req, res, next) => {
   /*
     #swagger.tags = ['Alert']
     #swagger.summary = 'Create Alert'
     #swagger.security = [{ "BearerAuth": [] }]
   */
-
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
   const user = req?.user?._id || null;
 
   const {
     customerId,
-    analystId,
     transactionId,
+    ruleRef,
+    ruleId,
+    ruleName,
+    ruleVersion,
+    ruleMeta,
+    explanation,
     caseType,
     riskScore,
     riskLabel,
+    priority,
+    deduplicationKey,
+    slaDeadline,
     activity = [],
-    activityNote = [],
-    settings,
     metadata,
     status,
   } = req.body;
 
-  // validate references
   const customer = customerId ? await Customer.findById(customerId) : null;
-  const transaction = transactionId
-    ? await Transaction.findById(transactionId)
-    : null;
+  if (customerId && !customer) {
+    return next(new ErrorResponse(`Customer not found with id ${customerId}`, 404));
+  }
 
-  if (customerId && !customer)
-    return next(
-      new ErrorResponse(`Customer not found with id ${customerId}`, 404),
-    );
-
-  if (transactionId && !transaction)
-    return next(
-      new ErrorResponse(`Transaction not found with id ${transactionId}`, 404),
-    );
+  let transaction = null;
+  if (transactionId) {
+    transaction = await Transaction.findById(transactionId).select("_id").lean();
+    if (!transaction) {
+      return next(new ErrorResponse(`Transaction not found with id ${transactionId}`, 404));
+    }
+  }
 
   const alert = await Alert.create({
     client,
     branch,
-    customer: customer?._id,
-    analyst: null,
-    transaction: transaction?._id,
-    caseType,
-    riskScore,
-    riskLabel,
+    customer: customer?._id || null,
+    transaction: transaction?._id || null,
+    ruleRef: ruleRef || null,
+    ruleId: ruleId || null,
+    ruleName: ruleName || null,
+    ruleVersion: ruleVersion || null,
+    ruleMeta: ruleMeta || {},
+    explanation: explanation || null,
+    caseType: caseType || null,
+    riskScore: riskScore || 0,
+    riskLabel: riskLabel || "Low",
+    priority: priority || "medium",
+    deduplicationKey: deduplicationKey || undefined,
+    slaDeadline: slaDeadline || null,
     activity,
-    activityNote,
-    settings,
-    metadata,
+    metadata: metadata || {},
     createdBy: user,
-    status,
+    status: status || "new",
   });
 
-  res.status(201).json({
-    succeed: true,
-    data: alert,
-    id: alert._id,
-  });
+  res.status(201).json({ succeed: true, data: alert, id: alert._id });
 });
 
-// @desc   Create dummy alert
+// @desc   Create dummy alert (for testing / demo)
 // @route  POST /api/v1/alerts/dummy
-// @access Public
+// @access Private
 exports.createDummyAlert = asyncHandler(async (req, res, next) => {
   /*
     #swagger.tags = ['Alert']
@@ -122,142 +137,142 @@ exports.createDummyAlert = asyncHandler(async (req, res, next) => {
     analystName,
     transactionId,
     caseType,
-    status = "Pending",
+    status = "new",
     riskScore = Math.floor(Math.random() * 100),
     riskLabel = "Medium",
     activity = [],
-    activityNote = [],
   } = req.body;
 
-  const user = await User.findOne({ name: customerName });
-
-  const customer = customerName
-    ? await Customer.findOne({ user: user?._id })
-    : null;
-
-  const transaction = transactionId
-    ? await Transaction.findOne({ uid: transactionId })
-    : null;
-
-  const analyst = analystName
-    ? await User.findOne({ name: analystName })
-    : null;
+  const userDoc = customerName ? await User.findOne({ name: customerName }) : null;
+  const customer = userDoc ? await Customer.findOne({ user: userDoc._id }) : null;
+  const transaction = transactionId ? await Transaction.findOne({ uid: transactionId }) : null;
+  const analyst = analystName ? await User.findOne({ name: analystName }) : null;
 
   if (!customer) return next(new ErrorResponse("Customer not found", 404));
-  if (!transaction)
-    return next(new ErrorResponse("Transaction not found", 404));
+  if (!transaction) return next(new ErrorResponse("Transaction not found", 404));
 
   const alert = await Alert.create({
     customer: customer._id,
     transaction: transaction._id,
-    analyst: analyst._id,
+    analyst: analyst?._id || null,
     caseType: caseType || "Default",
     riskScore,
     riskLabel,
     activity,
-    activityNote,
     status,
   });
 
-  res.status(201).json({
-    succeed: true,
-    data: alert,
-    id: alert._id,
-  });
+  res.status(201).json({ succeed: true, data: alert, id: alert._id });
 });
 
 // @desc   Get single alert by id
 // @route  GET /api/v1/alerts/:id
-// @access Public
+// @access Private
 exports.getAlert = asyncHandler(async (req, res, next) => {
-  const alert = await Alert.findById(req.params.id)
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
     .populate("customer")
     .populate("analyst")
-    .populate("transaction");
+    .populate("transaction")
+    .populate("ruleRef", "name version caseType")
+    .populate("linkedCase", "uid title status");
 
-  if (!alert)
-    return next(
-      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404),
-    );
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
 
-  res.status(200).json({
-    succeed: true,
-    data: alert,
-  });
+  res.status(200).json({ succeed: true, data: alert });
 });
 
 // @desc   Update single alert
 // @route  PUT /api/v1/alerts/:id
-// @access Public
+// @access Private
 exports.updateAlert = asyncHandler(async (req, res, next) => {
   const alertId = req.params.id;
-  let alert = await Alert.findById(alertId);
+  const alert = await Alert.findOne({ _id: alertId, isDeleted: { $ne: true } });
 
-  if (!alert)
+  if (!alert) {
     return next(new ErrorResponse(`Alert not found with id ${alertId}`, 404));
+  }
 
-  // update fields
-  const updated = await Alert.findByIdAndUpdate(alertId, req.body, {
+  const allowedFields = [
+    "caseType",
+    "riskScore",
+    "riskLabel",
+    "priority",
+    "status",
+    "statusReason",
+    "analyst",
+    "slaDeadline",
+    "slaStatus",
+    "explanation",
+    "metadata",
+  ];
+
+  const updates = {};
+  allowedFields.forEach((field) => {
+    if (req.body[field] !== undefined) updates[field] = req.body[field];
+  });
+
+  if (Object.keys(updates).length === 0) {
+    return next(new ErrorResponse("No valid fields provided for update", 400));
+  }
+
+  const updated = await Alert.findByIdAndUpdate(alertId, updates, {
     new: true,
     runValidators: true,
   });
 
-  res.status(200).json({
-    succeed: true,
-    data: updated,
-  });
+  res.status(200).json({ succeed: true, data: updated });
 });
 
-// @desc   Delete single alert
+// @desc   Soft-delete an alert
 // @route  DELETE /api/v1/alerts/:id
-// @access Public
+// @access Private
 exports.deleteAlert = asyncHandler(async (req, res, next) => {
-  const alert = await Alert.findById(req.params.id);
-  if (!alert)
-    return next(
-      new ErrorResponse(`Alert not found with id ${req.params.id}`, 404),
-    );
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
 
-  await alert.deleteOne();
+  alert.isDeleted = true;
+  alert.deletedAt = new Date();
+  await alert.save();
 
-  res.status(200).json({
-    succeed: true,
-    data: req.params.id,
-  });
+  res.status(200).json({ succeed: true, data: req.params.id });
 });
 
 // @desc   Assign an analyst to an alert
 // @route  PUT /api/v1/alerts/:id/assign-analyst
-// @access Private (Admin)
+// @access Private
 exports.assignAnalyst = asyncHandler(async (req, res, next) => {
   /*
-      #swagger.tags = ['Alert']
-      #swagger.summary = 'Assign Analyst to Alert'
-      #swagger.parameters['body'] = { 
-        in: 'body', 
-        required: true, 
-        schema: { analystId: "analystIdHere" } 
-      }
-    */
-
+    #swagger.tags = ['Alert']
+    #swagger.summary = 'Assign Analyst to Alert'
+  */
   const alertId = req.params.id;
   const { analystId } = req.body;
 
   if (!analystId) {
     return next(new ErrorResponse("analystId is required", 400));
   }
-  console.log(analystId);
-  const alert = await Alert.findById(alertId);
-  if (!alert)
+
+  const alert = await Alert.findOne({ _id: alertId, isDeleted: { $ne: true } });
+  if (!alert) {
     return next(new ErrorResponse(`Alert not found with id ${alertId}`, 404));
+  }
 
   const analyst = await User.findById(analystId);
-  if (!analyst)
-    return next(
-      new ErrorResponse(`Analyst not found with id ${analystId}`, 404),
-    );
+  if (!analyst) {
+    return next(new ErrorResponse(`Analyst not found with id ${analystId}`, 404));
+  }
 
   alert.analyst = analyst._id;
+  alert.activity.push({
+    type: "activity",
+    title: "Analyst assigned",
+    message: `${analyst.name} assigned by ${req.user.name || req.user._id}`,
+    createdBy: req.user._id,
+  });
   await alert.save();
 
   res.status(200).json({
@@ -267,14 +282,13 @@ exports.assignAnalyst = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc   ECCD Dummy Data Creation for Presentation
-// @route  PUT /api/v1/alerts/:id/eccd-dummy
-// @access Private (Admin)
-// assumes asyncHandler, ErrorResponse and Alert are already imported
+// @desc   ECCD Dummy Data for Presentation
+// @route  GET /api/v1/alerts/:caseNumber/eccd-dummy
+// @access Private
 exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
   const { caseNumber } = req.params;
 
-  const alert = await Alert.findOne({ uid: caseNumber });
+  const alert = await Alert.findOne({ uid: caseNumber, isDeleted: { $ne: true } });
   if (!alert) {
     return next(new ErrorResponse(`Alert not found with Case Number ${caseNumber}`, 404));
   }
@@ -283,12 +297,12 @@ exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
   let usedFallback = false;
   let sourceUid = null;
 
-  // If not available → get random ECCD from another alert
   if (!eccdData) {
     const samples = await Alert.aggregate([
       {
         $match: {
-          _id: { $ne: alert._id }, // don't pick itself
+          _id: { $ne: alert._id },
+          isDeleted: { $ne: true },
           "metadata.ecddReport": { $ne: null },
         },
       },
@@ -301,12 +315,7 @@ exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
       sourceUid = samples[0].uid;
       usedFallback = true;
 
-      // ✅ ensure metadata object exists
-      if (!alert.metadata) {
-        alert.metadata = {};
-      }
-
-      // ✅ save fallback ECCD into this alert
+      if (!alert.metadata) alert.metadata = {};
       alert.metadata.ecddReport = eccdData;
       alert.markModified("metadata");
       await alert.save();
@@ -314,11 +323,7 @@ exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
   }
 
   if (!eccdData) {
-    return res.status(200).json({
-      succeed: false,
-      data: null,
-      message: `No ECCD data available anywhere.`,
-    });
+    return res.status(200).json({ succeed: false, data: null, message: "No ECCD data available." });
   }
 
   res.status(200).json({
@@ -328,4 +333,143 @@ exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
       ? `ECCD copied from alert ${sourceUid} and saved to alert ${alert.uid}`
       : `ECCD returned from alert ${alert.uid}`,
   });
+});
+
+// @desc   Mark alert as under review (analyst picks it up)
+// @route  PUT /api/v1/alerts/:id/review
+// @access Private
+exports.reviewAlert = asyncHandler(async (req, res, next) => {
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
+
+  if (alert.status !== "new") {
+    return next(new ErrorResponse(`Alert is already in status "${alert.status}"`, 400));
+  }
+
+  alert.status = "under_review";
+  if (!alert.analyst) alert.analyst = req.user._id;
+  alert.activity.push({
+    type: "activity",
+    title: "Review started",
+    message: `Picked up for review by ${req.user.name || req.user._id}`,
+    createdBy: req.user._id,
+  });
+  await alert.save();
+
+  res.status(200).json({ succeed: true, data: alert });
+});
+
+// @desc   Dismiss an alert
+// @route  PUT /api/v1/alerts/:id/dismiss
+// @access Private
+exports.dismissAlert = asyncHandler(async (req, res, next) => {
+  const { reason = "false_positive", note } = req.body;
+  const validDismissals = ["dismissed", "false_positive"];
+
+  if (!validDismissals.includes(reason)) {
+    return next(new ErrorResponse(`reason must be one of: ${validDismissals.join(", ")}`, 400));
+  }
+
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
+
+  if (alert.status === "escalated_to_case") {
+    return next(new ErrorResponse("Cannot dismiss an alert that has been escalated to a case", 400));
+  }
+
+  alert.status = reason;
+  alert.closedAt = new Date();
+  if (note) alert.statusReason = note;
+  if (!alert.analyst) alert.analyst = req.user._id;
+  alert.activity.push({
+    type: "activity",
+    title: reason === "false_positive" ? "Marked false positive" : "Dismissed",
+    message: `By ${req.user.name || req.user._id}${note ? `. Note: ${note}` : ""}`,
+    createdBy: req.user._id,
+  });
+  await alert.save();
+
+  res.status(200).json({ succeed: true, data: alert });
+});
+
+// @desc   Escalate an alert to a new investigation case
+// @route  POST /api/v1/alerts/:id/escalate
+// @access Private — admin / compliance_officer
+exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
+  const tenant = {
+    client: req?.user?.client?._id || null,
+    branch: req?.user?.branch?._id || null,
+  };
+
+  const alertFilter = { _id: req.params.id, isDeleted: { $ne: true } };
+  if (tenant.client) alertFilter.client = tenant.client;
+
+  const alert = await Alert.findOne(alertFilter)
+    .populate("customer", "name email")
+    .populate("transaction", "uid amount type");
+
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
+
+  if (alert.linkedCase) {
+    return next(
+      new ErrorResponse(`Alert ${alert.uid} is already linked to case ${alert.linkedCase}`, 400)
+    );
+  }
+
+  const {
+    title = `Investigation — ${alert.uid}`,
+    description,
+    priority = mapRiskToPriority(alert.riskLabel),
+    type = mapAlertTypeToCase(alert.caseType),
+    assignedTo,
+  } = req.body;
+
+  const newCase = await Case.create({
+    ...tenant,
+    title,
+    description,
+    priority,
+    type,
+    caseType: sanitizeCaseType(alert.caseType),
+    linkedAlerts: [alert._id],
+    linkedCustomers: alert.customer ? [alert.customer._id] : [],
+    linkedTransactions: alert.transaction ? [alert.transaction._id] : [],
+    riskScore: alert.riskScore || null,
+    riskLabel: alert.riskLabel || null,
+    assignedTo: assignedTo || null,
+    createdBy: req.user._id,
+  });
+
+  alert.status = "escalated_to_case";
+  alert.linkedCase = newCase._id;
+  if (!alert.analyst) alert.analyst = req.user._id;
+  alert.activity.push({
+    type: "activity",
+    title: "Escalated to case",
+    message: `Case "${title}" created by ${req.user.name || req.user._id}`,
+    createdBy: req.user._id,
+  });
+  await alert.save();
+
+  await AuditLog.create({
+    ...tenant,
+    case: newCase._id,
+    user: req.user._id,
+    action: "case_created",
+    details: `Case created by escalating alert ${alert.uid} (${alert.riskLabel || ""} ${alert.caseType || ""})`,
+  });
+
+  const populated = await Case.findById(newCase._id)
+    .populate("createdBy", "name email avatar")
+    .populate("assignedTo", "name email avatar")
+    .populate("linkedAlerts", "uid caseType riskScore riskLabel status")
+    .lean();
+
+  res.status(201).json({ succeed: true, data: populated });
 });

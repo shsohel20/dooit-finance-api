@@ -24,12 +24,13 @@ const alert = require("./alert");
 const rfi = require("./rfi");
 const notify = require("./notify");
 const leads = require("./leads");
-const clientRule = require("./clientRules");
+const ruleEngine = require("./ruleEngine");
 const policyHub = require("./policyHub");
 const riskassessment = require("./riskassessment");
 const privacy = require("./privacy");
 const rolePermission = require("./rolePermission");
 const trainingModule = require("./trainingModule");
+const cases = require("./cases");
 const assignmentRoutes = require("./trainingAssignment");
 const progressRoutes = require("./trainingProgress");
 const reportRoutes = require("./trainingReport");
@@ -56,11 +57,14 @@ router.use("/ifti-report", iftiReport);
 router.use("/ttr-report", ttrReport);
 router.use("/report-notify", notify);
 router.use("/email", leads);
-router.use("/client-rule", clientRule);
+router.use("/rule-engine", ruleEngine);
 router.use("/policy-hub", policyHub);
 router.use("/risk-assessment", riskassessment);
 router.use("/privacy", privacy);
 router.use("/role-permissions", rolePermission);
+
+// Case Management
+router.use("/cases", cases);
 
 //Training module CRUD + quiz management + video progress
 router.use("/training-modules", trainingModule);
