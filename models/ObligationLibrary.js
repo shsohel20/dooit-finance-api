@@ -56,7 +56,6 @@ const ObligationLibrarySchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-ObligationLibrarySchema.index({ category: 1 });
 ObligationLibrarySchema.index({ applicableEntityTypes: 1 });
 ObligationLibrarySchema.index({ applicableLicenses: 1 });
 
