@@ -271,7 +271,7 @@ exports.getMe = asyncHandler(async (req, res, next) => {
   const userScope = [];
   const customerScope = [];
   if (clientId) {
-    userScope.push({ clientBelongs: clientId });
+    // userScope.push({ clientBelongs: clientId });
     customerScope.push({ "relations.client": clientId });
   }
   if (branchId) {
@@ -279,10 +279,18 @@ exports.getMe = asyncHandler(async (req, res, next) => {
     customerScope.push({ "relations.branch": branchId });
   }
 
-  const userFilter = userScope.length ? { $or: userScope } : {};
   const customerFilter = customerScope.length ? { $or: customerScope } : {};
 
+  // Include users referenced in the customer table within scope
+  const customerUserIds = await Customer.distinct("user", { ...customerFilter, user: { $ne: null } });
+  if (customerUserIds.length) {
+    userScope.push({ _id: { $in: customerUserIds } });
+  }
+
+  const userFilter = userScope.length ? { $or: userScope } : {};
+
   let encryptionStatus = false;
+  let encryptionData = {}
   try {
     const [totalUsers, encryptedUsers, totalCustomers, encryptedCustomers] = await Promise.all([
       User.countDocuments(userFilter),
@@ -296,14 +304,23 @@ exports.getMe = asyncHandler(async (req, res, next) => {
       totalCustomers > 0 && encryptedCustomers === totalCustomers;
 
     encryptionStatus = allEncrypted;
+
+    encryptionData = {
+      totalUsers,
+      encryptedUsers,
+      totalCustomers,
+      encryptedCustomers
+    }
   } catch (err) {
     console.error("[getMe] encryptionStatus failed:", err.message);
   }
 
   res.status(200).json({
     success: true,
-    data: req.user,
+    encryptionData,
     encryptionStatus,
+    data: req.user,
+
   });
 });
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {
