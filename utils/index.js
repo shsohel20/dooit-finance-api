@@ -5,6 +5,7 @@ const User = require("../models/User");
 const ErrorResponse = require("./errorResponse");
 const Branch = require("../models/Branch");
 const crypto = require("crypto");
+const { hashForSearch } = require("./encryption");
 // ** Checks if an object is empty (returns boolean)
 const isObjEmpty = (obj) => {
   return Object?.keys(obj).length === 0;
@@ -373,7 +374,7 @@ const validateBranchUpdate = async (branchId, data, next) => {
 
   if (userEmail || email) {
     const ue = (userEmail || email).toLowerCase();
-    const existing = await User.findOne({ email: ue });
+    const existing = await User.findOne({ emailHash: hashForSearch(ue) });
     if (existing && existing._id.toString() !== linkedUserId)
       return next(
         new ErrorResponse(`Email "${ue}" is already used by another user.`, 409)

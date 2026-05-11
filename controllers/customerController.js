@@ -17,6 +17,7 @@ const Client = require("../models/Client");
 const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { generateQR } = require("../utils/qrService");
+const { hashForSearch } = require("../utils/encryption");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -118,7 +119,7 @@ exports.createInviteOld = asyncHandler(async (req, res, next) => {
 
   // 2) try to find an existing user by email/phone
   let user = null;
-  if (email) user = await User.findOne({ email });
+  if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user && phone) user = await User.findOne({ phone });
 
   // helper: idempotently add relation to a customer doc (uses relationType & onboardingChannel)
@@ -523,7 +524,7 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
   const phone = contact.phone || null;
 
   let user = null;
-  if (email) user = await User.findOne({ email });
+  if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user && phone) user = await User.findOne({ phone });
 
   // ---------------------------
@@ -694,7 +695,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   const phone = contact.phone || null;
 
   let user = null;
-  if (email) user = await User.findOne({ email });
+  if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user && phone) user = await User.findOne({ phone });
 
   // ---------------------------
@@ -848,7 +849,7 @@ exports.validateInviteOld = asyncHandler(async (req, res, next) => {
     }
   } else {
     if (email) {
-      user = await User.findOne({ email });
+      user = await User.findOne({ emailHash: hashForSearch(email) });
     }
     if (!user && phone) {
       user = await User.findOne({ phone });
@@ -914,7 +915,7 @@ exports.validateInvite = asyncHandler(async (req, res, next) => {
       linkedToCustomer = true;
     } else linkedToCustomer = false;
   } else {
-    if (email) user = await User.findOne({ email });
+    if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
     if (!user && phone) user = await User.findOne({ phone });
     if (user) userExists = true;
   }
@@ -1617,7 +1618,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
 
       // Try find existing user by email or userName
       const existingUser = await User.findOne({
-        $or: [{ email: userPayload.email }, { userName: userPayload.userName }],
+        $or: [{ emailHash: hashForSearch(userPayload.email) }, { userName: userPayload.userName }],
       }).session(session);
 
       if (existingUser) {
