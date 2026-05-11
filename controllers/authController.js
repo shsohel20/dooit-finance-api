@@ -7,9 +7,19 @@ const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
 const { hashForSearch, decrypt } = require("../utils/encryption");
+const mongoose = require("mongoose");
 
-const resolveEmail = (user) =>
-  user.isDataEncrypted ? decrypt(user.email) : user.email;
+// Fetches the raw email from MongoDB, bypassing all Mongoose hooks.
+// post("init") mutates user.email to "***" before any controller code runs,
+// so we must go to the raw collection to get the encrypted value and decrypt it.
+const getRawEmail = async (userId) => {
+  const raw = await mongoose.connection.db
+    .collection("users")
+    .findOne({ _id: userId }, { projection: { email: 1, isDataEncrypted: 1 } });
+  if (!raw) return null;
+  if (raw.isDataEncrypted) return decrypt(raw.email);
+  return raw.email;
+};
 
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
@@ -39,7 +49,7 @@ const emailSend = async (user, resetToken, clientUrl, res, next) => {
 
   try {
     await sendEmail({
-      email: resolveEmail(user),
+      email: await getRawEmail(user._id),
       subject: "Confirmation Token token",
       message,
     });
@@ -57,7 +67,7 @@ const emailSend = async (user, resetToken, clientUrl, res, next) => {
 const optSend = async (user, message, subject, res, next) => {
   try {
     await sendEmail({
-      email: resolveEmail(user),
+      email: await getRawEmail(user._id),
       subject,
       message,
     });
@@ -500,7 +510,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
 
   try {
     await sendEmail({
-      email: resolveEmail(user),
+      email: await getRawEmail(user._id),
       subject: "Password reset token",
       message,
     });
