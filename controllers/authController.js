@@ -6,7 +6,10 @@ const Otp = require("../models/Otp");
 const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
-const { hashForSearch } = require("../utils/encryption");
+const { hashForSearch, decrypt } = require("../utils/encryption");
+
+const resolveEmail = (user) =>
+  user.isDataEncrypted ? decrypt(user.email) : user.email;
 
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
@@ -36,7 +39,7 @@ const emailSend = async (user, resetToken, clientUrl, res, next) => {
 
   try {
     await sendEmail({
-      email: user.email,
+      email: resolveEmail(user),
       subject: "Confirmation Token token",
       message,
     });
@@ -54,7 +57,7 @@ const emailSend = async (user, resetToken, clientUrl, res, next) => {
 const optSend = async (user, message, subject, res, next) => {
   try {
     await sendEmail({
-      email: user.email,
+      email: resolveEmail(user),
       subject,
       message,
     });
@@ -497,7 +500,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
 
   try {
     await sendEmail({
-      email: user.email,
+      email: resolveEmail(user),
       subject: "Password reset token",
       message,
     });
