@@ -495,7 +495,10 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   //get reset token
   const resetToken = user.getResetPasswordToken();
 
-  await user.save({ validateBeforeSave: false });
+  await User.updateOne(
+    { _id: user._id },
+    { resetPasswordToken: user.resetPasswordToken, resetPasswordExpire: user.resetPasswordExpire }
+  );
   ///Create URL
   // const resetUrl = `http://localhost:3000/auth/reset-password/${resetToken}`;
 
@@ -519,10 +522,10 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
       message: "Email Send Successfully",
     });
   } catch (error) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
-
-    await user.save({ validateBeforeSave: false });
+    await User.updateOne(
+      { _id: user._id },
+      { resetPasswordToken: undefined, resetPasswordExpire: undefined }
+    );
 
     return next(new ErrorResponse("Email could not be sent", 500));
   }
@@ -558,11 +561,13 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid Token.", 401));
   }
 
-  //Set New Password
-  user.password = req.body.password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-  await user.save();
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(req.body.password, salt);
+
+  await User.updateOne(
+    { _id: user._id },
+    { password: hashedPassword, resetPasswordToken: undefined, resetPasswordExpire: undefined }
+  );
   sendTokenResponse(user, 200, res);
 });
 
@@ -612,9 +617,10 @@ exports.updatePassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Current Password not match.", 401));
   }
 
-  user.password = req.body.newPassword;
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(req.body.newPassword, salt);
 
-  await user.save();
+  await User.updateOne({ _id: user._id }, { password: hashedPassword });
   sendTokenResponse(user, 200, res);
 });
 
@@ -665,11 +671,10 @@ exports.confirmUser = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid Token.", 401));
   }
 
-  //Set New Password
-  user.isActive = true;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-  await user.save();
+  await User.updateOne(
+    { _id: user._id },
+    { isActive: true, resetPasswordToken: undefined, resetPasswordExpire: undefined }
+  );
   sendTokenResponse(user, 200, res);
 });
 
@@ -706,13 +711,12 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
       if (!user) {
         return next(new ErrorResponse("Invalid Token.", 401));
       }
-      // active user
-      user.isActive = true;
 
-      await user.save();
+      await User.updateOne({ _id: user._id }, { isActive: true });
+
       userActivated = true;
       sendTokenResponse(user, 200, res);
-      break; // Break out of the loop once the user is activated
+      break;
     }
   }
 
