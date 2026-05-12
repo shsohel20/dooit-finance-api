@@ -132,7 +132,8 @@ exports.verifyUser = asyncHandler(async (req, res, next) => {
 ///Grant Access to specific roles
 exports.authorize = (...roles) => {
   return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
+    const userRole = (req.user.role ?? "").toLowerCase();
+    if (!roles.map((r) => r.toLowerCase()).includes(userRole)) {
       return next(
         new ErrorResponse(
           `User role ${req.user.role} is not authorized to access`,

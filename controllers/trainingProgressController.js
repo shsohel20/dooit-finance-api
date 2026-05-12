@@ -107,7 +107,7 @@ exports.startModule = asyncHandler(async (req, res, next) => {
         const openToAll = accessRules.some((a) => a.roles.length === 0);
 
         if (!openToAll) {
-            const roleDoc = await Roles.findOne({ name: req.user.role, isActive: true })
+            const roleDoc = await Roles.findOne({ name: { $regex: new RegExp(`^${req.user.role}$`, "i") }, isActive: true })
                 .select("_id")
                 .lean();
 
@@ -484,7 +484,7 @@ exports.getProgressReport = asyncHandler(async (req, res, next) => {
     const filter = {};
 
     // Managers see only their assignments; admins see all
-    if (req.user.role === "manager") {
+    if (req.user.role?.toLowerCase() === "manager") {
         const myAssignments = await ModuleAssignment.find({
             assignedBy: req.user._id,
         }).select("_id");

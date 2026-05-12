@@ -81,8 +81,8 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
   const roleIdToName = {};
   const roleNameToId = {};
   for (const r of allRoles) {
-    roleIdToName[String(r._id)] = r.name;
-    roleNameToId[r.name] = String(r._id);
+    roleIdToName[String(r._id)] = r.name.toLowerCase();
+    roleNameToId[r.name.toLowerCase()] = String(r._id);
   }
 
   let autoAssigned = 0;
@@ -97,7 +97,8 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
       const roleNames = scope.roles
         .map((rid) => roleIdToName[String(rid)])
         .filter(Boolean);
-      if (roleNames.length) userFilter.role = { $in: roleNames };
+      if (roleNames.length)
+        userFilter.role = { $in: roleNames.map((n) => new RegExp(`^${n}$`, "i")) };
     }
     // roles: [] means open to all roles within this client/branch — no role filter
 
@@ -109,8 +110,8 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
       learner: u._id,
       assignedBy: req.user._id,
       status: "pending",
-      roleId: roleNameToId[u.role]
-        ? new mongoose.Types.ObjectId(roleNameToId[u.role])
+      roleId: roleNameToId[u.role?.toLowerCase()]
+        ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
         : undefined,
     }));
 
@@ -201,8 +202,8 @@ exports.assignUpdateModuleAccess = asyncHandler(async (req, res, next) => {
   const roleNameToId = {};
 
   for (const r of allRoles) {
-    roleIdToName[String(r._id)] = r.name;
-    roleNameToId[r.name] = String(r._id);
+    roleIdToName[String(r._id)] = r.name.toLowerCase();
+    roleNameToId[r.name.toLowerCase()] = String(r._id);
   }
 
   let autoAssigned = 0;
@@ -219,7 +220,7 @@ exports.assignUpdateModuleAccess = asyncHandler(async (req, res, next) => {
         .filter(Boolean);
 
       if (roleNames.length) {
-        userFilter.role = { $in: roleNames };
+        userFilter.role = { $in: roleNames.map((n) => new RegExp(`^${n}$`, "i")) };
       }
     }
 
@@ -232,8 +233,8 @@ exports.assignUpdateModuleAccess = asyncHandler(async (req, res, next) => {
       learner: u._id,
       assignedBy: req.user._id,
       status: "pending",
-      roleId: roleNameToId[u.role]
-        ? new mongoose.Types.ObjectId(roleNameToId[u.role])
+      roleId: roleNameToId[u.role?.toLowerCase()]
+        ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
         : undefined,
     }));
 

@@ -107,7 +107,7 @@ exports.createUser = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/user/role/:role
 // @access Admin
 exports.getUsersByRole = asyncHandler(async (req, res) => {
-  const filter = { role: req.params.role };
+  const filter = { role: { $regex: new RegExp(`^${req.params.role}$`, "i") } };
 
   console.log(req?.user?.client?._id)
 

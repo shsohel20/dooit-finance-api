@@ -9,7 +9,7 @@ const TrainingLearnerProgress = require("../models/TrainingLearnerProgress");
 // @desc  High-level KPI snapshot for the dashboard
 // @route GET /api/v1/reports/overview
 exports.getOverview = asyncHandler(async (req, res, next) => {
-    const isAdmin = req.user.role === "admin";
+    const isAdmin = req.user.role?.toLowerCase() === "admin";
     const managerId = req.user._id;
 
     // Scoped assignment filter
@@ -133,7 +133,7 @@ exports.getLearnerReport = asyncHandler(async (req, res, next) => {
         Object.assign(filter, { attempts: { $size: 0 } });
 
     // Managers only see learners in their assignments
-    if (req.user.role === "manager") {
+    if (req.user.role?.toLowerCase() === "manager") {
         const myAssignments = await ModuleAssignment.find({
             assignedBy: req.user._id,
         }).select("learner module");

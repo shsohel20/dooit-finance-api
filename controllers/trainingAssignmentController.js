@@ -52,16 +52,19 @@ exports.assignModule = asyncHandler(async (req, res, next) => {
             const uniqueRoleNames = [...new Set(learnerUsers.map((u) => u.role).filter(Boolean))];
 
             // Resolve role name -> ObjectId
-            const roleDocs = await Roles.find({ name: { $in: uniqueRoleNames }, isActive: true })
+            const roleDocs = await Roles.find({
+                name: { $in: uniqueRoleNames.map((n) => new RegExp(`^${n}$`, "i")) },
+                isActive: true,
+            })
                 .select("_id name")
                 .lean();
 
             const roleNameToId = {};
-            for (const r of roleDocs) roleNameToId[r.name] = String(r._id);
+            for (const r of roleDocs) roleNameToId[r.name.toLowerCase()] = String(r._id);
 
             // Build learner -> roleId map
             for (const u of learnerUsers) {
-                learnerRoleIdMap[String(u._id)] = roleNameToId[u.role] || null;
+                learnerRoleIdMap[String(u._id)] = roleNameToId[u.role?.toLowerCase()] || null;
             }
 
             // Collect all allowed role ObjectIds across all access rules
@@ -233,7 +236,7 @@ exports.getAssignment = asyncHandler(async (req, res, next) => {
     const isOwner =
         String(assignment.learner) === String(req.user._id) ||
         String(assignment.assignedBy) === String(req.user._id) ||
-        req.user.role === "admin";
+        req.user.role?.toLowerCase() === "admin";
 
     if (!isOwner)
         return next(new ErrorResponse("Not authorised to view this assignment", 403));
@@ -254,7 +257,7 @@ exports.deleteAssignment = asyncHandler(async (req, res, next) => {
     // Only the assigner or an admin can revoke
     if (
         String(assignment.assignedBy) !== String(req.user._id) &&
-        req.user.role !== "admin"
+        req.user.role?.toLowerCase() !== "admin"
     ) {
         return next(new ErrorResponse("Not authorised to revoke this assignment", 403));
     }
@@ -282,7 +285,7 @@ exports.getAllAssignments = asyncHandler(async (req, res, next) => {
     if (status) filter.status = status;
 
     // Managers can only see their own
-    if (req.user.role === "manager") filter.assignedBy = req.user._id;
+    if (req.user.role?.toLowerCase() === "manager") filter.assignedBy = req.user._id;
 
     const assignments = await ModuleAssignment.find(filter)
         .populate("module", "title uid")
