@@ -5,7 +5,8 @@
       "Bash(mongosh --eval \"rs.status\\(\\)\" --quiet)",
       "PowerShell(mongosh --eval \"rs.status\\(\\)\" --quiet 2>&1)",
       "Bash(Get-ChildItem -Path \"f:\\\\Fintech\\\\dooit-api\" -Force)",
-      "Bash(Select-Object Name, PSIsContainer)"
+      "Bash(Select-Object Name, PSIsContainer)",
+      "PowerShell(Get-ChildItem \"f:\\\\Fintech\\\\dooit-api\" | Where-Object { $_.Name -ne \"node_modules\" } | Format-Table Name, PSIsContainer, Length)"
     ]
   }
 }

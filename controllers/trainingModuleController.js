@@ -57,16 +57,13 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
   }
 
   const docs = scopes.map(({ client, branch, roles }) => ({
+    uid: `TMACSS_${new mongoose.Types.ObjectId()}`,
     module: moduleId,
     client: client || null,
     branch: branch || null,
     roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
     assignedBy: req.user._id,
   }));
-
-  // for (let index = 0; index < array.length; index++) {
-  //   const element = array[index];
-  // }
   let clientUsers = [];
   for (const doc of docs) {
     const query = {
@@ -103,12 +100,9 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
     clientUsers = clientUsers.filter(
       (u) => u && doc.roles.includes(roleNameToId[u.role?.toLowerCase()]),
     ); // filter out null/undefined
-
-    await TrainingModuleAccess.deleteMany(query);
   }
 
   let inserted = 0;
-  let autoAssigned = 0;
   try {
     const result = await TrainingModuleAccess.insertMany(docs, {
       ordered: false,
@@ -130,8 +124,6 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
   const learnerIds = uniqueUsers.map((u) => u._id);
 
   const assignDocs = uniqueUsers.map((u) => ({
-    uid: `MODASS_${new mongoose.Types.ObjectId()}`,
-
     module: moduleId,
     learner: u._id,
     assignedBy: req.user._id,
@@ -185,13 +177,8 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
   res.status(201).json({
     success: true,
     moduleId,
-    // scopes,
-    // docs,
-    // clientUsers,
-    // mod,
-    // inserted,
-    // skipped: docs.length - inserted,
-    // autoAssigned,
+    inserted,
+    skipped: docs.length - inserted,
   });
 });
 
