@@ -11,6 +11,8 @@ const {
   assessFromBody,
   assessCustomerById,
   getIndividualRiskAssessments,
+  getIndividualRiskAssessment,
+  updateIndividualRiskAssessment,
   assessFromBodySave,
 
   createCountryRisk,
@@ -89,5 +91,10 @@ router.post("/risk/factors/import", upload.single("file"), importRiskFactorsCsv)
 // router.post("/risk/factors/import-excel", upload.single("file"), importRiskFactorsExcel);
 
 
+
+// /:id must come after all named routes
+router.route("/:id")
+  .get(getIndividualRiskAssessment)
+  .put(updateIndividualRiskAssessment);
 
 module.exports = router;

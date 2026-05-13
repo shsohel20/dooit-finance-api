@@ -2,7 +2,7 @@ const { default: axios } = require("axios");
 const asyncHandler = require("../middleware/async");
 const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
-const htmlPdf = require("html-pdf");
+const puppeteer = require("puppeteer");
 const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
@@ -417,19 +417,25 @@ exports.downloadPolicyHubPDF = asyncHandler(async (req, res, next) => {
       </html>
     `;
 
-  const options = { format: "A4" };
-
-  htmlPdf.create(htmlContent, options).toStream((err, pdfStream) => {
-    if (err) {
-      return next(new ErrorResponse("Error generating PDF", 500));
-    }
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({ format: "A4" });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename=policyhub-${policyHub._id}.pdf`,
     );
-
-    pdfStream.pipe(res);
-  });
+    res.send(pdfBuffer);
+  } catch (err) {
+    return next(new ErrorResponse("Error generating PDF", 500));
+  } finally {
+    if (browser) await browser.close();
+  }
 });

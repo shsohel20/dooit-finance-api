@@ -36,6 +36,33 @@ const assignmentRoutes = require("./trainingAssignment");
 const progressRoutes = require("./trainingProgress");
 const reportRoutes = require("./trainingReport");
 
+// ── Phase 1: EWRA / GRC ───────────────────────────────────────────────────────
+const entityType = require("./entity-type");
+const entityProfile = require("./entity-profile");
+const obligationLibrary = require("./obligation-library");
+const entityObligation = require("./entity-obligation");
+
+// ── Phase 2: Controls Library ─────────────────────────────────────────────────
+const control = require("./control");
+
+// ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
+const ewra = require("./ewra");
+const countryRisk = require("./country-risk");
+
+// ── Phase 5: Testing Module ───────────────────────────────────────────────────
+const testTemplate = require("./test-template");
+const testSchedule = require("./test-schedule");
+
+// ── Phase 6: Issues & Remediation ────────────────────────────────────────────
+const issue = require("./issue");
+
+// ── Phase 7: Executive Dashboard ─────────────────────────────────────────────
+const grcDashboard  = require("./grc-dashboard");
+const ewraDashboard = require("./ewra-dashboard");
+
+// ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
+const rgMapper = require("./rg-mapper");
+
 // Mount routes
 router.use("/fileupload", fileUpload);
 router.use("/auth", auth);
@@ -76,5 +103,32 @@ router.use("/training-progress", progressRoutes);
 
 // Manager/admin reports
 router.use("/training-reports", reportRoutes);
+
+// ── Phase 1: EWRA / GRC ───────────────────────────────────────────────────────
+router.use("/entity-type",        entityType);
+router.use("/entity-profile",     entityProfile);
+router.use("/obligation-library", obligationLibrary);
+router.use("/entity-obligation",  entityObligation);
+
+// ── Phase 2: Controls Library ─────────────────────────────────────────────────
+router.use("/control",            control);
+
+// ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
+router.use("/ewra",               ewra);
+router.use("/country-risk",       countryRisk);
+
+// ── Phase 5: Testing Module ───────────────────────────────────────────────────
+router.use("/test-template",      testTemplate);
+router.use("/test-schedule",      testSchedule);
+
+// ── Phase 6: Issues & Remediation ────────────────────────────────────────────
+router.use("/issue",              issue);
+
+// ── Phase 7: Executive Dashboard ─────────────────────────────────────────────
+router.use("/grc-dashboard",      grcDashboard);
+router.use("/ewra-dashboard",     ewraDashboard);
+
+// ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
+router.use("/rg-mapper",          rgMapper);
 
 module.exports = router;
