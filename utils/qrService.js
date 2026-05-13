@@ -34,8 +34,8 @@ const generateQR = async ({
         const baseUrl = process.env.FRONTEND_URL;
 
         payload = branchId
-            ? `${baseUrl}/scan-qr?client=${clientId}&branch=${branchId}`
-            : `${baseUrl}/scan-qr?client=${clientId}`;
+            ? `${baseUrl}/accept-invite/scan-qr?client=${clientId}&branch=${branchId}`
+            : `${baseUrl}/accept-invite/scan-qr?client=${clientId}`;
     } else {
         // Raw JSON payload (not recommended for production)
         payload = JSON.stringify({
