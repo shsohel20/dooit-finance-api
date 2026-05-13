@@ -16,10 +16,10 @@ const {
   updatePart,
   getQuestion,
   deletePart,
-  assignModuleAccess,
+  // assignModuleAccess,
   getModuleAccess,
-  assignUpdateModuleAccess,
   deleteModuleAccess,
+  assignAccess,
 } = require("../controllers/trainingModuleController");
 
 const {
@@ -80,8 +80,8 @@ router
 // ── Module Access (admin assigns module to client/branch/role scopes) ─────────
 router
   .route("/:moduleId/access")
-  .post(authorize("admin", "manager"), assignModuleAccess)
-  .put(authorize("admin", "manager"), assignUpdateModuleAccess)
+  .post(authorize("admin", "manager"), assignAccess)
+  // .put(authorize("admin", "manager"), assignModuleAccess)
   .get(authorize("admin", "manager"), getModuleAccess);
 
 router.delete("/access/:accessId", authorize("admin"), deleteModuleAccess);

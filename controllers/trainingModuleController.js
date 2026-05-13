@@ -10,6 +10,9 @@ const TrainingModuleAccess = require("../models/TrainingModuleAccess");
 const User = require("../models/User");
 const Roles = require("../models/Role");
 const axios = require("axios");
+const Client = require("../models/Client");
+const Branch = require("../models/Branch");
+const _ = require("lodash");
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -38,29 +41,74 @@ exports.createModule = asyncHandler(async (req, res, next) => {
   res.status(201).json({ success: true, data: module });
 });
 
-// @desc  Admin assigns module to client / branch / role scope(s)
-// @route POST /api/v1/training-modules/:moduleId/access
-exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
+exports.assignAccess = asyncHandler(async (req, res, next) => {
   const { moduleId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(moduleId))
-    return next(new ErrorResponse("Invalid module id", 400));
 
   const mod = await TrainingModule.findById(moduleId);
   if (!mod) return next(new ErrorResponse("Module not found", 404));
-
-  // Accept a single object or an array of scope objects
   const scopes = Array.isArray(req.body) ? req.body : [req.body];
+
+  const allRoles = await Roles.find({}).select("_id name").lean();
+  const roleIdToName = {};
+  const roleNameToId = {};
+  for (const r of allRoles) {
+    roleIdToName[String(r._id)] = r.name.toLowerCase();
+    roleNameToId[r.name.toLowerCase()] = String(r._id);
+  }
 
   const docs = scopes.map(({ client, branch, roles }) => ({
     module: moduleId,
-    client: client || undefined,
-    branch: branch || undefined,
+    client: client || null,
+    branch: branch || null,
     roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
     assignedBy: req.user._id,
   }));
 
+  // for (let index = 0; index < array.length; index++) {
+  //   const element = array[index];
+  // }
+  let clientUsers = [];
+  for (const doc of docs) {
+    const query = {
+      module: moduleId,
+      client: doc.client,
+      branch: doc.branch,
+    };
+    const queryUser = {
+      // module: moduleId,
+      clientBelongs: doc.client,
+      branchBelongs: doc.branch,
+    };
+
+    const client = await Client.findById(doc.client)
+      .populate({
+        path: "user",
+        select: "_id role userType",
+      })
+      .lean();
+    const branch = await Branch.findById(doc.branch)
+      .populate({
+        path: "user",
+        select: "_id role userType",
+      })
+      .lean();
+
+    clientUsers = [
+      ...clientUsers,
+      ...(await User.find(queryUser).select("_id role userType").lean()),
+      ...(client?.user ? [client.user] : []),
+      ...(branch?.user ? [branch.user] : []),
+    ];
+
+    clientUsers = clientUsers.filter(
+      (u) => u && doc.roles.includes(roleNameToId[u.role?.toLowerCase()]),
+    ); // filter out null/undefined
+
+    await TrainingModuleAccess.deleteMany(query);
+  }
+
   let inserted = 0;
+  let autoAssigned = 0;
   try {
     const result = await TrainingModuleAccess.insertMany(docs, {
       ordered: false,
@@ -74,195 +122,76 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
       return next(err);
     }
   }
+  const uniqueUsers = _.uniqBy(
+    clientUsers.filter((u) => u?._id),
+    (u) => String(u._id),
+  );
 
-  // ── Auto-assign matching learners ──────────────────────────────────────────
-  // Fetch all Roles once (small collection) to build both direction maps
-  const allRoles = await Roles.find({}).select("_id name").lean();
-  const roleIdToName = {};
-  const roleNameToId = {};
-  for (const r of allRoles) {
-    roleIdToName[String(r._id)] = r.name.toLowerCase();
-    roleNameToId[r.name.toLowerCase()] = String(r._id);
-  }
+  const learnerIds = uniqueUsers.map((u) => u._id);
 
-  let autoAssigned = 0;
+  const assignDocs = uniqueUsers.map((u) => ({
+    uid: `MODASS_${new mongoose.Types.ObjectId()}`,
 
-  for (const scope of docs) {
-    // Build the user filter matching this scope
-    const userFilter = { isActive: true };
-    if (scope.client) userFilter.clientBelongs = scope.client;
-    if (scope.branch) userFilter.branchBelongs = scope.branch;
+    module: moduleId,
+    learner: u._id,
+    assignedBy: req.user._id,
 
-    if (scope.roles && scope.roles.length > 0) {
-      const roleNames = scope.roles
-        .map((rid) => roleIdToName[String(rid)])
-        .filter(Boolean);
-      if (roleNames.length)
-        userFilter.role = { $in: roleNames.map((n) => new RegExp(`^${n}$`, "i")) };
-    }
-    // roles: [] means open to all roles within this client/branch — no role filter
+    roleId: roleNameToId[u.role?.toLowerCase()]
+      ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
+      : undefined,
+  }));
 
-    const matchedUsers = await User.find(userFilter).select("_id role").lean();
-    if (!matchedUsers.length) continue;
+  await ModuleAssignment.bulkWrite([
+    // CREATE + UPDATE
+    ...assignDocs.map((doc) => ({
+      updateOne: {
+        filter: {
+          module: doc.module,
+          learner: doc.learner,
+        },
 
-    const assignDocs = matchedUsers.map((u) => ({
-      module: moduleId,
-      learner: u._id,
-      assignedBy: req.user._id,
-      status: "pending",
-      roleId: roleNameToId[u.role?.toLowerCase()]
-        ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
-        : undefined,
-    }));
+        update: {
+          $set: {
+            assignedBy: doc.assignedBy,
+            roleId: doc.roleId,
+          },
 
-    try {
-      const ar = await ModuleAssignment.insertMany(assignDocs, {
-        ordered: false,
-        rawResult: true,
-      });
-      autoAssigned += ar.insertedCount ?? 0;
-    } catch (err) {
-      if (err.name === "MongoBulkWriteError" || err.result) {
-        autoAssigned += err.result?.insertedCount ?? err.insertedCount ?? 0;
-      }
-      // silently skip duplicate assignments
-    }
-  }
+          // only when creating
+          $setOnInsert: {
+            uid: doc.uid,
+            module: doc.module,
+            learner: doc.learner,
+            status: "pending",
+          },
+        },
 
-  if (autoAssigned > 0) {
-    await TrainingModule.findByIdAndUpdate(moduleId, {
-      $inc: { "stats.assignedCount": autoAssigned },
-    });
-  }
-  // ─────────────────────────────────────────────────────────────────────────
+        upsert: true,
+      },
+    })),
+
+    // DELETE removed learners
+    {
+      deleteMany: {
+        filter: {
+          module: moduleId,
+          learner: {
+            $nin: learnerIds,
+          },
+        },
+      },
+    },
+  ]);
 
   res.status(201).json({
     success: true,
-    inserted,
-    skipped: docs.length - inserted,
-    autoAssigned,
-  });
-});
-exports.assignUpdateModuleAccess = asyncHandler(async (req, res, next) => {
-  const client = req?.user?.client?._id || null;
-  const branch = req?.user?.branch?._id || null;
-  const { moduleId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(moduleId)) {
-    return next(new ErrorResponse("Invalid module id", 400));
-  }
-
-  // Build scope filter
-  const query = { module: moduleId };
-  if (client) query.client = client;
-  if (branch) query.branch = branch;
-
-  // ✅ FIX: use findOne instead of findById
-  const mod = await TrainingModule.findById(moduleId);
-  if (!mod) {
-    return next(new ErrorResponse("Module not found", 404));
-  }
-
-  // Accept single or array
-  const scopes = Array.isArray(req.body) ? req.body : [req.body];
-
-  // Normalize scopes
-  const docs = scopes.map(({ client, branch, roles }) => ({
-    module: moduleId,
-    client: client || undefined,
-    branch: branch || undefined,
-    roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
-    assignedBy: req.user._id,
-  }));
-
-  // 🔥 STEP 1: Remove old access for this scope (true update behavior)
-  await TrainingModuleAccess.deleteMany(query);
-
-  // 🔥 STEP 2: Insert new access
-  let inserted = 0;
-  try {
-    const result = await TrainingModuleAccess.insertMany(docs, {
-      ordered: false,
-      rawResult: true,
-    });
-    inserted = result.insertedCount ?? 0;
-  } catch (err) {
-    if (err.name === "MongoBulkWriteError" || err.result) {
-      inserted = err.result?.insertedCount ?? err.insertedCount ?? 0;
-    } else {
-      return next(err);
-    }
-  }
-
-  // ── Auto-assign learners ─────────────────────────────
-
-  const allRoles = await Roles.find({}).select("_id name").lean();
-
-  const roleIdToName = {};
-  const roleNameToId = {};
-
-  for (const r of allRoles) {
-    roleIdToName[String(r._id)] = r.name.toLowerCase();
-    roleNameToId[r.name.toLowerCase()] = String(r._id);
-  }
-
-  let autoAssigned = 0;
-
-  for (const scope of docs) {
-    const userFilter = { isActive: true };
-
-    if (scope.client) userFilter.clientBelongs = scope.client;
-    if (scope.branch) userFilter.branchBelongs = scope.branch;
-
-    if (scope.roles && scope.roles.length > 0) {
-      const roleNames = scope.roles
-        .map((rid) => roleIdToName[String(rid)])
-        .filter(Boolean);
-
-      if (roleNames.length) {
-        userFilter.role = { $in: roleNames.map((n) => new RegExp(`^${n}$`, "i")) };
-      }
-    }
-
-    const matchedUsers = await User.find(userFilter).select("_id role").lean();
-
-    if (!matchedUsers.length) continue;
-
-    const assignDocs = matchedUsers.map((u) => ({
-      module: moduleId,
-      learner: u._id,
-      assignedBy: req.user._id,
-      status: "pending",
-      roleId: roleNameToId[u.role?.toLowerCase()]
-        ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
-        : undefined,
-    }));
-
-    try {
-      const ar = await ModuleAssignment.insertMany(assignDocs, {
-        ordered: false,
-        rawResult: true,
-      });
-      autoAssigned += ar.insertedCount ?? 0;
-    } catch (err) {
-      if (err.name === "MongoBulkWriteError" || err.result) {
-        autoAssigned += err.result?.insertedCount ?? err.insertedCount ?? 0;
-      }
-    }
-  }
-
-  // Update stats
-  if (autoAssigned > 0) {
-    await TrainingModule.findByIdAndUpdate(moduleId, {
-      $inc: { "stats.assignedCount": autoAssigned },
-    });
-  }
-
-  res.status(200).json({
-    success: true,
-    inserted,
-    skipped: docs.length - inserted,
-    autoAssigned,
+    moduleId,
+    // scopes,
+    // docs,
+    // clientUsers,
+    // mod,
+    // inserted,
+    // skipped: docs.length - inserted,
+    // autoAssigned,
   });
 });
 
