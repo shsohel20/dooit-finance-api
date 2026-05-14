@@ -9,182 +9,195 @@ const TrainingModulePart = require("../models/TrainingModulePart");
 const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
 const TrainingModuleAccess = require("../models/TrainingModuleAccess");
 const Roles = require("../models/Role");
+const { jsonFormat } = require("../utils");
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function isValidId(id) {
-    return mongoose.Types.ObjectId.isValid(id);
+  return mongoose.Types.ObjectId.isValid(id);
 }
 
 /**
  * Upsert progress doc — find or create for (learner, module)
  */
 async function findOrCreateProgress(learnerId, moduleId, assignmentId) {
-    let progress = await TrainingLearnerProgress.findOne({
-        learner: learnerId,
-        module: moduleId,
+  let progress = await TrainingLearnerProgress.findOne({
+    learner: learnerId,
+    module: moduleId,
+  });
+
+  if (!progress) {
+    progress = await TrainingLearnerProgress.create({
+      learner: learnerId,
+      module: moduleId,
+      assignment: assignmentId || undefined,
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
     });
 
-    if (!progress) {
-        progress = await TrainingLearnerProgress.create({
-            learner: learnerId,
-            module: moduleId,
-            assignment: assignmentId || undefined,
-            startedAt: new Date(),
-            lastActivityAt: new Date(),
-        });
-
-        // Mark assignment in-progress
-        if (assignmentId) {
-            await ModuleAssignment.findByIdAndUpdate(assignmentId, {
-                status: "in-progress",
-            });
-        }
+    // Mark assignment in-progress
+    if (assignmentId) {
+      await ModuleAssignment.findByIdAndUpdate(assignmentId, {
+        status: "in-progress",
+      });
     }
+  }
 
-    return progress;
+  return progress;
 }
 
 // ─── GET /progress/:moduleId ─────────────────────────────────────────────────
 // @desc  Get my progress for a specific module, including part-wise score/result
 // @route GET /api/v1/progress/:moduleId
 exports.getMyProgress = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
+  const { moduleId } = req.params;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
 
-    const progress = await TrainingLearnerProgress.findOne({
-        learner: req.user._id,
-        module: moduleId,
-    }).lean();
+  const progress = await TrainingLearnerProgress.findOne({
+    learner: req.user._id,
+    module: moduleId,
+  }).lean();
 
-    if (!progress)
-        return res.status(200).json({ success: true, data: null });
+  if (!progress) return res.status(200).json({ success: true, data: null });
 
-    // Ordered parts for the module
-    const parts = await TrainingModulePart.find({ module: moduleId })
-        .sort({ order: 1 })
-        .select("_id title order")
-        .lean();
+  // Ordered parts for the module
+  const parts = await TrainingModulePart.find({ module: moduleId })
+    .sort({ order: 1 })
+    .select("_id title order")
+    .lean();
 
-    // Only current-round attempts
-    const currentAttempts = progress.attempts.filter(
-        (a) => a.attemptRound === progress.attemptRound
-    );
+  // Only current-round attempts
+  const currentAttempts = progress.attempts.filter(
+    (a) => a.attemptRound === progress.attemptRound,
+  );
 
-    // Group attempts and watch records by part id
-    const attemptsByPart = currentAttempts.reduce((acc, a) => {
-        const pid = String(a.part);
-        (acc[pid] = acc[pid] || []).push(a);
-        return acc;
-    }, {});
+  // Group attempts and watch records by part id
+  const attemptsByPart = currentAttempts.reduce((acc, a) => {
+    const pid = String(a.part);
+    (acc[pid] = acc[pid] || []).push(a);
+    return acc;
+  }, {});
 
-    const watchByPart = (progress.watchRecords || []).reduce((acc, w) => {
-        acc[String(w.part)] = w;
-        return acc;
-    }, {});
+  const watchByPart = (progress.watchRecords || []).reduce((acc, w) => {
+    acc[String(w.part)] = w;
+    return acc;
+  }, {});
 
-    const partResults = parts.map((part, index) => {
-        const pid = String(part._id);
-        const attempts = attemptsByPart[pid] || [];
-        const watch = watchByPart[pid] || null;
+  const partResults = parts.map((part, index) => {
+    const pid = String(part._id);
+    const attempts = attemptsByPart[pid] || [];
+    const watch = watchByPart[pid] || null;
 
-        const earned = attempts.reduce((s, a) => s + (a.pointsEarned || 0), 0);
-        const possible = attempts.reduce((s, a) => s + (a.possiblePoints || 1), 0);
-        const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+    const earned = attempts.reduce((s, a) => s + (a.pointsEarned || 0), 0);
+    const possible = attempts.reduce((s, a) => s + (a.possiblePoints || 1), 0);
+    const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
 
-        return {
-            part: part._id,
-            title: part.title,
-            order: part.order,
-            index,
-            attempted: attempts.length > 0,
-            correct: attempts.filter((a) => a.isCorrect).length,
-            total: attempts.length,
-            earned,
-            possible,
-            score,
-            passed: attempts.length > 0 && score >= progress.passThreshold,
-            watch: watch
-                ? {
-                      watchedSeconds: watch.watchedSeconds,
-                      watchPercent: watch.watchPercent,
-                      completed: watch.completed,
-                  }
-                : null,
-        };
-    });
+    return {
+      part: part._id,
+      title: part.title,
+      order: part.order,
+      index,
+      attempted: attempts.length > 0,
+      correct: attempts.filter((a) => a.isCorrect).length,
+      total: attempts.length,
+      earned,
+      possible,
+      score,
+      passed: attempts.length > 0 && score >= progress.passThreshold,
+      watch: watch
+        ? {
+            watchedSeconds: watch.watchedSeconds,
+            watchPercent: watch.watchPercent,
+            completed: watch.completed,
+          }
+        : null,
+    };
+  });
 
-    res.status(200).json({
-        success: true,
-        data: { ...progress, partResults },
-    });
+  res.status(200).json({
+    success: true,
+    data: { ...progress, partResults },
+  });
 });
 
 // ─── GET /progress ───────────────────────────────────────────────────────────
 // @desc  Get all my progress records (learner dashboard)
 // @route GET /api/v1/progress
 exports.getAllMyProgress = asyncHandler(async (req, res, next) => {
-    const records = await TrainingLearnerProgress.find({ learner: req.user._id })
-        .populate("module", "title uid status stats partsCount")
-        .lean();
+  const records = await TrainingLearnerProgress.find({ learner: req.user._id })
+    .populate("module", "title uid status stats partsCount")
+    .lean();
 
-    res.status(200).json({ success: true, count: records.length, data: records });
+  res.status(200).json({ success: true, count: records.length, data: records });
 });
 
 // ─── POST /progress/:moduleId/start ─────────────────────────────────────────
 // @desc  Start (or resume) a module — creates the progress doc if needed
 // @route POST /api/v1/progress/:moduleId/start
 exports.startModule = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
+  const { moduleId } = req.params;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
 
-    const mod = await TrainingModule.findById(moduleId);
-    if (!mod) return next(new ErrorResponse("Module not found", 404));
+  const mod = await TrainingModule.findById(moduleId);
+  if (!mod) return next(new ErrorResponse("Module not found", 404));
 
-    // Confirm learner has an active assignment
-    const assignment = await ModuleAssignment.findOne({
-        module: moduleId,
-        learner: req.user._id,
-        status: { $in: ["pending", "in-progress"] },
-    });
+  // Confirm learner has an active assignment
+  const assignment = await ModuleAssignment.findOne({
+    module: moduleId,
+    learner: req.user._id,
+    status: { $in: ["pending", "in-progress"] },
+  });
 
-    if (!assignment)
-        return next(new ErrorResponse("You are not assigned to this module", 403));
+  if (!assignment)
+    return next(new ErrorResponse("You are not assigned to this module", 403));
 
-    // ── Role-gate: verify learner's role is still permitted ───────────────────
-    const accessRules = await TrainingModuleAccess.find({ module: moduleId, status: "active" })
-        .select("roles")
+  // ── Role-gate: verify learner's role is still permitted ───────────────────
+  const accessRules = await TrainingModuleAccess.find({
+    module: moduleId,
+    status: "active",
+  })
+    .select("roles")
+    .lean();
+
+  if (accessRules.length > 0) {
+    const openToAll = accessRules.some((a) => a.roles.length === 0);
+
+    if (!openToAll) {
+      const roleDoc = await Roles.findOne({
+        name: { $regex: new RegExp(`^${req.user.role}$`, "i") },
+        isActive: true,
+      })
+        .select("_id")
         .lean();
 
-    if (accessRules.length > 0) {
-        const openToAll = accessRules.some((a) => a.roles.length === 0);
+      const permitted =
+        roleDoc &&
+        accessRules.some((a) =>
+          a.roles.some((r) => String(r) === String(roleDoc._id)),
+        );
 
-        if (!openToAll) {
-            const roleDoc = await Roles.findOne({ name: { $regex: new RegExp(`^${req.user.role}$`, "i") }, isActive: true })
-                .select("_id")
-                .lean();
-
-            const permitted = roleDoc && accessRules.some((a) =>
-                a.roles.some((r) => String(r) === String(roleDoc._id))
-            );
-
-            if (!permitted)
-                return next(new ErrorResponse("Your role does not have access to this module", 403));
-        }
+      if (!permitted)
+        return next(
+          new ErrorResponse(
+            "Your role does not have access to this module",
+            403,
+          ),
+        );
     }
-    // ─────────────────────────────────────────────────────────────────────────
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
-    const progress = await findOrCreateProgress(
-        req.user._id,
-        moduleId,
-        assignment._id
-    );
+  const progress = await findOrCreateProgress(
+    req.user._id,
+    moduleId,
+    assignment._id,
+  );
 
-    res.status(200).json({ success: true, data: progress });
+  res.status(200).json({ success: true, data: progress });
 });
 
 // ─── POST /progress/:moduleId/attempts ──────────────────────────────────────
@@ -192,119 +205,120 @@ exports.startModule = asyncHandler(async (req, res, next) => {
 //        Body: { partId, answers: [{ questionId, selectedAnswer }] }
 // @route POST /api/v1/progress/:moduleId/attempts
 exports.submitAttempts = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
-    const { partId, answers } = req.body; // answers: [{ questionId, selectedAnswer }]
+  const { moduleId } = req.params;
+  const { partId, answers } = req.body; // answers: [{ questionId, selectedAnswer }]
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
-    if (!isValidId(partId))
-        return next(new ErrorResponse("Invalid part id", 400));
-    if (!Array.isArray(answers) || answers.length === 0)
-        return next(new ErrorResponse("answers array is required", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(partId))
+    return next(new ErrorResponse("Invalid part id", 400));
+  if (!Array.isArray(answers) || answers.length === 0)
+    return next(new ErrorResponse("answers array is required", 400));
 
-    // Load part with questions populated
-    const part = await TrainingModulePart.findById(partId).populate("questions");
-    if (!part) return next(new ErrorResponse("Part not found", 404));
-    if (String(part.module) !== String(moduleId))
-        return next(new ErrorResponse("Part does not belong to this module", 400));
+  // Load part with questions populated
+  const part = await TrainingModulePart.findById(partId).populate("questions");
+  if (!part) return next(new ErrorResponse("Part not found", 404));
+  if (String(part.module) !== String(moduleId))
+    return next(new ErrorResponse("Part does not belong to this module", 400));
 
-    const assignment = await ModuleAssignment.findOne({
-        module: moduleId,
-        learner: req.user._id,
-    });
-    if (!assignment)
-        return next(new ErrorResponse("You are not assigned to this module", 403));
+  const assignment = await ModuleAssignment.findOne({
+    module: moduleId,
+    learner: req.user._id,
+  });
+  if (!assignment)
+    return next(new ErrorResponse("You are not assigned to this module", 403));
 
-    const progress = await findOrCreateProgress(
-        req.user._id,
-        moduleId,
-        assignment._id
-    );
+  const progress = await findOrCreateProgress(
+    req.user._id,
+    moduleId,
+    assignment._id,
+  );
 
-    // Build a map of questionId -> question doc for quick lookup
-    const questionMap = {};
-    part.questions.forEach((q) => {
-        questionMap[String(q._id)] = q;
-    });
+  // Build a map of questionId -> question doc for quick lookup
+  const questionMap = {};
+  part.questions.forEach((q) => {
+    questionMap[String(q._id)] = q;
+  });
 
-    const newAttempts = [];
-    for (const { questionId, selectedAnswer } of answers) {
-        if (!isValidId(questionId)) continue;
+  const newAttempts = [];
+  for (const { questionId, selectedAnswer } of answers) {
+    if (!isValidId(questionId)) continue;
 
-        const question = questionMap[questionId];
-        if (!question) continue;
+    const question = questionMap[questionId];
+    if (!question) continue;
 
-        // Determine correctness (correctAnswers is an array of keys)
-        let isCorrect = false;
-        if (question.type === "single" || question.type === "boolean") {
-            isCorrect = question.correctAnswers.includes(String(selectedAnswer));
-        } else if (question.type === "multiple") {
-            // For multiple-select, selectedAnswer should be a comma-separated or array
-            const selected = Array.isArray(selectedAnswer)
-                ? selectedAnswer.map(String)
-                : String(selectedAnswer)
-                    .split(",")
-                    .map((s) => s.trim());
-            const correct = question.correctAnswers.map(String).sort();
-            isCorrect =
-                JSON.stringify(selected.sort()) === JSON.stringify(correct);
-        }
-
-        const possiblePoints = question.points || 1;
-        newAttempts.push({
-            part: partId,
-            question: questionId,
-            selectedAnswer: Array.isArray(selectedAnswer)
-                ? selectedAnswer.join(",")
-                : String(selectedAnswer),
-            isCorrect,
-            pointsEarned: isCorrect ? possiblePoints : 0,
-            possiblePoints,
-            attemptRound: progress.attemptRound,
-        });
+    // Determine correctness (correctAnswers is an array of keys)
+    let isCorrect = false;
+    if (question.type === "single" || question.type === "boolean") {
+      isCorrect = question.correctAnswers.includes(String(selectedAnswer));
+    } else if (question.type === "multiple") {
+      // For multiple-select, selectedAnswer should be a comma-separated or array
+      const selected = Array.isArray(selectedAnswer)
+        ? selectedAnswer.map(String)
+        : String(selectedAnswer)
+            .split(",")
+            .map((s) => s.trim());
+      const correct = question.correctAnswers.map(String).sort();
+      isCorrect = JSON.stringify(selected.sort()) === JSON.stringify(correct);
     }
 
-    // Add new attempts to the progress document
-    progress.attempts.push(...newAttempts);
-
-    // Advance currentPartIndex if this part is now complete
-    const partIndex = (
-        await TrainingModulePart.find({ module: moduleId }).sort("order").select("_id")
-    ).findIndex((p) => String(p._id) === String(partId));
-
-    if (partIndex >= 0 && partIndex >= progress.currentPartIndex) {
-        progress.currentPartIndex = partIndex + 1;
-    }
-
-    progress.lastActivityAt = new Date();
-    progress.recalculateScore();
-    await progress.save();
-
-    // Build per-question result for the response
-    const results = newAttempts.map((a) => ({
-        questionId: a.question,
-        selectedAnswer: a.selectedAnswer,
-        isCorrect: a.isCorrect,
-        pointsEarned: a.pointsEarned,
-    }));
-
-    const partScore = newAttempts.length
-        ? Math.round(
-            (newAttempts.filter((a) => a.isCorrect).length / newAttempts.length) *
-            100
-        )
-        : 0;
-
-    res.status(201).json({
-        success: true,
-        data: {
-            results,
-            partScore,
-            passed: partScore >= 70,
-            overallScore: progress.score,
-            currentPartIndex: progress.currentPartIndex,
-        },
+    const possiblePoints = question.points || 1;
+    newAttempts.push({
+      part: partId,
+      question: questionId,
+      selectedAnswer: Array.isArray(selectedAnswer)
+        ? selectedAnswer.join(",")
+        : String(selectedAnswer),
+      isCorrect,
+      pointsEarned: isCorrect ? possiblePoints : 0,
+      possiblePoints,
+      attemptRound: progress.attemptRound,
     });
+  }
+
+  // Add new attempts to the progress document
+  progress.attempts.push(...newAttempts);
+
+  // Advance currentPartIndex if this part is now complete
+  const partIndex = (
+    await TrainingModulePart.find({ module: moduleId })
+      .sort("order")
+      .select("_id")
+  ).findIndex((p) => String(p._id) === String(partId));
+
+  if (partIndex >= 0 && partIndex >= progress.currentPartIndex) {
+    progress.currentPartIndex = partIndex + 1;
+  }
+
+  progress.lastActivityAt = new Date();
+  progress.recalculateScore();
+  await progress.save();
+
+  // Build per-question result for the response
+  const results = newAttempts.map((a) => ({
+    questionId: a.question,
+    selectedAnswer: a.selectedAnswer,
+    isCorrect: a.isCorrect,
+    pointsEarned: a.pointsEarned,
+  }));
+
+  const partScore = newAttempts.length
+    ? Math.round(
+        (newAttempts.filter((a) => a.isCorrect).length / newAttempts.length) *
+          100,
+      )
+    : 0;
+
+  res.status(201).json({
+    success: true,
+    data: {
+      results,
+      partScore,
+      passed: partScore >= 70,
+      overallScore: progress.score,
+      currentPartIndex: progress.currentPartIndex,
+    },
+  });
 });
 
 // ─── PUT /progress/:moduleId/watch ──────────────────────────────────────────
@@ -312,308 +326,465 @@ exports.submitAttempts = asyncHandler(async (req, res, next) => {
 //        Body: { partId, watchedSeconds, durationSec }
 // @route PUT /api/v1/progress/:moduleId/watch
 exports.updateWatchProgress = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
-    const { partId, watchedSeconds, durationSec } = req.body;
+  const { moduleId } = req.params;
+  const { partId, watchedSeconds, durationSec } = req.body;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
-    if (!isValidId(partId))
-        return next(new ErrorResponse("Invalid part id", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(partId))
+    return next(new ErrorResponse("Invalid part id", 400));
 
-    const part = await TrainingModulePart.findById(partId).select(
-        "minWatchPercent module"
-    );
-    if (!part) return next(new ErrorResponse("Part not found", 404));
+  const part = await TrainingModulePart.findById(partId).select(
+    "minWatchPercent module",
+  );
+  if (!part) return next(new ErrorResponse("Part not found", 404));
 
-    const assignment = await ModuleAssignment.findOne({
-        module: moduleId,
-        learner: req.user._id,
-    });
-    if (!assignment)
-        return next(new ErrorResponse("Not assigned to this module", 403));
+  const assignment = await ModuleAssignment.findOne({
+    module: moduleId,
+    learner: req.user._id,
+  });
+  if (!assignment)
+    return next(new ErrorResponse("Not assigned to this module", 403));
 
-    const progress = await findOrCreateProgress(
-        req.user._id,
-        moduleId,
-        assignment._id
-    );
+  const progress = await findOrCreateProgress(
+    req.user._id,
+    moduleId,
+    assignment._id,
+  );
 
-    const effectiveDuration = durationSec ?? part.video?.durationSec ?? 0;
+  const effectiveDuration = durationSec ?? part.video?.durationSec ?? 0;
 
-    // 1. Resolve the final watchedSeconds first
-    const existingIdx = progress.watchRecords.findIndex(
-        (w) => String(w.part) === String(partId)
-    );
+  // 1. Resolve the final watchedSeconds first
+  const existingIdx = progress.watchRecords.findIndex(
+    (w) => String(w.part) === String(partId),
+  );
 
-    const finalWatchedSeconds = Math.max(
-        watchedSeconds,
-        existingIdx >= 0 ? progress.watchRecords[existingIdx].watchedSeconds : 0
-    );
+  const finalWatchedSeconds = Math.max(
+    watchedSeconds,
+    existingIdx >= 0 ? progress.watchRecords[existingIdx].watchedSeconds : 0,
+  );
 
-    // 2. Then calculate watchPercent from the correct value
-    const watchPercent = effectiveDuration > 0
-        ? Math.min(100, Math.round((finalWatchedSeconds / effectiveDuration) * 100))
-        : 0;
+  // 2. Then calculate watchPercent from the correct value
+  const watchPercent =
+    effectiveDuration > 0
+      ? Math.min(
+          100,
+          Math.round((finalWatchedSeconds / effectiveDuration) * 100),
+        )
+      : 0;
 
-    const record = {
-        part: partId,
-        watchedSeconds: finalWatchedSeconds,
-        durationSec: effectiveDuration,
-        watchPercent,
-        completed: watchPercent >= (part.minWatchPercent || 80),
-    };
+  const record = {
+    part: partId,
+    watchedSeconds: finalWatchedSeconds,
+    durationSec: effectiveDuration,
+    watchPercent,
+    completed: watchPercent >= (part.minWatchPercent || 80),
+  };
 
-    if (existingIdx >= 0) {
-        progress.watchRecords[existingIdx] = record;
-    } else {
-        progress.watchRecords.push(record);
-    }
-    progress.lastActivityAt = new Date();
-    await progress.save();
+  if (existingIdx >= 0) {
+    progress.watchRecords[existingIdx] = record;
+  } else {
+    progress.watchRecords.push(record);
+  }
+  progress.lastActivityAt = new Date();
+  await progress.save();
 
-    res.status(200).json({ success: true, data: record });
+  res.status(200).json({ success: true, data: record });
 });
 
 // ─── POST /progress/:moduleId/complete ──────────────────────────────────────
 // @desc  Mark module as completed, calculate final score & pass/fail
 // @route POST /api/v1/progress/:moduleId/complete
 exports.completeModule = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
+  const { moduleId } = req.params;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
 
-    const progress = await TrainingLearnerProgress.findOne({
-        learner: req.user._id,
-        module: moduleId,
-    });
-    if (!progress)
-        return next(new ErrorResponse("No progress record found", 404));
+  const progress = await TrainingLearnerProgress.findOne({
+    learner: req.user._id,
+    module: moduleId,
+  });
+  if (!progress)
+    return next(new ErrorResponse("No progress record found", 404));
 
-    if (progress.completedAt)
-        return next(
-            new ErrorResponse("Module already completed. Use retake to reset.", 400)
-        );
-
-    progress.recalculateScore();
-
-    const isPassed = progress.score >= progress.passThreshold;
-    progress.isPassed = isPassed;
-    progress.completedAt = new Date();
-    if (isPassed) progress.passedAt = new Date();
-    progress.lastActivityAt = new Date();
-
-    await progress.save();
-
-    // Update assignment status + snapshot score
-    const updatePayload = {
-        finalScore: progress.score,
-        isPassed,
-        completedAt: progress.completedAt,
-        status: "completed",
-    };
-
-    const assignment = await ModuleAssignment.findOneAndUpdate(
-        { module: moduleId, learner: req.user._id },
-        updatePayload,
-        { new: true }
+  if (progress.completedAt)
+    return next(
+      new ErrorResponse("Module already completed. Use retake to reset.", 400),
     );
 
-    // Update module aggregate stats
-    const statsUpdate = { $inc: {} };
-    if (isPassed) {
-        statsUpdate.$inc["stats.passedCount"] = 1;
-    } else {
-        statsUpdate.$inc["stats.failedCount"] = 1;
-    }
+  progress.recalculateScore();
 
-    // Recalculate avgScore (simple running average stored in module stats)
-    const module = await TrainingModule.findById(moduleId);
-    if (module) {
-        const completedCount =
-            (module.stats.passedCount || 0) +
-            (module.stats.failedCount || 0) +
-            1; // include this new one
-        statsUpdate.$set = {
-            "stats.avgScore": Number(
-                (
-                    ((module.stats.avgScore || 0) * (completedCount - 1) +
-                        progress.score) /
-                    completedCount
-                ).toFixed(2)
-            ),
-        };
-    }
+  const isPassed = progress.score >= progress.passThreshold;
+  progress.isPassed = isPassed;
+  progress.completedAt = new Date();
+  if (isPassed) progress.passedAt = new Date();
+  progress.lastActivityAt = new Date();
 
-    await TrainingModule.findByIdAndUpdate(moduleId, statsUpdate);
+  await progress.save();
 
-    res.status(200).json({
-        success: true,
-        data: {
-            score: progress.score,
-            isPassed,
-            passThreshold: progress.passThreshold,
-            completedAt: progress.completedAt,
-        },
-    });
+  // Update assignment status + snapshot score
+  const updatePayload = {
+    finalScore: progress.score,
+    isPassed,
+    completedAt: progress.completedAt,
+    status: "completed",
+  };
+
+  const assignment = await ModuleAssignment.findOneAndUpdate(
+    { module: moduleId, learner: req.user._id },
+    updatePayload,
+    { new: true },
+  );
+
+  // Update module aggregate stats
+  const statsUpdate = { $inc: {} };
+  if (isPassed) {
+    statsUpdate.$inc["stats.passedCount"] = 1;
+  } else {
+    statsUpdate.$inc["stats.failedCount"] = 1;
+  }
+
+  // Recalculate avgScore (simple running average stored in module stats)
+  const module = await TrainingModule.findById(moduleId);
+  if (module) {
+    const completedCount =
+      (module.stats.passedCount || 0) + (module.stats.failedCount || 0) + 1; // include this new one
+    statsUpdate.$set = {
+      "stats.avgScore": Number(
+        (
+          ((module.stats.avgScore || 0) * (completedCount - 1) +
+            progress.score) /
+          completedCount
+        ).toFixed(2),
+      ),
+    };
+  }
+
+  await TrainingModule.findByIdAndUpdate(moduleId, statsUpdate);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      score: progress.score,
+      isPassed,
+      passThreshold: progress.passThreshold,
+      completedAt: progress.completedAt,
+    },
+  });
 });
 
 // ─── POST /progress/:moduleId/retake ────────────────────────────────────────
 // @desc  Manager grants a retake — resets learner progress for one more attempt
 // @route POST /api/v1/progress/:moduleId/retake   (manager role)
 exports.grantRetake = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
-    const { learnerId } = req.body;
+  const { moduleId } = req.params;
+  const { learnerId } = req.body;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
-    if (!learnerId || !isValidId(learnerId))
-        return next(new ErrorResponse("learnerId is required", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+  if (!learnerId || !isValidId(learnerId))
+    return next(new ErrorResponse("learnerId is required", 400));
 
-    const assignment = await ModuleAssignment.findOne({
-        module: moduleId,
-        learner: learnerId,
+  const assignment = await ModuleAssignment.findOne({
+    module: moduleId,
+    learner: learnerId,
+  });
+  if (!assignment) return next(new ErrorResponse("Assignment not found", 404));
+
+  // Check maxAttempts
+  if (assignment.maxAttempts > 0) {
+    const progress = await TrainingLearnerProgress.findOne({
+      learner: learnerId,
+      module: moduleId,
     });
-    if (!assignment)
-        return next(new ErrorResponse("Assignment not found", 404));
-
-    // Check maxAttempts
-    if (assignment.maxAttempts > 0) {
-        const progress = await TrainingLearnerProgress.findOne({
-            learner: learnerId,
-            module: moduleId,
-        });
-        if (progress && progress.attemptRound >= assignment.maxAttempts) {
-            return next(
-                new ErrorResponse(
-                    `Max attempts (${assignment.maxAttempts}) reached`,
-                    400
-                )
-            );
-        }
+    if (progress && progress.attemptRound >= assignment.maxAttempts) {
+      return next(
+        new ErrorResponse(
+          `Max attempts (${assignment.maxAttempts}) reached`,
+          400,
+        ),
+      );
     }
+  }
 
-    // Reset progress for new round
-    await TrainingLearnerProgress.findOneAndUpdate(
-        { learner: learnerId, module: moduleId },
-        {
-            $inc: { attemptRound: 1 },
-            $set: {
-                currentPartIndex: 0,
-                isPassed: false,
-                score: 0,
-                totalPoints: 0,
-                maxPoints: 0,
-                completedAt: null,
-                passedAt: null,
-                lastActivityAt: new Date(),
-            },
-        }
-    );
+  // Reset progress for new round
+  await TrainingLearnerProgress.findOneAndUpdate(
+    { learner: learnerId, module: moduleId },
+    {
+      $inc: { attemptRound: 1 },
+      $set: {
+        currentPartIndex: 0,
+        isPassed: false,
+        score: 0,
+        totalPoints: 0,
+        maxPoints: 0,
+        completedAt: null,
+        passedAt: null,
+        lastActivityAt: new Date(),
+      },
+    },
+  );
 
-    await ModuleAssignment.findByIdAndUpdate(assignment._id, {
-        $inc: { retakesGranted: 1 },
-        $set: {
-            status: "in-progress",
-            finalScore: null,
-            isPassed: null,
-            completedAt: null,
-        },
-    });
+  await ModuleAssignment.findByIdAndUpdate(assignment._id, {
+    $inc: { retakesGranted: 1 },
+    $set: {
+      status: "in-progress",
+      finalScore: null,
+      isPassed: null,
+      completedAt: null,
+    },
+  });
 
-    // Update module stats
-    await TrainingModule.findByIdAndUpdate(moduleId, {
-        $inc: { "stats.startedCount": 1 },
-    });
+  // Update module stats
+  await TrainingModule.findByIdAndUpdate(moduleId, {
+    $inc: { "stats.startedCount": 1 },
+  });
 
-    res.status(200).json({
-        success: true,
-        message: "Retake granted. Learner can now restart the module.",
-    });
+  res.status(200).json({
+    success: true,
+    message: "Retake granted. Learner can now restart the module.",
+  });
 });
 
 // ─── GET /progress/report ────────────────────────────────────────────────────
 // @desc  Manager/admin: get all progress across assignments they manage
 // @route GET /api/v1/progress/report
 exports.getProgressReport = asyncHandler(async (req, res, next) => {
-    const { moduleId, status, learnerId } = req.query;
+  const { moduleId, status, learnerId } = req.query;
 
-    const filter = {};
+  const filter = {};
 
-    // Managers see only their assignments; admins see all
-    if (req.user.role?.toLowerCase() === "manager") {
-        const myAssignments = await ModuleAssignment.find({
-            assignedBy: req.user._id,
-        }).select("_id");
-        filter.assignment = { $in: myAssignments.map((a) => a._id) };
-    }
+  // Managers see only their assignments; admins see all
+  if (req.user.role?.toLowerCase() === "manager") {
+    const myAssignments = await ModuleAssignment.find({
+      assignedBy: req.user._id,
+    }).select("_id");
+    filter.assignment = { $in: myAssignments.map((a) => a._id) };
+  }
 
-    if (moduleId && isValidId(moduleId)) filter.module = moduleId;
-    if (learnerId && isValidId(learnerId)) filter.learner = learnerId;
-    if (status) {
-        // status is a virtual — filter by stored fields
-        if (status === "passed") filter.isPassed = true;
-        else if (status === "failed")
-            Object.assign(filter, { isPassed: false, completedAt: { $ne: null } });
-        else if (status === "in-progress")
-            Object.assign(filter, {
-                completedAt: null,
-                "attempts.0": { $exists: true },
-            });
-        else if (status === "not-started")
-            Object.assign(filter, { attempts: { $size: 0 } });
-    }
+  if (moduleId && isValidId(moduleId)) filter.module = moduleId;
+  if (learnerId && isValidId(learnerId)) filter.learner = learnerId;
+  if (status) {
+    // status is a virtual — filter by stored fields
+    if (status === "passed") filter.isPassed = true;
+    else if (status === "failed")
+      Object.assign(filter, { isPassed: false, completedAt: { $ne: null } });
+    else if (status === "in-progress")
+      Object.assign(filter, {
+        completedAt: null,
+        "attempts.0": { $exists: true },
+      });
+    else if (status === "not-started")
+      Object.assign(filter, { attempts: { $size: 0 } });
+  }
 
-    const records = await TrainingLearnerProgress.find(filter)
-        .populate("learner", "name email")
-        .populate("module", "title uid")
-        .populate("assignment", "dueDate maxAttempts status")
-        .lean();
+  const records = await TrainingLearnerProgress.find(filter)
+    .populate("learner", "name email")
+    .populate("module", "title uid")
+    .populate("assignment", "dueDate maxAttempts status")
+    .lean();
 
-    // Attach virtual status manually since lean() strips virtuals
-    const enriched = records.map((r) => ({
-        ...r,
-        status: r.isPassed
-            ? "passed"
-            : r.completedAt
-                ? "failed"
-                : r.attempts?.length > 0
-                    ? "in-progress"
-                    : "not-started",
-    }));
+  // Attach virtual status manually since lean() strips virtuals
+  const enriched = records.map((r) => ({
+    ...r,
+    status: r.isPassed
+      ? "passed"
+      : r.completedAt
+        ? "failed"
+        : r.attempts?.length > 0
+          ? "in-progress"
+          : "not-started",
+  }));
 
-    res.status(200).json({
-        success: true,
-        count: enriched.length,
-        data: enriched,
-    });
+  res.status(200).json({
+    success: true,
+    count: enriched.length,
+    data: enriched,
+  });
 });
 
 // ─── GET /progress/:moduleId/learners ────────────────────────────────────────
 // @desc  Manager: get per-learner progress for a specific module
 // @route GET /api/v1/progress/:moduleId/learners
 exports.getModuleLearnerProgress = asyncHandler(async (req, res, next) => {
-    const { moduleId } = req.params;
+  const { moduleId } = req.params;
 
-    if (!isValidId(moduleId))
-        return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
 
-    const records = await TrainingLearnerProgress.find({ module: moduleId })
-        .populate("learner", "name email")
-        .lean();
+  const records = await TrainingLearnerProgress.find({ module: moduleId })
+    .populate("learner", "name email")
+    .lean();
 
-    const enriched = records.map((r) => ({
-        ...r,
-        status: r.isPassed
-            ? "passed"
-            : r.completedAt
-                ? "failed"
-                : r.attempts?.length > 0
-                    ? "in-progress"
-                    : "not-started",
-        correctCount: r.attempts?.filter((a) => a.isCorrect).length || 0,
-        totalAttempts: r.attempts?.length || 0,
-    }));
+  const enriched = records.map((r) => ({
+    ...r,
+    status: r.isPassed
+      ? "passed"
+      : r.completedAt
+        ? "failed"
+        : r.attempts?.length > 0
+          ? "in-progress"
+          : "not-started",
+    correctCount: r.attempts?.filter((a) => a.isCorrect).length || 0,
+    totalAttempts: r.attempts?.length || 0,
+  }));
 
-    res.status(200).json({ success: true, count: enriched.length, data: enriched });
+  res
+    .status(200)
+    .json({ success: true, count: enriched.length, data: enriched });
+});
+
+// ─── GET /progress/:moduleId/learners/:learnerId ─────────────────────────────
+// @desc  Manager/admin: part-wise progress + result for a specific learner
+// @route GET /api/v1/progress/:moduleId/learners/:learnerId
+exports.getLearnerPartProgress = asyncHandler(async (req, res, next) => {
+  const { moduleId, learnerId } = req.params;
+
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+  if (!isValidId(learnerId))
+    return next(new ErrorResponse("Invalid learner id", 400));
+
+  const progress = await TrainingLearnerProgress.findOne({
+    learner: learnerId,
+    module: moduleId,
+  })
+    .populate("learner", "name email")
+    .lean();
+
+  if (!progress) return res.status(200).json({ success: true, data: null });
+
+  const parts = await TrainingModulePart.find({ module: moduleId })
+    .sort({ order: 1 })
+    .select("_id title order")
+    .lean();
+
+  const currentAttempts = progress.attempts.filter(
+    (a) => a.attemptRound === progress.attemptRound,
+  );
+
+  const attemptsByPart = currentAttempts.reduce((acc, a) => {
+    const pid = String(a.part);
+    (acc[pid] = acc[pid] || []).push(a);
+    return acc;
+  }, {});
+
+  const watchByPart = (progress.watchRecords || []).reduce((acc, w) => {
+    acc[String(w.part)] = w;
+    return acc;
+  }, {});
+
+  const partResults = parts.map((part, index) => {
+    const pid = String(part._id);
+    const attempts = attemptsByPart[pid] || [];
+    const watch = watchByPart[pid] || null;
+
+    const earned = attempts.reduce((s, a) => s + (a.pointsEarned || 0), 0);
+    const possible = attempts.reduce((s, a) => s + (a.possiblePoints || 1), 0);
+    const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+
+    return {
+      part: part._id,
+      title: part.title,
+      order: part.order,
+      index,
+      attempted: attempts.length > 0,
+      correct: attempts.filter((a) => a.isCorrect).length,
+      total: attempts.length,
+      earned,
+      possible,
+      score,
+      passed: attempts.length > 0 && score >= progress.passThreshold,
+      watch: watch
+        ? {
+            watchedSeconds: watch.watchedSeconds,
+            watchPercent: watch.watchPercent,
+            completed: watch.completed,
+          }
+        : null,
+    };
+  });
+
+  const overallStatus = progress.isPassed
+    ? "passed"
+    : progress.completedAt
+      ? "failed"
+      : currentAttempts.length > 0
+        ? "in-progress"
+        : "not-started";
+
+  res.status(200).json({
+    success: true,
+    data: {
+      learner: progress.learner,
+      module: progress.module,
+      attemptRound: progress.attemptRound,
+      score: progress.score,
+      isPassed: progress.isPassed,
+      passThreshold: progress.passThreshold,
+      status: overallStatus,
+      startedAt: progress.startedAt,
+      completedAt: progress.completedAt,
+      partResults,
+    },
+  });
+});
+
+// ─── GET /progress/parts/:partId ─────────────────────────────────────────────
+// @desc  Learner: get my result for a single part (module resolved from part)
+// @route GET /api/v1/progress/parts/:partId
+exports.getMyPartProgress = asyncHandler(async (req, res, next) => {
+  const { partId } = req.params;
+
+  if (!isValidId(partId))
+    return next(new ErrorResponse("Invalid part id", 400));
+
+  const part = await TrainingModulePart.findById(partId);
+
+  if (!part) return next(new ErrorResponse("Part not found", 404));
+  // console.log(req.user);
+  const progress = await TrainingLearnerProgress.findOne({
+    learner: req.user._id,
+    module: part.module,
+  }).lean();
+
+  if (!progress) return res.status(200).json({ success: true, data: null });
+
+  const attempts = progress.attempts.filter(
+    (a) =>
+      String(a.part) === partId && a.attemptRound === progress.attemptRound,
+  );
+
+  const watch =
+    (progress.watchRecords || []).find((w) => String(w.part) === partId) ||
+    null;
+
+  const earned = attempts.reduce((s, a) => s + (a.pointsEarned || 0), 0);
+  const possible = attempts.reduce((s, a) => s + (a.possiblePoints || 1), 0);
+  const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+
+  res.status(200).json({
+    success: true,
+    data: {
+      ...jsonFormat(part),
+      learner: req.user._id,
+      results: {
+        attempted: attempts.length > 0,
+        correct: attempts.filter((a) => a.isCorrect).length,
+        total: attempts.length,
+        earned,
+        possible,
+        score,
+        passed: attempts.length > 0 && score >= progress.passThreshold,
+        watch: watch
+          ? {
+              watchedSeconds: watch.watchedSeconds,
+              watchPercent: watch.watchPercent,
+              completed: watch.completed,
+            }
+          : null,
+      },
+    },
+  });
 });
