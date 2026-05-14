@@ -46,7 +46,7 @@ async function findOrCreateProgress(learnerId, moduleId, assignmentId) {
 }
 
 // ─── GET /progress/:moduleId ─────────────────────────────────────────────────
-// @desc  Get my progress for a specific module (learner)
+// @desc  Get my progress for a specific module, including part-wise score/result
 // @route GET /api/v1/progress/:moduleId
 exports.getMyProgress = asyncHandler(async (req, res, next) => {
     const { moduleId } = req.params;
@@ -57,12 +57,69 @@ exports.getMyProgress = asyncHandler(async (req, res, next) => {
     const progress = await TrainingLearnerProgress.findOne({
         learner: req.user._id,
         module: moduleId,
-    });
+    }).lean();
 
     if (!progress)
-        return res.status(200).json({ success: true, data: null }); // not started yet
+        return res.status(200).json({ success: true, data: null });
 
-    res.status(200).json({ success: true, data: progress });
+    // Ordered parts for the module
+    const parts = await TrainingModulePart.find({ module: moduleId })
+        .sort({ order: 1 })
+        .select("_id title order")
+        .lean();
+
+    // Only current-round attempts
+    const currentAttempts = progress.attempts.filter(
+        (a) => a.attemptRound === progress.attemptRound
+    );
+
+    // Group attempts and watch records by part id
+    const attemptsByPart = currentAttempts.reduce((acc, a) => {
+        const pid = String(a.part);
+        (acc[pid] = acc[pid] || []).push(a);
+        return acc;
+    }, {});
+
+    const watchByPart = (progress.watchRecords || []).reduce((acc, w) => {
+        acc[String(w.part)] = w;
+        return acc;
+    }, {});
+
+    const partResults = parts.map((part, index) => {
+        const pid = String(part._id);
+        const attempts = attemptsByPart[pid] || [];
+        const watch = watchByPart[pid] || null;
+
+        const earned = attempts.reduce((s, a) => s + (a.pointsEarned || 0), 0);
+        const possible = attempts.reduce((s, a) => s + (a.possiblePoints || 1), 0);
+        const score = possible > 0 ? Math.round((earned / possible) * 100) : 0;
+
+        return {
+            part: part._id,
+            title: part.title,
+            order: part.order,
+            index,
+            attempted: attempts.length > 0,
+            correct: attempts.filter((a) => a.isCorrect).length,
+            total: attempts.length,
+            earned,
+            possible,
+            score,
+            passed: attempts.length > 0 && score >= progress.passThreshold,
+            watch: watch
+                ? {
+                      watchedSeconds: watch.watchedSeconds,
+                      watchPercent: watch.watchPercent,
+                      completed: watch.completed,
+                  }
+                : null,
+        };
+    });
+
+    res.status(200).json({
+        success: true,
+        data: { ...progress, partResults },
+    });
 });
 
 // ─── GET /progress ───────────────────────────────────────────────────────────

@@ -241,6 +241,8 @@ exports.getModule = asyncHandler(async (req, res, next) => {
   if (!isValidId(req.params.id))
     return next(new ErrorResponse("Invalid module id", 400));
 
+  console.log(req.params.id);
+
   const mod = await TrainingModule.findById(req.params.id);
 
   if (!mod) return next(new ErrorResponse("Module not found", 404));
