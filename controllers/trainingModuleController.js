@@ -48,6 +48,8 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
   if (!mod) return next(new ErrorResponse("Module not found", 404));
   const scopes = Array.isArray(req.body) ? req.body : [req.body];
 
+  console.log(scopes);
+
   const allRoles = await Roles.find({}).select("_id name").lean();
   const roleIdToName = {};
   const roleNameToId = {};
@@ -57,7 +59,7 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
   }
 
   const docs = scopes.map(({ client, branch, roles }) => ({
-    uid: `TMACSS_${new mongoose.Types.ObjectId()}`,
+    // uid: `TMACSS_${new mongoose.Types.ObjectId()}`,
     module: moduleId,
     client: client || null,
     branch: branch || null,
@@ -150,7 +152,7 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
 
           // only when creating
           $setOnInsert: {
-            uid: doc.uid,
+            uid: `MODASS_${new mongoose.Types.ObjectId()}`,
             module: doc.module,
             learner: doc.learner,
             status: "pending",
