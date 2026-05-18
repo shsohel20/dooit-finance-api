@@ -9,6 +9,7 @@ const {
     getAssignment,
     deleteAssignment,
     getAllAssignments,
+    getAssignmentsByModule,
     updateAssignmentStatus,
 } = require("../controllers/trainingAssignmentController");
 
@@ -30,6 +31,13 @@ router.get("/mine", getMyAssignments);
 
 router.get("/by-me", authorize("admin", "manager"), getAssignedByMe);
 router.get("/", authorize("admin", "manager"), getAllAssignments);
+
+// GET /api/v1/assignments/module/:moduleId → all assignments for a module
+router.get(
+    "/module/:moduleId",
+    authorize("admin", "manager"),
+    getAssignmentsByModule
+);
 
 router.post("/:moduleId/assign", authorize("admin", "manager"), assignModule);
 

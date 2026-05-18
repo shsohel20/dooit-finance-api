@@ -331,6 +331,79 @@ exports.getAllAssignments = asyncHandler(async (req, res, next) => {
     .json({ success: true, count: assignments.length, data: assignments });
 });
 
+// ─── GET /assignments/module/:moduleId ───────────────────────────────────────
+// @desc  Manager/Admin: all assignments for a given module, with learner progress
+// @route GET /api/v1/assignments/module/:moduleId
+exports.getAssignmentsByModule = asyncHandler(async (req, res, next) => {
+  const { moduleId } = req.params;
+  const { status } = req.query;
+
+  if (!isValidId(moduleId))
+    return next(new ErrorResponse("Invalid module id", 400));
+
+  const mod = await TrainingModule.findById(moduleId).select(
+    "title uid status stats",
+  );
+  if (!mod) return next(new ErrorResponse("Module not found", 404));
+
+  const filter = { module: moduleId };
+  if (status) filter.status = status;
+
+  // Managers can only see assignments they created
+  if (req.user.role?.toLowerCase() === "manager")
+    filter.assignedBy = req.user._id;
+
+  const assignments = await ModuleAssignment.find(filter)
+    .populate("learner", "name email")
+    .populate("assignedBy", "name email")
+    .lean();
+
+  // Enrich each record with live progress
+  const enriched = await Promise.all(
+    assignments.map(async (a) => {
+      const progress = await TrainingLearnerProgress.findOne({
+        learner: a.learner?._id,
+        module: moduleId,
+      })
+        .select(
+          "score isPassed completedAt currentPartIndex attemptRound attempts",
+        )
+        .lean();
+
+      const status = progress
+        ? progress.isPassed
+          ? "passed"
+          : progress.completedAt
+            ? "failed"
+            : progress.attempts?.length > 0
+              ? "in-progress"
+              : "not-started"
+        : "not-started";
+
+      return {
+        ...a,
+        progress: progress
+          ? {
+              score: progress.score,
+              isPassed: progress.isPassed,
+              completedAt: progress.completedAt,
+              currentPartIndex: progress.currentPartIndex,
+              attemptRound: progress.attemptRound,
+              status,
+            }
+          : null,
+      };
+    }),
+  );
+
+  res.status(200).json({
+    success: true,
+    module: mod,
+    count: enriched.length,
+    data: enriched,
+  });
+});
+
 // ─── PATCH /assignments/:id/status ───────────────────────────────────────────
 // @desc  Update assignment status (e.g., mark overdue via cron) — admin only
 // @route PATCH /api/v1/assignments/:id/status
