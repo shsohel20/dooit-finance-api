@@ -715,7 +715,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
           client,
           branch,
           type: safeType,
-          onboardingChannel: onboardingChannel || "",
+          onboardingChannel: onboardingChannel || "websdk",
           source,
           notes,
           active: true,
@@ -794,11 +794,18 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
     data: {
       url,
       customerId: customer._id,
+      token: plain,
       relationIndex: relIndex,
     },
     invite:
       process.env.NODE_ENV === "development"
-        ? { url, token: plain }
+        ? {
+          url,
+          token: plain,
+          customerId: customer._id,
+
+
+        }
         : undefined,
   });
 });
