@@ -18,6 +18,11 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { generateQR } = require("../utils/qrService");
 const { hashForSearch } = require("../utils/encryption");
+const { ensureSumsubApplicant } = require("../services/sumsubService");
+const {
+  findOrCreateJourney,
+  syncJourneyStatus,
+} = require("../services/journeyService");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -49,7 +54,7 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
   const customer = await Customer.findById(req.params.id).populate("user");
   if (!customer) {
     return next(
-      new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404)
+      new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404),
     );
   }
 
@@ -108,7 +113,7 @@ exports.createInviteOld = asyncHandler(async (req, res, next) => {
     if (!br) return next(new ErrorResponse("Branch not found", 404));
     if (br.client && br.client.toString() !== client.toString()) {
       return next(
-        new ErrorResponse("Branch does not belong to the client", 400)
+        new ErrorResponse("Branch does not belong to the client", 400),
       );
     }
   }
@@ -529,10 +534,24 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
 
   // ---------------------------
   // Find customer
+  // Pass 1: by linked User account
+  // Pass 2: by metadata (email / phone / client / branch) — catches customers
+  //         created from a previous anonymous invite with no User yet
   // ---------------------------
-  let customer = user
-    ? await Customer.findOne({ user: user._id })
-    : null;
+  let customer = user ? await Customer.findOne({ user: user._id }) : null;
+
+  if (!customer) {
+    const metaOr = [];
+    if (email) metaOr.push({ "metadata.email": email });
+    if (phone) metaOr.push({ "metadata.phone": phone });
+
+    if (metaOr.length > 0) {
+      const metaFilter = { $or: metaOr };
+      if (client) metaFilter["metadata.client"] = client;
+      if (branch) metaFilter["metadata.branch"] = branch;
+      customer = await Customer.findOne(metaFilter);
+    }
+  }
 
   // ---------------------------
   // Create customer if needed
@@ -563,16 +582,17 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
   // ---------------------------
   // 🔧 Repair old broken relations
   // ---------------------------
-  customer.relations.forEach(r => {
+  customer.relations.forEach((r) => {
     if (!r.type) r.type = "individual";
   });
 
   // ---------------------------
   // Ensure relation exists
   // ---------------------------
-  let relIndex = customer.relations.findIndex(r =>
-    r.client?.toString() === client.toString() &&
-    (branch ? r.branch?.toString() === branch.toString() : !r.branch)
+  let relIndex = customer.relations.findIndex(
+    (r) =>
+      r.client?.toString() === client.toString() &&
+      (branch ? r.branch?.toString() === branch.toString() : !r.branch),
   );
 
   if (relIndex === -1) {
@@ -604,12 +624,95 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
 
   await customer.save();
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sumsub applicant — idempotent creation
+  // Runs after invite is persisted so invite creation never fails due to
+  // a Sumsub API error. Result is included in the response for the caller.
+  //
+  // Decision tree (handled inside ensureSumsubApplicant):
+  //   1. sumsubApplicantId exists locally  → verify it's still alive in Sumsub
+  //   2. Not found locally                 → look up in Sumsub by externalUserId
+  //   3. Not found in Sumsub               → create new applicant
+  // ─────────────────────────────────────────────────────────────────────────
+  let sumsubResult = null;
+  let sumsubError = null;
+
+  try {
+    sumsubResult = await ensureSumsubApplicant(customer);
+  } catch (err) {
+    // Non-fatal — log and surface in response; invite is already saved
+    sumsubError = err.message;
+    console.error(
+      "[createInvite] Sumsub applicant creation failed:",
+      err.message,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Record journey_start step — creates/updates the OnboardingJourney so
+  // the invite + Sumsub applicant creation is tracked in the local DB.
+  // Non-fatal: a journey error must never fail the invite response.
+  // ─────────────────────────────────────────────────────────────────────────
+  let journeyId = null;
+  try {
+    const journey = await findOrCreateJourney({
+      customerId: customer._id,
+      clientId: client,
+      branchId: branch || null,
+      relationIndex: relIndex,
+      channel: onboardingChannel || "Mobile App",
+      provider: "sumsub",
+    });
+
+    const stepStatus = sumsubResult ? "approved" : "submitted";
+
+    journey.setStepStatus("journey_start", stepStatus, {
+      required: false, // tracking step — never blocks journey completion
+      bumpAttempt: false,
+      data: {
+        inviteMethod: "direct",
+        invitedBy: req.user?._id || null,
+        applicantId: sumsubResult?.applicantId || null,
+        inspectionId: sumsubResult?.inspectionId || null,
+        applicantCreated: sumsubResult?.created ?? null,
+        sumsubError: sumsubError || null,
+        at: new Date(),
+      },
+    });
+
+    journey.recordEvent({
+      step: "journey_start",
+      action: "invite_created",
+      status: stepStatus,
+      note: sumsubResult
+        ? `Applicant ${sumsubResult.created ? "created" : "found"} in Sumsub (${sumsubResult.applicantId})`
+        : `Invite created — Sumsub pending${sumsubError ? `: ${sumsubError}` : ""}`,
+      actor: req.user?._id || null,
+      actorRole: "staff",
+      payload: {
+        customerId: customer._id,
+        inviteMethod: "direct",
+        applicantId: sumsubResult?.applicantId || null,
+        applicantCreated: sumsubResult?.created ?? null,
+        sumsubError: sumsubError || undefined,
+      },
+    });
+
+    syncJourneyStatus(journey);
+    await journey.save();
+    journeyId = journey._id;
+  } catch (journeyErr) {
+    console.error(
+      "[createInvite] journey_start recording failed:",
+      journeyErr.message,
+    );
+  }
+
   // ---------------------------
   // Build invite URL
   // ---------------------------
   const INVITE_BASE =
-    process.env.CLIENT_INVITE_URL ||
-    "http://localhost:3000/accept-invite";
+    process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
 
   const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
 
@@ -648,6 +751,15 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
     data: {
       customerId: customer._id,
       relationIndex: relIndex,
+      journeyId: journeyId || null,
+      sumsub: sumsubResult
+        ? {
+            applicantId: sumsubResult.applicantId,
+            inspectionId: sumsubResult.inspectionId,
+            created: sumsubResult.created,
+          }
+        : null,
+      sumsubError: sumsubError || undefined,
     },
     invite:
       process.env.NODE_ENV === "development"
@@ -656,7 +768,6 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
   });
 });
 exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
-
   const {
     client,
     branch,
@@ -700,11 +811,27 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
 
   // ---------------------------
   // Find customer
+  // Pass 1: by linked User account
+  // Pass 2: by metadata (email / phone / client / branch) — catches customers
+  //         created from a previous anonymous QR invite with no User yet
   // ---------------------------
-  let customer = user
-    ? await Customer.findOne({ user: user._id })
-    : null;
+  let customer = user ? await Customer.findOne({ user: user._id }) : null;
 
+  if (!customer) {
+    const metaOr = [];
+    if (email) metaOr.push({ "metadata.email": email });
+    if (phone) metaOr.push({ "metadata.phone": phone });
+
+    if (metaOr.length > 0) {
+      const metaFilter = { $or: metaOr };
+      if (client) metaFilter["metadata.client"] = client;
+      if (branch) metaFilter["metadata.branch"] = branch;
+      customer = await Customer.findOne(metaFilter);
+    }
+  }
+  // return res.status(200).json({
+  //   customer,
+  // });
   // ---------------------------
   // Create customer if needed
   // ---------------------------
@@ -734,16 +861,17 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   // ---------------------------
   // 🔧 Repair old broken relations
   // ---------------------------
-  customer.relations.forEach(r => {
+  customer.relations.forEach((r) => {
     if (!r.type) r.type = "individual";
   });
 
   // ---------------------------
   // Ensure relation exists
   // ---------------------------
-  let relIndex = customer.relations.findIndex(r =>
-    r.client?.toString() === client.toString() &&
-    (branch ? r.branch?.toString() === branch.toString() : !r.branch)
+  let relIndex = customer.relations.findIndex(
+    (r) =>
+      r.client?.toString() === client.toString() &&
+      (branch ? r.branch?.toString() === branch.toString() : !r.branch),
   );
 
   if (relIndex === -1) {
@@ -775,15 +903,97 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
 
   await customer.save();
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Sumsub applicant — idempotent creation
+  // Runs after invite is persisted so invite creation never fails due to
+  // a Sumsub API error. Result is included in the response for the caller.
+  //
+  // Decision tree (handled inside ensureSumsubApplicant):
+  //   1. sumsubApplicantId exists locally  → verify it's still alive in Sumsub
+  //   2. Not found locally                 → look up in Sumsub by externalUserId
+  //   3. Not found in Sumsub               → create new applicant
+  // ─────────────────────────────────────────────────────────────────────────
+  let sumsubResult = null;
+  let sumsubError = null;
+
+  try {
+    sumsubResult = await ensureSumsubApplicant(customer);
+  } catch (err) {
+    // Non-fatal — log and surface in response; invite is already saved
+    sumsubError = err.message;
+    console.error(
+      "[createInviteFromQr] Sumsub applicant creation failed:",
+      err.message,
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Record journey_start step — creates/updates the OnboardingJourney so
+  // the QR invite + Sumsub applicant creation is tracked in the local DB.
+  // Non-fatal: a journey error must never fail the invite response.
+  // ─────────────────────────────────────────────────────────────────────────
+  let journeyId = null;
+  try {
+    const journey = await findOrCreateJourney({
+      customerId: customer._id,
+      clientId: client,
+      branchId: branch || null,
+      relationIndex: relIndex,
+      channel: onboardingChannel || "app",
+      provider: "sumsub",
+    });
+
+    const stepStatus = sumsubResult ? "approved" : "submitted";
+
+    journey.setStepStatus("journey_start", stepStatus, {
+      required: false, // tracking step — never blocks journey completion
+      bumpAttempt: false,
+      data: {
+        inviteMethod: "qr",
+        invitedBy: req.user?._id || null,
+        applicantId: sumsubResult?.applicantId || null,
+        inspectionId: sumsubResult?.inspectionId || null,
+        applicantCreated: sumsubResult?.created ?? null,
+        sumsubError: sumsubError || null,
+        at: new Date(),
+      },
+    });
+
+    journey.recordEvent({
+      step: "journey_start",
+      action: "invite_created",
+      status: stepStatus,
+      note: sumsubResult
+        ? `Applicant ${sumsubResult.created ? "created" : "found"} in Sumsub (${sumsubResult.applicantId})`
+        : `QR invite created — Sumsub pending${sumsubError ? `: ${sumsubError}` : ""}`,
+      actor: req.user?._id || null,
+      actorRole: "staff",
+      payload: {
+        customerId: customer._id,
+        inviteMethod: "qr",
+        applicantId: sumsubResult?.applicantId || null,
+        applicantCreated: sumsubResult?.created ?? null,
+        sumsubError: sumsubError || undefined,
+      },
+    });
+
+    syncJourneyStatus(journey);
+    await journey.save();
+    journeyId = journey._id;
+  } catch (journeyErr) {
+    console.error(
+      "[createInviteFromQr] journey_start recording failed:",
+      journeyErr.message,
+    );
+  }
+
   // ---------------------------
   // Build invite URL
   // ---------------------------
   const INVITE_BASE =
-    process.env.CLIENT_INVITE_URL ||
-    "http://localhost:3000/accept-invite";
+    process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
 
   const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
-
 
   // ---------------------------
   // Response
@@ -796,20 +1006,22 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
       customerId: customer._id,
       token: plain,
       relationIndex: relIndex,
+      journeyId: journeyId || null,
+      sumsub: sumsubResult
+        ? {
+            applicantId: sumsubResult.applicantId,
+            inspectionId: sumsubResult.inspectionId,
+            created: sumsubResult.created,
+          }
+        : null,
+      sumsubError: sumsubError || undefined,
     },
     invite:
       process.env.NODE_ENV === "development"
-        ? {
-          url,
-          token: plain,
-          customerId: customer._id,
-
-
-        }
+        ? { url, token: plain, customerId: customer._id }
         : undefined,
   });
 });
-
 
 // GET /api/v1/invites/validate?token=...&cid=...
 exports.validateInviteOld = asyncHandler(async (req, res, next) => {
@@ -895,7 +1107,7 @@ exports.validateInvite = asyncHandler(async (req, res, next) => {
   const relMatch = customer.findRelationByHashedToken(hashed);
   if (!relMatch) {
     return next(
-      new ErrorResponse("Invalid invite token for this customer", 400)
+      new ErrorResponse("Invalid invite token for this customer", 400),
     );
   }
   const { relation, index } = relMatch;
@@ -964,7 +1176,7 @@ async function upsertPersonalKyc(customer, incomingPersonalKyc) {
   customer.personalKyc = Object.assign(
     {},
     customer.personalKyc || {},
-    incomingPersonalKyc
+    incomingPersonalKyc,
   );
   return true;
 }
@@ -989,7 +1201,7 @@ exports.acceptInvitePersonalOld = asyncHandler(async (req, res, next) => {
     if (!customer) return next(new ErrorResponse("Customer not found", 404));
     if (!customer.inviteToken || customer.inviteToken !== hashed)
       return next(
-        new ErrorResponse("Invalid invite token for this customer", 400)
+        new ErrorResponse("Invalid invite token for this customer", 400),
       );
   } else {
     customer = await Customer.findOne({ inviteToken: hashed });
@@ -1149,7 +1361,7 @@ async function upsertEntityModel(
   payload,
   customerId,
   clientId,
-  branchId
+  branchId,
 ) {
   if (!payload || Object.keys(payload).length === 0) {
     // return existing if any
@@ -1204,7 +1416,7 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
     if (!customer) return next(new ErrorResponse("Customer not found", 404));
     if (!customer.inviteToken || customer.inviteToken !== hashed)
       return next(
-        new ErrorResponse("Invalid invite token for this customer", 400)
+        new ErrorResponse("Invalid invite token for this customer", 400),
       );
   } else {
     customer = await Customer.findOne({ inviteToken: hashed });
@@ -1242,7 +1454,7 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
       kyc,
       customer._id,
       clientId,
-      branchId
+      branchId,
     );
   } else if (requestedType === "trust") {
     createdKycDoc = await upsertEntityModel(
@@ -1250,11 +1462,11 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
       kyc,
       customer._id,
       clientId,
-      branchId
+      branchId,
     );
   } else if (
     ["partnership", "government_body", "association", "cooperative"].includes(
-      requestedType
+      requestedType,
     )
   ) {
     createdKycDoc = await upsertEntityModel(
@@ -1262,7 +1474,7 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
       kyc,
       customer._id,
       clientId,
-      branchId
+      branchId,
     );
   } else {
     return next(new ErrorResponse("Unsupported requestedType", 400));
@@ -1289,7 +1501,7 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
     customer.kycHistory.push({
       status: "pending",
       note: `Processed entity KYC input for type ${requestedType}; missing: ${missing.join(
-        ", "
+        ", ",
       )}`,
       changedBy: user._id,
       changedAt: Date.now(),
@@ -1404,7 +1616,7 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
         kyc,
         customer._id,
         clientId,
-        branchId
+        branchId,
       );
     } else if (requestedType === "trust") {
       createdKycDoc = await upsertEntityModel(
@@ -1412,11 +1624,11 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
         kyc,
         customer._id,
         clientId,
-        branchId
+        branchId,
       );
     } else if (
       ["partnership", "government_body", "association", "cooperative"].includes(
-        requestedType
+        requestedType,
       )
     ) {
       createdKycDoc = await upsertEntityModel(
@@ -1424,7 +1636,7 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
         kyc,
         customer._id,
         clientId,
-        branchId
+        branchId,
       );
     } else {
       return next(new ErrorResponse("Unsupported requestedType", 400));
@@ -1466,7 +1678,7 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
     customer.kycHistory.push({
       status: "pending",
       note: `Entity KYC input processed for type ${requestedType}; missing: ${missing.join(
-        ", "
+        ", ",
       )}`,
       changedBy: user._id,
       changedAt: Date.now(),
@@ -1598,12 +1810,12 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
 
       if (!clientDoc) {
         return next(
-          new ErrorResponse(`Client Not found, please check client name`, 404)
+          new ErrorResponse(`Client Not found, please check client name`, 404),
         );
       }
       if (body.branchName && !branchDoc) {
         return next(
-          new ErrorResponse(`Branch Not found, please check client name`, 404)
+          new ErrorResponse(`Branch Not found, please check client name`, 404),
         );
       }
 
@@ -1611,9 +1823,11 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const userPayload = {
         name:
           body.name ||
-          `${body.personalKyc?.personal_form?.customer_details?.given_name || ""
-            } ${body.personalKyc?.personal_form?.customer_details?.surname || ""
-            }`.trim() ||
+          `${
+            body.personalKyc?.personal_form?.customer_details?.given_name || ""
+          } ${
+            body.personalKyc?.personal_form?.customer_details?.surname || ""
+          }`.trim() ||
           body.userName ||
           "Unnamed",
         userName: body.userName,
@@ -1625,7 +1839,10 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
 
       // Try find existing user by email or userName
       const existingUser = await User.findOne({
-        $or: [{ emailHash: hashForSearch(userPayload.email) }, { userName: userPayload.userName }],
+        $or: [
+          { emailHash: hashForSearch(userPayload.email) },
+          { userName: userPayload.userName },
+        ],
       }).session(session);
 
       if (existingUser) {
@@ -1644,17 +1861,17 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const relationCandidate =
         clientDoc || branchDoc
           ? {
-            client: clientDoc ? clientDoc._id : undefined,
-            branch: branchDoc ? branchDoc._id : undefined,
-            type: requestedType,
-            onboardingChannel: body.onboardingChannel || "API",
-            registeredAt: body.registeredAt
-              ? new Date(body.registeredAt)
-              : new Date(),
-            source: body.source || "api",
-            notes: body.notes || "",
-            active: true,
-          }
+              client: clientDoc ? clientDoc._id : undefined,
+              branch: branchDoc ? branchDoc._id : undefined,
+              type: requestedType,
+              onboardingChannel: body.onboardingChannel || "API",
+              registeredAt: body.registeredAt
+                ? new Date(body.registeredAt)
+                : new Date(),
+              source: body.source || "api",
+              notes: body.notes || "",
+              active: true,
+            }
           : null;
 
       // 4) Create or update Customer
@@ -1727,7 +1944,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
         if (!createdCustomer || !createdCustomer._id) {
           throw new ErrorResponse(
             "Customer creation failed before KYC creation",
-            500
+            500,
           );
         }
 
@@ -1794,7 +2011,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           const result = await findOrUpdateKyc(
             CompanyKyc,
             findQuery,
-            compPayload
+            compPayload,
           );
           createdKyc.push({
             type: "CompanyKyc",
@@ -1847,7 +2064,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           const result = await findOrUpdateKyc(
             TrustKyc,
             findQuery,
-            trustPayload
+            trustPayload,
           );
           createdKyc.push({
             type: "TrustKyc",
@@ -1890,7 +2107,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
           const result = await findOrUpdateKyc(
             NonIndividualKyc,
             findQuery,
-            nonIndPayload
+            nonIndPayload,
           );
           createdKyc.push({
             type: "NonIndividualKyc",
@@ -1953,7 +2170,6 @@ function escapeRegExp(string) {
 function escapeRegExp(string) {
   return String(string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
-
 
 ///Company Controller:
 
@@ -2064,7 +2280,10 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
 
   if (!doc) {
     return next(
-      new ErrorResponse(`CompanyKyc not found for identifier: ${identifier}`, 404)
+      new ErrorResponse(
+        `CompanyKyc not found for identifier: ${identifier}`,
+        404,
+      ),
     );
   }
 
@@ -2073,7 +2292,6 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
     data: doc,
   });
 });
-
 
 ///For Trust:
 
@@ -2106,15 +2324,13 @@ exports.getTrustKycs = asyncHandler(async (req, res, next) => {
 
   // Trust registration filters
   if (reg) {
-    filter[
-      "trust_details.trust_type.unregulated_trust.registration_number"
-    ] = String(reg).trim();
+    filter["trust_details.trust_type.unregulated_trust.registration_number"] =
+      String(reg).trim();
   }
 
   if (abn) {
-    filter[
-      "trust_details.trust_type.self_managed_super_fund.abn"
-    ] = String(abn).trim();
+    filter["trust_details.trust_type.self_managed_super_fund.abn"] =
+      String(abn).trim();
   }
 
   // search by trust name
@@ -2196,8 +2412,8 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(
         `TrustKyc not found for identifier: ${identifier}`,
-        404
-      )
+        404,
+      ),
     );
   }
 
@@ -2207,17 +2423,17 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
   });
 });
 
-
-///For Non individual by Type 
+///For Non individual by Type
 exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
-
   function buildNonIndividualTypeFilter(type) {
     switch (type) {
       case "partnership":
         return { "partnership.partnership_type": { $exists: true, $ne: null } };
 
       case "government_body":
-        return { "government_body.government_body_type": { $exists: true, $ne: null } };
+        return {
+          "government_body.government_body_type": { $exists: true, $ne: null },
+        };
 
       case "association":
       case "cooperative":
@@ -2272,7 +2488,7 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
 
   const total = await NonIndividualKyc.countDocuments(filter);
   const pages = Math.ceil(total / qLimit);
-  console.log(filter)
+  console.log(filter);
   const docs = await NonIndividualKyc.find(filter)
     .sort(sort)
     .skip(skip)
@@ -2288,7 +2504,6 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
     data: docs,
   });
 });
-
 
 exports.downloadQR = asyncHandler(async (req, res, next) => {
   const { format = "png" } = req.query;
@@ -2319,7 +2534,7 @@ exports.downloadQR = asyncHandler(async (req, res, next) => {
     res.setHeader("Content-Type", "image/svg+xml");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=qr-${branchId || clientId}.svg`
+      `attachment; filename=qr-${branchId || clientId}.svg`,
     );
     return res.send(qr);
   }
@@ -2328,7 +2543,7 @@ exports.downloadQR = asyncHandler(async (req, res, next) => {
   res.setHeader("Content-Type", "image/png");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename=qr-${branchId || clientId}.png`
+    `attachment; filename=qr-${branchId || clientId}.png`,
   );
 
   return res.send(qr);

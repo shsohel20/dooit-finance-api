@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const { Schema } = mongoose;
 
 const STEP_TYPES = [
+  "journey_start",
   "personal_form",
   "id_document",
   "selfie",
@@ -45,7 +46,7 @@ const StepDocumentSchema = new Schema(
     size: Number,
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const StepSchema = new Schema(
@@ -62,7 +63,7 @@ const StepSchema = new Schema(
     completedAt: Date,
     rejectionReason: String,
   },
-  { _id: false }
+  { _id: false },
 );
 
 const EventSchema = new Schema(
@@ -78,7 +79,7 @@ const EventSchema = new Schema(
     userAgent: String,
     at: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const OnboardingJourneySchema = new Schema(
@@ -130,12 +131,12 @@ const OnboardingJourneySchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 OnboardingJourneySchema.index(
   { customer: 1, client: 1, branch: 1 },
-  { unique: true, sparse: true, name: "journey_relation_unique" }
+  { unique: true, sparse: true, name: "journey_relation_unique" },
 );
 
 OnboardingJourneySchema.methods.recordEvent = function (event = {}) {
@@ -146,7 +147,7 @@ OnboardingJourneySchema.methods.recordEvent = function (event = {}) {
 OnboardingJourneySchema.methods.setStepStatus = function (
   stepType,
   status,
-  extra = {}
+  extra = {},
 ) {
   let step = this.steps.find((s) => s.type === stepType);
   const now = new Date();
@@ -190,7 +191,4 @@ OnboardingJourneySchema.statics.STEP_TYPES = STEP_TYPES;
 OnboardingJourneySchema.statics.STEP_STATUSES = STEP_STATUSES;
 OnboardingJourneySchema.statics.JOURNEY_STATUSES = JOURNEY_STATUSES;
 
-module.exports = mongoose.model(
-  "OnboardingJourney",
-  OnboardingJourneySchema
-);
+module.exports = mongoose.model("OnboardingJourney", OnboardingJourneySchema);
