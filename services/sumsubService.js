@@ -19,7 +19,7 @@ const Customer = require("../models/Customer");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { hashToken } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
-const { sumsubPost, sumsubGet } = require("../utils/sumsubClient");
+const { sumsubPost, sumsubGet, sumsubPatch } = require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 const { syncJourneyStatus } = require("./journeyService");
 
@@ -424,13 +424,192 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 7. requestPendingReview  — move applicant → "pending" (triggers Sumsub AI check)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Submit a Sumsub applicant for AI verification (move to pending status).
+ * Idempotent — Sumsub returns 409 when the applicant is already pending/queued.
+ *
+ * @param {string}      applicantId
+ * @param {string|null} reason      — optional rejection/re-submission reason
+ * @returns {Promise<{ status: number, data: object }>}
+ */
+const requestPendingReview = async (applicantId, reason) => {
+  const reasonParam = reason
+    ? `?reason=${encodeURIComponent(reason)}`
+    : "";
+  return sumsubPost(
+    `/resources/applicants/${applicantId}/status/pending${reasonParam}`,
+    {},
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 8. getApplicant  — fetch full applicant record from Sumsub
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the full Sumsub applicant object (review status, review result, docs…).
+ *
+ * @param {string} applicantId
+ * @returns {Promise<{ status: number, data: object }>}
+ */
+const getApplicant = async (applicantId) =>
+  sumsubGet(`/resources/applicants/${applicantId}/one`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 9. syncApplicantFromOcr  — background PATCH /info + /fixedInfo with retries
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Pause execution for `ms` milliseconds. */
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Retry `fn` up to `maxAttempts` times with exponential back-off.
+ * Retries on network errors and on upstream 5xx / 429 responses.
+ * Returns the last { status, data } result even when the final attempt fails.
+ *
+ * @param {() => Promise<{status:number,data:object}>} fn
+ * @param {number} maxAttempts
+ * @param {number} baseDelayMs  — first delay; doubles each retry (2 s → 4 s → 8 s)
+ */
+const withRetry = async (fn, maxAttempts = 3, baseDelayMs = 2_000) => {
+  let last;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      last = await fn();
+      // Don't retry on clean 4xx (client error) — only on 5xx / 429 / network
+      if (last.status < 500 && last.status !== 429) return last;
+    } catch (err) {
+      last = { status: 0, data: { description: err.message } };
+    }
+    if (attempt < maxAttempts) {
+      await sleep(baseDelayMs * 2 ** (attempt - 1)); // 2 s, 4 s, 8 s …
+    }
+  }
+  return last;
+};
+
+/**
+ * Map OCR fields → Sumsub /info (and /fixedInfo) body.
+ * Only non-null, mappable fields are included.
+ *
+ * OCR source fields used:
+ *   full_name       → firstName + lastName  (split on last whitespace token)
+ *   date_of_birth   → dob  (parses "31 Dec 1990" → "1990-12-31")
+ *   issuing_country → country  (any format → alpha-3 via toAlpha3)
+ *   nationality     → nationality  (alpha-3)
+ *   sex             → gender  ("M"/"Male" → "M", "F"/"Female" → "F")
+ *   place_of_birth  → placeOfBirth
+ *
+ * @param {Object} f — OCR fields object
+ * @returns {Object} — Sumsub-compatible payload (empty object if nothing to send)
+ */
+const buildInfoPayloadFromOcr = (f = {}) => {
+  // ── Name ──────────────────────────────────────────────────────────────────
+  const fullName = (f.full_name || "").trim();
+  let firstName = null,
+    lastName = null;
+  if (fullName) {
+    const parts = fullName.split(/\s+/);
+    lastName = parts.length > 1 ? parts.pop() : null;
+    firstName = parts.join(" ") || null;
+  }
+
+  // ── Date of birth ─────────────────────────────────────────────────────────
+  // OCR returns e.g. "31 Dec 1990" — need ISO "1990-12-31"
+  let dob = null;
+  if (f.date_of_birth) {
+    const parsed = new Date(f.date_of_birth);
+    if (!isNaN(parsed.getTime())) {
+      dob = parsed.toISOString().split("T")[0];
+    }
+  }
+
+  // ── Country / nationality ─────────────────────────────────────────────────
+  const country = f.issuing_country ? toAlpha3(f.issuing_country) : null;
+  const nationality = f.nationality ? toAlpha3(f.nationality) : null;
+
+  // ── Gender ────────────────────────────────────────────────────────────────
+  let gender = null;
+  const sexRaw = (f.sex || "").trim().toUpperCase();
+  if (sexRaw === "M" || sexRaw === "MALE") gender = "M";
+  else if (sexRaw === "F" || sexRaw === "FEMALE") gender = "F";
+
+  // ── Place of birth ────────────────────────────────────────────────────────
+  const placeOfBirth = f.place_of_birth || null;
+
+  // ── Build payload — omit null / undefined ─────────────────────────────────
+  const payload = {};
+  if (firstName) payload.firstName = firstName;
+  if (lastName) payload.lastName = lastName;
+  if (dob) payload.dob = dob;
+  if (country) payload.country = country;
+  if (nationality) payload.nationality = nationality;
+  if (gender) payload.gender = gender;
+  if (placeOfBirth) payload.placeOfBirth = placeOfBirth;
+
+  return payload;
+};
+
+/**
+ * Push OCR-extracted data to Sumsub — fire-and-forget, non-blocking.
+ *
+ * Calls two endpoints in parallel:
+ *   PATCH /resources/applicants/{id}/info      — extracted document data
+ *   PATCH /resources/applicants/{id}/fixedInfo — asserted applicant data
+ *
+ * Each call is retried up to 3 times (2 s / 4 s / 8 s back-off).
+ * Errors are logged but never propagated — the OCR response has already
+ * been returned to the client before this runs.
+ *
+ * @param {string} applicantId  — Sumsub applicant ID
+ * @param {Object} ocrFields    — merged OCR fields from ocrPayload.fields
+ */
+const syncApplicantFromOcr = (applicantId, ocrFields) => {
+  if (!applicantId || !ocrFields) return;
+
+  const payload = buildInfoPayloadFromOcr(ocrFields);
+  if (!Object.keys(payload).length) {
+    console.log("[SumsubSync] No mappable OCR fields — skipping sync");
+    return;
+  }
+
+  const TAG = "[SumsubSync]";
+  const base = `/resources/applicants/${applicantId}`;
+
+  const patch = async (endpoint, label) => {
+    const { status, data } = await withRetry(
+      () => sumsubPatch(`${base}/${endpoint}`, payload),
+    );
+    if (status >= 400) {
+      console.error(
+        `${TAG} ${label} failed (${status}):`,
+        data?.description || data?.message || JSON.stringify(data),
+      );
+    } else {
+      console.log(`${TAG} ${label} synced (${status})`);
+    }
+  };
+
+  // Both PATCHes in parallel — fire-and-forget
+  Promise.all([patch("info", "info"), patch("fixedInfo", "fixedInfo")]).catch(
+    (err) => console.error(`${TAG} unexpected error:`, err.message),
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 module.exports = {
   resolveCustomerByToken,
   buildApplicantPayload,
   ensureSumsubApplicant,
+  requestPendingReview,
+  getApplicant,
   triggerAmlCheck,
   handleKycResult,
   handleAmlResult,
+  syncApplicantFromOcr,
 };

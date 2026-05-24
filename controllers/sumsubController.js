@@ -23,13 +23,15 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 
 const Customer = require("../models/Customer");
-const { sumsubGet, sumsubPost, sumsubPostForm, downloadBuffer, buildDocFormData } =
+const { sumsubGet, sumsubPostForm, downloadBuffer, buildDocFormData } =
   require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 
 const {
   resolveCustomerByToken,
   ensureSumsubApplicant,
+  requestPendingReview,
+  getApplicant,
   triggerAmlCheck,
   handleKycResult,
   handleAmlResult,
@@ -277,10 +279,9 @@ exports.requestCheck = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No Sumsub applicant. Call /sumsub/applicant first.", 400));
   }
 
-  const reasonParam = reason ? `?reason=${encodeURIComponent(reason)}` : "";
-  const { status, data } = await sumsubPost(
-    `/resources/applicants/${customer.sumsubApplicantId}/status/pending${reasonParam}`,
-    {},
+  const { status, data } = await requestPendingReview(
+    customer.sumsubApplicantId,
+    reason,
   );
 
   // 409 = already pending/queued — idempotent, treat as success
@@ -344,9 +345,7 @@ exports.getApplicantStatus = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No Sumsub applicant for this customer", 404));
   }
 
-  const { status, data } = await sumsubGet(
-    `/resources/applicants/${customer.sumsubApplicantId}/one`,
-  );
+  const { status, data } = await getApplicant(customer.sumsubApplicantId);
 
   if (status >= 400) {
     return next(

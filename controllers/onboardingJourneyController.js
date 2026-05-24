@@ -15,7 +15,10 @@ const {
   findOrCreateJourney,
   syncJourneyStatus,
   sanitizeDocuments,
+  postJourneyStepBackground,
 } = require("../services/journeyService");
+
+const { syncApplicantFromOcr } = require("../services/sumsubService");
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const { fetchImageAsBase64, fetchImageData } = require("../utils/imageUtils");
@@ -118,6 +121,55 @@ exports.postJourneyStep = asyncHandler(async (req, res, next) => {
       relationIndex,
       step: updatedStep,
     },
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @desc    Post an onboarding step — background / fire-and-forget variant
+// @route   POST /api/v1/onboarding-journey/background
+// @access  Public (relation invite token)
+//
+// Identical request body to POST /onboarding-journey.
+// Returns 202 Accepted immediately; the step is recorded asynchronously.
+// The client does NOT need to wait for the journey write to complete.
+// Errors are logged server-side and never propagated to the caller.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.postJourneyStepBg = asyncHandler(async (req, res) => {
+  const {
+    token,
+    step,
+    status = "submitted",
+    data,
+    documents,
+    note,
+    rejectionReason,
+    bumpAttempt = true,
+    action,
+    provider,
+    providerRef,
+  } = req.body || {};
+
+  // ── Respond immediately — 202 Accepted ────────────────────────────────────
+  res.status(202).json({
+    success: true,
+    message: `Step "${step}" accepted — processing in background`,
+  });
+
+  // ── Fire-and-forget ────────────────────────────────────────────────────────
+  // postJourneyStepBackground never throws; it logs and returns { success, error }.
+  postJourneyStepBackground({
+    token,
+    step,
+    status,
+    data,
+    documents,
+    note,
+    rejectionReason,
+    bumpAttempt,
+    action,
+    provider,
+    providerRef,
+    actorId: req.user?._id || null,
   });
 });
 
@@ -869,6 +921,13 @@ exports.ocrDocument = asyncHandler(async (req, res, next) => {
   syncJourneyStatus(journey);
   await journey.save();
 
+  // ── Push OCR data to Sumsub in background (non-blocking, with retries) ────
+  // Fires after the journey is saved so the response is never delayed.
+  // syncApplicantFromOcr only sends non-null mappable fields.
+  if (allSucceeded && customer.sumsubApplicantId) {
+    syncApplicantFromOcr(customer.sumsubApplicantId, ocrPayload.fields);
+  }
+
   const httpStatus = stepStatus === "rejected" ? 400 : 200;
   return res.status(httpStatus).json({
     success: stepStatus !== "rejected",
@@ -880,15 +939,15 @@ exports.ocrDocument = asyncHandler(async (req, res, next) => {
           ? "Document OCR completed successfully"
           : "Document OCR partially processed — pending review",
     data: {
-      journeyId: journey._id,
-      journeyStatus: journey.status,
-      relationIndex,
-      step: updatedStep,
+      //   journeyId: journey._id,
+      //  journeyStatus: journey.status,
+      //   relationIndex,
+      //   step: updatedStep,
       ocr: {
         cardType: ocrPayload.cardType,
         detectedType: ocrPayload.detectedType,
         fields: ocrPayload.fields,
-        parts: ocrPayload.parts,
+        //  parts: ocrPayload.parts,
         errors: ocrErrors.length ? ocrErrors : undefined,
         docCount: validDocs.length,
         succeeded: ocrResults.filter((r) => r.data?.success).length,

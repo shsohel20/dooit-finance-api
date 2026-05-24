@@ -64,6 +64,20 @@ const normalise = (response) => ({
   headers: response.headers,
 });
 
+// ── JSON PATCH ────────────────────────────────────────────────────────────────
+const sumsubPatch = async (path, body = {}) => {
+  const bodyStr = JSON.stringify(body);
+  const response = await axios.patch(`${SUMSUB_BASE_URL}${path}`, body, {
+    headers: {
+      ...buildHeaders("PATCH", path, bodyStr),
+      "Content-Type": "application/json",
+    },
+    validateStatus: () => true,
+    timeout: 30_000,
+  });
+  return normalise(response);
+};
+
 // ── JSON POST ─────────────────────────────────────────────────────────────────
 const sumsubPost = async (path, body = {}) => {
   const bodyStr = JSON.stringify(body);
@@ -164,6 +178,7 @@ const buildDocFormData = (metadata, imageBuffer, mimeType, filename) => {
 };
 
 module.exports = {
+  sumsubPatch,
   sumsubPost,
   sumsubGet,
   sumsubPostForm,

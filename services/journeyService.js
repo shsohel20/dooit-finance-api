@@ -18,6 +18,7 @@
 const path = require("path");
 const mime = require("mime-types");
 const OnboardingJourney = require("../models/OnboardingJourney");
+const { STEP_TYPES, STEP_STATUSES } = OnboardingJourney;
 const Customer = require("../models/Customer");
 const { hashToken } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
@@ -258,6 +259,145 @@ const writeJourneyStep = async (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// postJourneyStepBackground — headless clone of the postJourneyStep controller
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Record a journey step without an HTTP context (no req / res / next).
+ * Use for background jobs, internal service calls, and post-processing hooks.
+ *
+ * ── Two ways to supply the customer context ──────────────────────────────────
+ *
+ *   1. Token-based (mirrors the HTTP handler exactly):
+ *        await postJourneyStepBackground({ token, step, status, ... })
+ *
+ *   2. Pre-resolved (when the caller already has the customer document):
+ *        await postJourneyStepBackground({
+ *          customer, clientId, branchId, relationIndex,
+ *          step, status, ...
+ *        })
+ *      Skips token look-up — use this when called from another service that
+ *      already has the customer in scope (e.g. after OCR / liveness).
+ *
+ * ── Return value ─────────────────────────────────────────────────────────────
+ *   { success: true,  journey, step: updatedStep }   — on success
+ *   { success: false, error: string }                 — on any failure
+ *   Never throws — errors are logged and returned.
+ *
+ * @param {Object}  params
+ * @param {string}  [params.token]           — invite token (context option 1)
+ * @param {Object}  [params.customer]        — pre-resolved Customer doc (option 2)
+ * @param {*}       [params.clientId]        — required with pre-resolved customer
+ * @param {*}       [params.branchId]        — optional branch
+ * @param {number}  [params.relationIndex=0]
+ * @param {string}  params.step              — step type (STEP_TYPES)
+ * @param {string}  [params.status='submitted']
+ * @param {Object}  [params.data]
+ * @param {Array}   [params.documents]
+ * @param {string}  [params.note]
+ * @param {string}  [params.rejectionReason]
+ * @param {boolean} [params.bumpAttempt=true]
+ * @param {string}  [params.action]          — event action label
+ * @param {string}  [params.provider='internal']
+ * @param {string}  [params.providerRef]
+ * @param {*}       [params.actorId]         — actor for the event log
+ */
+const postJourneyStepBackground = async ({
+  // Context — token OR pre-resolved customer
+  token,
+  customer: resolvedCustomer,
+  clientId: resolvedClientId,
+  branchId: resolvedBranchId,
+  relationIndex: resolvedRelationIndex,
+  // Step params (mirrors HTTP handler)
+  step,
+  status = "submitted",
+  data,
+  documents,
+  note,
+  rejectionReason,
+  bumpAttempt = true,
+  action,
+  provider,
+  providerRef,
+  actorId,
+} = {}) => {
+  try {
+    // ── Validate ────────────────────────────────────────────────────────────
+    if (!step) throw new Error("step is required");
+    if (!STEP_TYPES.includes(step))
+      throw new Error(`Invalid step "${step}". Allowed: ${STEP_TYPES.join(", ")}`);
+    if (!STEP_STATUSES.includes(status))
+      throw new Error(`Invalid status "${status}". Allowed: ${STEP_STATUSES.join(", ")}`);
+
+    // ── Resolve customer context ─────────────────────────────────────────────
+    let customer, clientId, branchId, relationIndex;
+
+    if (resolvedCustomer) {
+      // Option 2 — pre-resolved; skip DB look-up
+      customer = resolvedCustomer;
+      clientId = resolvedClientId;
+      branchId = resolvedBranchId ?? null;
+      relationIndex = resolvedRelationIndex ?? 0;
+    } else {
+      // Option 1 — resolve from invite token (same as HTTP handler)
+      const resolved = await resolveInvite(token);
+      if (resolved.error) {
+        return { success: false, error: resolved.error.message };
+      }
+      customer = resolved.customer;
+      clientId = resolved.relation.client;
+      branchId = resolved.relation.branch ?? null;
+      relationIndex = resolved.relationIndex;
+    }
+
+    // ── Journey ─────────────────────────────────────────────────────────────
+    const journey = await findOrCreateJourney({
+      customerId: customer._id,
+      clientId,
+      branchId,
+      relationIndex,
+      channel: "Mobile App",
+      provider: provider || "internal",
+    });
+
+    if (journey.isNew && providerRef) {
+      journey.providerRef = providerRef;
+    }
+
+    // ── Step + event (identical to HTTP handler) ────────────────────────────
+    const updatedStep = journey.setStepStatus(step, status, {
+      data,
+      documents: sanitizeDocuments(documents),
+      rejectionReason,
+      bumpAttempt,
+    });
+
+    journey.recordEvent({
+      step,
+      action: action || "step_submitted",
+      status,
+      note: note || "",
+      actor: actorId || customer.user || null,
+      actorRole: "customer",
+      payload: {
+        customerId: customer._id,
+        hasData: !!data,
+        docCount: Array.isArray(documents) ? documents.length : 0,
+      },
+    });
+
+    syncJourneyStatus(journey);
+    await journey.save();
+
+    return { success: true, journey, step: updatedStep };
+  } catch (err) {
+    console.error("[JourneyBg] postJourneyStepBackground failed:", err.message);
+    return { success: false, error: err.message };
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 module.exports = {
@@ -267,4 +407,5 @@ module.exports = {
   findOrCreateJourney,
   syncJourneyStatus,
   writeJourneyStep,
+  postJourneyStepBackground,
 };

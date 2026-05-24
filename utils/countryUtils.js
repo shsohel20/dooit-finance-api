@@ -20,7 +20,7 @@
  */
 "use strict";
 
-const countries = require("../data/countries-alpha3.json");
+const countries = require("../_data/countries-alpha3.json");
 
 // ── Build lookup maps once at module load ────────────────────────────────────
 // Map: normalised string → country object

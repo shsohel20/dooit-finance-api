@@ -1,6 +1,7 @@
 const express = require("express");
 const {
   postJourneyStep,
+  postJourneyStepBg,
   getJourneyByCustomer,
   reviewJourneyStep,
   livenessDetection,
@@ -14,6 +15,9 @@ router.use(express.json({ limit: "15mb" }));
 
 // Public: customer posts every onboarding step here using their relation invite token
 router.post("/", protect, postJourneyStep);
+
+// Public: same as POST / but responds 202 immediately — step is written in background
+router.post("/background", protect, postJourneyStepBg);
 
 // Public: liveness verification via third-party API (uses relation invite token)
 router.post("/liveness-detection", protect, livenessDetection);

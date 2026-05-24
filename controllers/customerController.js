@@ -18,7 +18,8 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { generateQR } = require("../utils/qrService");
 const { hashForSearch } = require("../utils/encryption");
-const { ensureSumsubApplicant } = require("../services/sumsubService");
+const { ensureSumsubApplicant, requestPendingReview, triggerAmlCheck } = require("../services/sumsubService");
+const { runInBackground } = require("../utils/backgroundJob");
 const {
   findOrCreateJourney,
   syncJourneyStatus,
@@ -754,10 +755,10 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
       journeyId: journeyId || null,
       sumsub: sumsubResult
         ? {
-            applicantId: sumsubResult.applicantId,
-            inspectionId: sumsubResult.inspectionId,
-            created: sumsubResult.created,
-          }
+          applicantId: sumsubResult.applicantId,
+          inspectionId: sumsubResult.inspectionId,
+          created: sumsubResult.created,
+        }
         : null,
       sumsubError: sumsubError || undefined,
     },
@@ -1009,10 +1010,10 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
       journeyId: journeyId || null,
       sumsub: sumsubResult
         ? {
-            applicantId: sumsubResult.applicantId,
-            inspectionId: sumsubResult.inspectionId,
-            created: sumsubResult.created,
-          }
+          applicantId: sumsubResult.applicantId,
+          inspectionId: sumsubResult.inspectionId,
+          created: sumsubResult.created,
+        }
         : null,
       sumsubError: sumsubError || undefined,
     },
@@ -1336,6 +1337,15 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
     customer.isActive = true;
 
     await customer.save();
+
+    if (customer?.sumsubApplicantId) {
+      console.log(`Request to review to sum sub — scheduling background job`.bgBlue);
+      runInBackground(`sumsub:pendingReview+aml [${customer.sumsubApplicantId}]`, async () => {
+        await requestPendingReview(customer.sumsubApplicantId);
+        await triggerAmlCheck(customer);
+      });
+    }
+
 
     return res.status(200).json({
       success: true,
@@ -1823,11 +1833,9 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const userPayload = {
         name:
           body.name ||
-          `${
-            body.personalKyc?.personal_form?.customer_details?.given_name || ""
-          } ${
-            body.personalKyc?.personal_form?.customer_details?.surname || ""
-          }`.trim() ||
+          `${body.personalKyc?.personal_form?.customer_details?.given_name || ""
+            } ${body.personalKyc?.personal_form?.customer_details?.surname || ""
+            }`.trim() ||
           body.userName ||
           "Unnamed",
         userName: body.userName,
@@ -1861,17 +1869,17 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
       const relationCandidate =
         clientDoc || branchDoc
           ? {
-              client: clientDoc ? clientDoc._id : undefined,
-              branch: branchDoc ? branchDoc._id : undefined,
-              type: requestedType,
-              onboardingChannel: body.onboardingChannel || "API",
-              registeredAt: body.registeredAt
-                ? new Date(body.registeredAt)
-                : new Date(),
-              source: body.source || "api",
-              notes: body.notes || "",
-              active: true,
-            }
+            client: clientDoc ? clientDoc._id : undefined,
+            branch: branchDoc ? branchDoc._id : undefined,
+            type: requestedType,
+            onboardingChannel: body.onboardingChannel || "API",
+            registeredAt: body.registeredAt
+              ? new Date(body.registeredAt)
+              : new Date(),
+            source: body.source || "api",
+            notes: body.notes || "",
+            active: true,
+          }
           : null;
 
       // 4) Create or update Customer
