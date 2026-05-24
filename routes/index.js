@@ -4,6 +4,7 @@ const router = express.Router();
 
 // Import individual route files
 const fileUpload = require("./fileupload");
+const fileVault = require("./fileVault");
 const otp = require("./otp");
 const user = require("./user");
 const auth = require("./auth");
@@ -67,6 +68,7 @@ const rgMapper = require("./rg-mapper");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
+router.use("/file-vault", fileVault);
 router.use("/auth", auth);
 router.use("/otp", otp);
 router.use("/user", user);

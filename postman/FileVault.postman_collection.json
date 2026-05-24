@@ -1,0 +1,539 @@
+{
+  "info": {
+    "name": "Dooit API — FileVault",
+    "_postman_id": "dooit-filevault-collection-v1",
+    "description": "All endpoints for the FileVault file-management integration.\n\n**Setup**\n1. Set the `baseUrl` variable (default: `http://localhost:6830`).\n2. Run the **Login** request in the Auth folder — the `token` variable is set automatically.\n3. All FileVault requests will pick up the token from the collection variable.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:6830",
+      "type": "string",
+      "description": "Base URL of the Dooit API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT Bearer token — populated automatically by the Login request"
+    },
+    {
+      "key": "fileVaultFileId",
+      "value": "",
+      "type": "string",
+      "description": "FileVault file _id — populated automatically after Upload"
+    }
+  ],
+
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+
+  "item": [
+
+    {
+      "name": "🔐 Auth",
+      "item": [
+        {
+          "name": "Login (get token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token) {",
+                  "  pm.collectionVariables.set('token', res.token);",
+                  "  console.log('✅ token saved');",
+                  "} else {",
+                  "  console.warn('⚠️  No token in response — check credentials');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@dooit.ai\",\n  \"password\": \"yourpassword\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Authenticate and store the JWT. Edit the body with real credentials."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "📤 Upload",
+      "item": [
+
+        {
+          "name": "Upload Single File",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Upload successful', () => pm.expect(res.success).to.be.true);",
+                  "if (res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('fileVaultFileId', res.data._id);",
+                  "  console.log('✅ fileVaultFileId saved:', res.data._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "upload"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Any file — PDF, image, doc, etc. Max 50 MB"
+                }
+              ]
+            },
+            "description": "Upload a single file to FileVault.\n\n**Field:** `file` (form-data, binary)\n\n**Response:** FileVault file object including `_id`, `originalName`, `path`, `mimetype`, etc.\n\nThe test script automatically saves `_id` → `fileVaultFileId` collection variable."
+          },
+          "response": [
+            {
+              "name": "200 — Success",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "POST",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/upload" },
+                "body": { "mode": "formdata", "formdata": [{ "key": "file", "type": "file", "src": [] }] }
+              },
+              "body": "{\n  \"success\": true,\n  \"message\": \"File uploaded successfully\",\n  \"data\": {\n    \"_id\": \"64f1a2b3c4d5e6f7g8h9i0j1\",\n    \"originalName\": \"document.pdf\",\n    \"filename\": \"1704067200000-document.pdf\",\n    \"mimetype\": \"application/pdf\",\n    \"size\": 1024000,\n    \"folder\": \"documents\",\n    \"path\": \"/uploads/documents/1704067200000-document.pdf\",\n    \"visibility\": \"private\",\n    \"createdAt\": \"2024-01-01T00:00:00.000Z\"\n  }\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            },
+            {
+              "name": "400 — No File",
+              "status": "Bad Request",
+              "code": 400,
+              "originalRequest": {
+                "method": "POST",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/upload" }
+              },
+              "body": "{\n  \"success\": false,\n  \"error\": \"Please upload a file\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        },
+
+        {
+          "name": "Upload File Chunk (Large Files)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/chunk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "chunk"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "chunk",
+                  "type": "file",
+                  "src": [],
+                  "description": "Binary chunk data"
+                },
+                {
+                  "key": "fileId",
+                  "value": "my-unique-file-id-{{$randomUUID}}",
+                  "type": "text",
+                  "description": "Client-generated unique ID for the whole file"
+                },
+                {
+                  "key": "chunkIndex",
+                  "value": "0",
+                  "type": "text",
+                  "description": "0-based index of this chunk"
+                },
+                {
+                  "key": "totalChunks",
+                  "value": "5",
+                  "type": "text",
+                  "description": "Total number of chunks"
+                }
+              ]
+            },
+            "description": "Use for files larger than 5 MB. Generate a `fileId` on the client side and upload chunks sequentially starting from `chunkIndex: 0`."
+          },
+          "response": [
+            {
+              "name": "200 — Chunk Accepted",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "POST",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/chunk" }
+              },
+              "body": "{\n  \"success\": true,\n  \"message\": \"Chunk uploaded successfully\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "📋 List & Download",
+      "item": [
+
+        {
+          "name": "List Files",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault"],
+              "query": [
+                { "key": "page",     "value": "1",   "description": "Page number (default: 1)" },
+                { "key": "limit",    "value": "20",  "description": "Items per page (default: 20)" },
+                { "key": "q",        "value": "",    "description": "Search term", "disabled": true },
+                { "key": "folder",   "value": "",    "description": "Filter by folder name", "disabled": true },
+                { "key": "mimetype", "value": "",    "description": "Filter by MIME type e.g. image/jpeg", "disabled": true }
+              ]
+            },
+            "description": "Returns a paginated list of files stored in FileVault.\n\n**Query params (all optional):**\n- `page` — page number\n- `limit` — items per page\n- `q` — search term\n- `folder` — filter by folder\n- `mimetype` — filter by MIME type"
+          },
+          "response": [
+            {
+              "name": "200 — Success",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "GET",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault?page=1&limit=20" }
+              },
+              "body": "{\n  \"success\": true,\n  \"meta\": {\n    \"total\": 150,\n    \"page\": 1,\n    \"perPage\": 20,\n    \"totalPages\": 8\n  },\n  \"data\": [\n    {\n      \"_id\": \"64f1a2b3c4d5e6f7g8h9i0j1\",\n      \"originalName\": \"photo.jpg\",\n      \"filename\": \"1704067200000-photo.jpg\",\n      \"mimetype\": \"image/jpeg\",\n      \"size\": 2048000,\n      \"folder\": \"images\",\n      \"path\": \"/uploads/images/1704067200000-photo.jpg\",\n      \"visibility\": \"private\",\n      \"createdAt\": \"2024-01-01T00:00:00.000Z\"\n    }\n  ]\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        },
+
+        {
+          "name": "List Files — Image Filter",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault?page=1&limit=20&mimetype=image/jpeg",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault"],
+              "query": [
+                { "key": "page",     "value": "1" },
+                { "key": "limit",    "value": "20" },
+                { "key": "mimetype", "value": "image/jpeg" }
+              ]
+            },
+            "description": "Example: list only JPEG images."
+          },
+          "response": []
+        },
+
+        {
+          "name": "List Files — Search",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault?q=invoice&page=1&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault"],
+              "query": [
+                { "key": "q",     "value": "invoice" },
+                { "key": "page",  "value": "1" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "Example: search for files whose name contains \"invoice\"."
+          },
+          "response": []
+        },
+
+        {
+          "name": "Download File by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "{{fileVaultFileId}}"]
+            },
+            "description": "Streams the raw binary file back to the client.\n\n- Content-Type and Content-Disposition are forwarded from FileVault.\n- Use **Send and Download** in Postman to save the file to disk.\n- In the browser/frontend, point an `<a>` or `<img>` tag directly at this URL."
+          },
+          "response": [
+            {
+              "name": "200 — Binary file",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "GET",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}" }
+              },
+              "body": "<binary file data>",
+              "_postman_previewlanguage": "text",
+              "header": [
+                { "key": "Content-Type",        "value": "application/pdf" },
+                { "key": "Content-Disposition", "value": "attachment; filename=\"document.pdf\"" }
+              ]
+            },
+            {
+              "name": "404 — Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "originalRequest": {
+                "method": "GET",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}" }
+              },
+              "body": "{\n  \"success\": false,\n  \"error\": \"File not found in FileVault\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        },
+
+        {
+          "name": "Get File Direct URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Has URL', () => pm.expect(res.data.url).to.be.a('string'));",
+                  "if (res.data && res.data.url) {",
+                  "  console.log('📎 File URL:', res.data.url);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}/url",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "{{fileVaultFileId}}", "url"]
+            },
+            "description": "Returns the direct FileVault URL for the file. Useful for embedding in `<img src>`, sharing links, or storing references."
+          },
+          "response": [
+            {
+              "name": "200 — Success",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "GET",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}/url" }
+              },
+              "body": "{\n  \"success\": true,\n  \"data\": {\n    \"url\": \"https://files.strikeo.com/api/v1/files/64f1a2b3c4d5e6f7g8h9i0j1\"\n  }\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        }
+
+      ]
+    },
+
+    {
+      "name": "🗑️ Delete & Restore",
+      "item": [
+
+        {
+          "name": "Delete File by ID",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "{{fileVaultFileId}}"]
+            },
+            "description": "Soft-deletes a single file. The file can be restored with the **Restore Files** endpoint."
+          },
+          "response": [
+            {
+              "name": "200 — Deleted",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "DELETE",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}" }
+              },
+              "body": "{\n  \"success\": true,\n  \"message\": \"File deleted successfully\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            },
+            {
+              "name": "404 — Not Found",
+              "status": "Not Found",
+              "code": 404,
+              "originalRequest": {
+                "method": "DELETE",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/{{fileVaultFileId}}" }
+              },
+              "body": "{\n  \"success\": false,\n  \"error\": \"File not found in FileVault\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        },
+
+        {
+          "name": "Bulk Delete Files",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/bulk/delete",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "bulk", "delete"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileIds\": [\n    \"64f1a2b3c4d5e6f7g8h9i0j1\",\n    \"64f1a2b3c4d5e6f7g8h9i0j2\"\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Soft-deletes multiple files in a single request.\n\n**Body:** `{ fileIds: string[] }` — array of FileVault `_id` values."
+          },
+          "response": [
+            {
+              "name": "200 — Success",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "DELETE",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/bulk/delete" },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{ \"fileIds\": [\"64f1a2b3c4d5e6f7g8h9i0j1\"] }"
+                }
+              },
+              "body": "{\n  \"success\": true,\n  \"message\": \"2 file(s) deleted successfully\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            },
+            {
+              "name": "400 — Missing fileIds",
+              "status": "Bad Request",
+              "code": 400,
+              "originalRequest": {
+                "method": "DELETE",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/bulk/delete" },
+                "body": { "mode": "raw", "raw": "{}" }
+              },
+              "body": "{\n  \"success\": false,\n  \"error\": \"Please provide a non-empty array of fileIds\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        },
+
+        {
+          "name": "Restore Deleted Files",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/file-vault/restore",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "file-vault", "restore"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fileIds\": [\n    \"64f1a2b3c4d5e6f7g8h9i0j1\"\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Restores one or more soft-deleted files.\n\n**Body:** `{ fileIds: string[] }` — array of FileVault `_id` values."
+          },
+          "response": [
+            {
+              "name": "200 — Restored",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "POST",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/restore" },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{ \"fileIds\": [\"64f1a2b3c4d5e6f7g8h9i0j1\"] }"
+                }
+              },
+              "body": "{\n  \"success\": true,\n  \"data\": { \"restored\": 1 },\n  \"message\": \"1 file(s) restored successfully\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            },
+            {
+              "name": "400 — Missing fileIds",
+              "status": "Bad Request",
+              "code": 400,
+              "originalRequest": {
+                "method": "POST",
+                "url": { "raw": "{{baseUrl}}/api/v1/file-vault/restore" },
+                "body": { "mode": "raw", "raw": "{}" }
+              },
+              "body": "{\n  \"success\": false,\n  \"error\": \"Please provide a non-empty array of fileIds\"\n}",
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }]
+            }
+          ]
+        }
+
+      ]
+    }
+
+  ]
+}
