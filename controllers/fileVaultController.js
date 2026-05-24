@@ -42,9 +42,7 @@ exports.uploadFile = asyncHandler(async (req, res, next) => {
   const result = await fileVaultService.uploadFile(buffer, originalname, mimetype);
 
   res.status(200).json({
-    success: true,
-    message: "File uploaded successfully",
-    data: result.data,
+    result
   });
 });
 
