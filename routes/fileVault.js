@@ -31,7 +31,13 @@ const {
 
 const { protect } = require("../middleware/auth");
 
-const router = express.Router();
+// ── JSON parser — ONLY for routes whose body is application/json ─────────────
+// NEVER mount express.json() at router level here.
+// This router handles multipart/form-data uploads; a router-level JSON parser
+// grabs the raw body stream before multer can read it and throws:
+//   SyntaxError: Unexpected token - in JSON at position 0  (entity.parse.failed)
+// because it tries to parse the binary multipart payload as JSON.
+const jsonBody = express.json({ limit: "100mb" });
 
 // ── Multer — memory storage, accept any file type, max 50 MB ─────────────────
 const upload = multer({
@@ -39,9 +45,10 @@ const upload = multer({
   limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB
 });
 
+const router = express.Router();
+
 // All routes require a valid JWT
 router.use(protect);
-router.use(express.json());
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 router.post("/upload", upload.single("file"), uploadFile);
@@ -51,8 +58,9 @@ router.post("/chunk", upload.single("chunk"), uploadChunk);
 router.get("/", listFiles);
 
 // ── Bulk & Restore (must come before /:id to avoid param collision) ───────────
-router.delete("/bulk/delete", bulkDeleteFiles);
-router.post("/restore", restoreFiles);
+// jsonBody applied inline — only these two routes send an application/json body
+router.delete("/bulk/delete", jsonBody, bulkDeleteFiles);
+router.post("/restore", jsonBody, restoreFiles);
 
 // ── Single file operations ────────────────────────────────────────────────────
 router.get("/:id/url", getFileUrl);

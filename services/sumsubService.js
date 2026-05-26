@@ -436,9 +436,7 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
  * @returns {Promise<{ status: number, data: object }>}
  */
 const requestPendingReview = async (applicantId, reason) => {
-  const reasonParam = reason
-    ? `?reason=${encodeURIComponent(reason)}`
-    : "";
+  const reasonParam = reason ? `?reason=${encodeURIComponent(reason)}` : "";
   return sumsubPost(
     `/resources/applicants/${applicantId}/status/pending${reasonParam}`,
     {},
@@ -527,6 +525,8 @@ const buildInfoPayloadFromOcr = (f = {}) => {
     }
   }
 
+  let addresses = [];
+
   // ── Country / nationality ─────────────────────────────────────────────────
   const country = f.issuing_country ? toAlpha3(f.issuing_country) : null;
   const nationality = f.nationality ? toAlpha3(f.nationality) : null;
@@ -539,16 +539,43 @@ const buildInfoPayloadFromOcr = (f = {}) => {
 
   // ── Place of birth ────────────────────────────────────────────────────────
   const placeOfBirth = f.place_of_birth || null;
+  const countryOfBirth = f.place_of_birth || null;
+
+
+  // ── Address ───────────────────────────────────────────────────────────────
+  // Prefer address_breakdown fields; fall back to issuing country for country.
+  const aCountry = f?.address_breakdown?.country
+    ? toAlpha3(f.address_breakdown.country)
+    : country;
+  const street       = f?.address_breakdown?.street   || null;
+  const town         = f?.address_breakdown?.city     || null;
+  const state        = f?.address_breakdown?.state    || null;
+  const postCode     = f?.address_breakdown?.postcode || null;
+  const formattedAddress = f?.address               || null;
+
+  // Build the address entry — only include non-null fields
+  if (aCountry || street || town || state || postCode || formattedAddress) {
+    const addressEntry = {};
+    if (aCountry)          addressEntry.country          = aCountry;
+    if (street)            addressEntry.street           = street;
+    if (town)              addressEntry.town             = town;
+    if (state)             addressEntry.state            = state;
+    if (postCode)          addressEntry.postCode         = postCode;
+    if (formattedAddress)  addressEntry.formattedAddress = formattedAddress;
+    addresses.push(addressEntry);
+  }
 
   // ── Build payload — omit null / undefined ─────────────────────────────────
   const payload = {};
-  if (firstName) payload.firstName = firstName;
-  if (lastName) payload.lastName = lastName;
-  if (dob) payload.dob = dob;
-  if (country) payload.country = country;
-  if (nationality) payload.nationality = nationality;
-  if (gender) payload.gender = gender;
-  if (placeOfBirth) payload.placeOfBirth = placeOfBirth;
+  if (firstName)        payload.firstName       = firstName;
+  if (lastName)         payload.lastName        = lastName;
+  if (dob)              payload.dob             = dob;
+  if (country)          payload.country         = country;
+  if (nationality)      payload.nationality     = nationality;
+  if (gender)           payload.gender          = gender;
+  if (placeOfBirth)     payload.placeOfBirth    = placeOfBirth;
+  if (countryOfBirth)   payload.countryOfBirth  = countryOfBirth;
+  if (addresses.length) payload.addresses       = addresses;
 
   return payload;
 };
@@ -571,6 +598,7 @@ const syncApplicantFromOcr = (applicantId, ocrFields) => {
   if (!applicantId || !ocrFields) return;
 
   const payload = buildInfoPayloadFromOcr(ocrFields);
+  console.log(payload);
   if (!Object.keys(payload).length) {
     console.log("[SumsubSync] No mappable OCR fields — skipping sync");
     return;
@@ -580,8 +608,8 @@ const syncApplicantFromOcr = (applicantId, ocrFields) => {
   const base = `/resources/applicants/${applicantId}`;
 
   const patch = async (endpoint, label) => {
-    const { status, data } = await withRetry(
-      () => sumsubPatch(`${base}/${endpoint}`, payload),
+    const { status, data } = await withRetry(() =>
+      sumsubPatch(`${base}/${endpoint}`, payload),
     );
     if (status >= 400) {
       console.error(
