@@ -41,9 +41,9 @@ exports.uploadFile = asyncHandler(async (req, res, next) => {
 
   const result = await fileVaultService.uploadFile(buffer, originalname, mimetype);
 
-  res.status(200).json({
+  res.status(200).json(
     result
-  });
+  );
 });
 
 // @desc    Upload a file chunk (for large files > 5 MB)
