@@ -1,0 +1,210 @@
+{
+  "info": {
+    "name": "Dooit API — Dummy Import",
+    "_postman_id": "dooit-dummy-import-collection-v1",
+    "description": "Single-request bulk import: Users → Clients → Branches → Customers (all 7 types) → Transactions.\n\n**Setup**\n1. Set the `baseUrl` variable (default `http://localhost:5000`).\n2. (Optional) Run **Login** in the Auth folder to populate `{{token}}` — the import endpoint is open by default.\n3. Send **Full Import** to seed the entire hierarchy in one shot.\n4. Use **Minimal Import** for a quick single-entity smoke test.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string",
+      "description": "Base URL of the Dooit API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT Bearer token — set automatically by the Login request"
+    },
+    {
+      "key": "importedClientId",
+      "value": "",
+      "type": "string",
+      "description": "First client _id from the last import response"
+    },
+    {
+      "key": "importedBranchId",
+      "value": "",
+      "type": "string",
+      "description": "First branch _id from the last import response"
+    },
+    {
+      "key": "importedCustomerId",
+      "value": "",
+      "type": "string",
+      "description": "First customer _id from the last import response"
+    }
+  ],
+
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+
+  "item": [
+
+    {
+      "name": "🔐 Auth",
+      "item": [
+        {
+          "name": "Login (get token)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.token) {",
+                  "  pm.collectionVariables.set('token', res.token);",
+                  "  console.log('✅ token saved');",
+                  "} else {",
+                  "  console.warn('⚠️  No token in response — check credentials');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@dooit.com\",\n  \"password\": \"Admin@1234\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Authenticate and store the JWT. Edit credentials to match your environment."
+          },
+          "response": []
+        }
+      ]
+    },
+
+    {
+      "name": "📥 Dummy Import",
+      "item": [
+
+        {
+          "name": "Full Import — all 7 customer types",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success flag is true', () => pm.expect(res.success).to.be.true);",
+                  "",
+                  "if (res.data && res.data[0]) {",
+                  "  const firstClient = res.data[0].client;",
+                  "  pm.collectionVariables.set('importedClientId', firstClient.id);",
+                  "  console.log('✅ importedClientId:', firstClient.id, '|', firstClient.name);",
+                  "",
+                  "  const firstBranch = res.data[0].branches[0]?.branch;",
+                  "  if (firstBranch) {",
+                  "    pm.collectionVariables.set('importedBranchId', firstBranch.id);",
+                  "    console.log('✅ importedBranchId:', firstBranch.id, '|', firstBranch.name);",
+                  "  }",
+                  "",
+                  "  const firstCustomer = res.data[0].branches[0]?.customers[0]?.customer;",
+                  "  if (firstCustomer) {",
+                  "    pm.collectionVariables.set('importedCustomerId', firstCustomer.id);",
+                  "    console.log('✅ importedCustomerId:', firstCustomer.id, '|', firstCustomer.name);",
+                  "  }",
+                  "}",
+                  "",
+                  "const s = res.summary;",
+                  "if (s) {",
+                  "  console.log('📊 Summary:',",
+                  "    'users:', s.users?.created, 'created,', s.users?.found, 'found |',",
+                  "    'clients:', s.clients?.created, '|',",
+                  "    'branches:', s.branches?.created, '|',",
+                  "    'customers:', s.customers?.created, '|',",
+                  "    'transactions:', s.transactions?.created",
+                  "  );",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dummy-import",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "dummy-import"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"clients\": [\n    {\n      \"name\": \"Alpha Bank Ltd\",\n      \"clientType\": \"Bank\",\n      \"email\": \"info@alphabank.com\",\n      \"userName\": \"alpha.admin\",\n      \"phone\": \"+8809612001001\",\n      \"website\": \"https://www.alphabank.com\",\n      \"registrationNumber\": \"BREG-2005-001\",\n      \"taxId\": \"TAX-ALPHA-001\",\n      \"status\": \"Active\",\n      \"address\": {\n        \"street\": \"12 Dilkusha Commercial Area\",\n        \"city\": \"Dhaka\",\n        \"state\": \"Dhaka Division\",\n        \"country\": \"Bangladesh\",\n        \"zipcode\": \"1000\"\n      },\n      \"legalRepresentative\": {\n        \"name\": \"Md. Rafiqul Islam\",\n        \"email\": \"ceo@alphabank.com\",\n        \"phone\": \"+8801711000001\",\n        \"designation\": \"Chief Executive Officer\"\n      },\n      \"contacts\": [\n        {\n          \"name\": \"Compliance Team\",\n          \"title\": \"Head of Compliance\",\n          \"email\": \"compliance@alphabank.com\",\n          \"phone\": \"+8801711000002\",\n          \"primary\": true\n        }\n      ],\n      \"branches\": [\n        {\n          \"name\": \"Alpha Bank HQ Branch\",\n          \"branchCode\": \"AB-HQ-001\",\n          \"branchType\": \"Main\",\n          \"email\": \"hq@alphabank.com\",\n          \"phone\": \"+8809612001011\",\n          \"swiftCode\": \"ALPBBDDH\",\n          \"userName\": \"alpha.hq\",\n          \"status\": \"Active\",\n          \"address\": {\n            \"street\": \"12 Dilkusha Commercial Area\",\n            \"city\": \"Dhaka\",\n            \"state\": \"Dhaka Division\",\n            \"country\": \"Bangladesh\",\n            \"zipcode\": \"1000\"\n          },\n          \"manager\": {\n            \"name\": \"Tanvir Ahmed\",\n            \"email\": \"hq.manager@alphabank.com\",\n            \"phone\": \"+8801711000010\",\n            \"employeeId\": \"EMP-HQ-001\"\n          },\n          \"services\": [\"Deposits\", \"Withdrawals\", \"Foreign Exchange\", \"Trade Finance\", \"Loans\"],\n          \"customers\": [\n            {\n              \"customerType\": \"individual\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"verified\",\n              \"given_name\": \"Arif\",\n              \"middle_name\": \"Hossain\",\n              \"surname\": \"Chowdhury\",\n              \"date_of_birth\": \"1988-07-22\",\n              \"email\": \"arif.chowdhury@gmail.com\",\n              \"phone\": \"+8801712300001\",\n              \"occupation\": \"Software Engineer\",\n              \"industry\": \"Technology\",\n              \"employer_name\": \"DataSoft Systems Ltd\",\n              \"identificationNo\": \"NID-19881234567\",\n              \"source_of_funds\": \"Employment Income\",\n              \"source_of_wealth\": \"Savings from Salary\",\n              \"account_purpose\": \"Personal Banking & Savings\",\n              \"residential_address\": {\n                \"address\": \"Flat 4B, House 22, Road 5\",\n                \"suburb\": \"Dhanmondi\",\n                \"state\": \"Dhaka\",\n                \"postcode\": \"1209\",\n                \"country\": \"Bangladesh\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 50000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"DEP-2024-001\",\n                  \"narrative\": \"Salary credit – November 2024\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-11-30T10:15:00.000Z\",\n                  \"sender\": {\n                    \"name\": \"DataSoft Systems Ltd\",\n                    \"account\": \"ACC-DSL-001\",\n                    \"institution\": \"Dutch-Bangla Bank\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                },\n                {\n                  \"type\": \"withdrawal\",\n                  \"amount\": 10000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"WDR-2024-001\",\n                  \"narrative\": \"Cash withdrawal for household expenses\",\n                  \"channel\": \"ATM\",\n                  \"timestamp\": \"2024-12-05T14:30:00.000Z\"\n                },\n                {\n                  \"type\": \"transfer\",\n                  \"amount\": 15000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"TRF-2024-001\",\n                  \"narrative\": \"Rent payment – December 2024\",\n                  \"channel\": \"Mobile App\",\n                  \"timestamp\": \"2024-12-01T09:00:00.000Z\",\n                  \"beneficiary\": {\n                    \"name\": \"Rahman Properties\",\n                    \"account\": \"ACC-RP-0055\",\n                    \"institution\": \"BRAC Bank\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                }\n              ]\n            },\n            {\n              \"customerType\": \"company\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"verified\",\n              \"company_name\": \"Nexgen Textiles Ltd\",\n              \"company_registration\": \"RJSC-2010-00456\",\n              \"company_tax_id\": \"TIN-NEXGEN-8821\",\n              \"company_type\": \"Private Limited Company\",\n              \"date_of_incorporation\": \"2010-03-15\",\n              \"country_of_incorporation\": \"Bangladesh\",\n              \"source_of_funds\": \"Export Revenue\",\n              \"source_of_wealth\": \"Garment Manufacturing & Export\",\n              \"account_purpose\": \"Trade Finance & Payroll\",\n              \"contact_person\": {\n                \"given_name\": \"Nasrin\",\n                \"surname\": \"Begum\",\n                \"email\": \"cfo@nexgentextiles.com\",\n                \"phone\": \"+8801811200001\",\n                \"designation\": \"Chief Financial Officer\"\n              },\n              \"business_address\": {\n                \"street\": \"Plot 45, DEPZ, Savar\",\n                \"city\": \"Dhaka\",\n                \"state\": \"Dhaka Division\",\n                \"country\": \"Bangladesh\",\n                \"zipcode\": \"1340\"\n              },\n              \"directors\": [\n                { \"name\": \"Kamal Uddin\", \"designation\": \"Managing Director\", \"nationality\": \"Bangladeshi\" },\n                { \"name\": \"Nasrin Begum\", \"designation\": \"Director & CFO\",    \"nationality\": \"Bangladeshi\" }\n              ],\n              \"shareholders\": [\n                { \"name\": \"Kamal Uddin\", \"percentage\": 60 },\n                { \"name\": \"Nasrin Begum\", \"percentage\": 40 }\n              ],\n              \"ultimate_beneficial_owners\": [\n                { \"name\": \"Kamal Uddin\", \"ownershipPercentage\": 60, \"nationality\": \"Bangladeshi\" }\n              ],\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 2500000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"EXP-2024-011\",\n                  \"narrative\": \"Export proceeds – Order #EXP-2024-011\",\n                  \"channel\": \"Wire Transfer\",\n                  \"timestamp\": \"2024-11-20T08:00:00.000Z\",\n                  \"sender\": {\n                    \"name\": \"H&M Global Sourcing\",\n                    \"account\": \"DE89370400440532013000\",\n                    \"institution\": \"Deutsche Bank\",\n                    \"institutionCountry\": \"Germany\"\n                  }\n                },\n                {\n                  \"type\": \"withdrawal\",\n                  \"amount\": 800000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"PAY-2024-NOV\",\n                  \"narrative\": \"November payroll disbursement\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-11-30T11:00:00.000Z\"\n                }\n              ]\n            }\n          ]\n        },\n        {\n          \"name\": \"Alpha Bank Dhanmondi Branch\",\n          \"branchCode\": \"AB-DM-002\",\n          \"branchType\": \"Retail\",\n          \"email\": \"dhanmondi@alphabank.com\",\n          \"userName\": \"alpha.dhanmondi\",\n          \"phone\": \"+8809612001022\",\n          \"status\": \"Active\",\n          \"address\": {\n            \"street\": \"House 5, Road 27\",\n            \"city\": \"Dhaka\",\n            \"state\": \"Dhaka Division\",\n            \"country\": \"Bangladesh\",\n            \"zipcode\": \"1209\"\n          },\n          \"manager\": {\n            \"name\": \"Sumaiya Khanam\",\n            \"email\": \"dhanmondi.manager@alphabank.com\",\n            \"phone\": \"+8801711000020\",\n            \"employeeId\": \"EMP-DM-002\"\n          },\n          \"services\": [\"Deposits\", \"Withdrawals\", \"Remittance\", \"Loans\"],\n          \"customers\": [\n            {\n              \"customerType\": \"partnership\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"in_review\",\n              \"partnership_name\": \"Rahman & Associates Law Firm\",\n              \"registration_number\": \"PTR-DHAKA-2015-088\",\n              \"date_of_formation\": \"2015-06-01\",\n              \"source_of_funds\": \"Legal Service Fees\",\n              \"source_of_wealth\": \"Professional Practice\",\n              \"account_purpose\": \"Business Operations & Client Disbursements\",\n              \"contact_person\": {\n                \"given_name\": \"Zubayer\",\n                \"surname\": \"Rahman\",\n                \"email\": \"zubayer@rahman-associates.com\",\n                \"phone\": \"+8801912000001\",\n                \"designation\": \"Managing Partner\"\n              },\n              \"business_address\": {\n                \"street\": \"Suite 301, Concord Tower, 113 Kazi Nazrul Islam Ave\",\n                \"city\": \"Dhaka\",\n                \"state\": \"Dhaka Division\",\n                \"country\": \"Bangladesh\",\n                \"zipcode\": \"1215\"\n              },\n              \"partners\": [\n                { \"name\": \"Zubayer Rahman\",  \"ownershipPercentage\": 55, \"nationality\": \"Bangladeshi\", \"role\": \"Managing Partner\" },\n                { \"name\": \"Fariha Hossain\", \"ownershipPercentage\": 45, \"nationality\": \"Bangladeshi\", \"role\": \"Senior Partner\" }\n              ],\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 300000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"LAW-FEE-2024-09\",\n                  \"narrative\": \"Legal retainer fee – Q4 2024\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-10-02T09:30:00.000Z\"\n                },\n                {\n                  \"type\": \"withdrawal\",\n                  \"amount\": 120000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"PART-DIV-2024-09\",\n                  \"narrative\": \"Partner dividend – October 2024\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-10-31T14:00:00.000Z\"\n                }\n              ]\n            },\n            {\n              \"customerType\": \"trust\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"verified\",\n              \"trust_name\": \"Hasan Family Charitable Trust\",\n              \"trust_deed_number\": \"TRS-DHAKA-2018-033\",\n              \"trust_type\": \"Charitable Trust\",\n              \"date_of_establishment\": \"2018-01-10\",\n              \"source_of_funds\": \"Donations & Investment Returns\",\n              \"source_of_wealth\": \"Family Wealth & Philanthropy\",\n              \"account_purpose\": \"Charitable Grant Disbursements\",\n              \"trustee\": {\n                \"given_name\": \"Imtiaz\",\n                \"surname\": \"Hasan\",\n                \"email\": \"imtiaz@hasantrust.org\",\n                \"phone\": \"+8801612000001\"\n              },\n              \"settlor\": {\n                \"name\": \"Late Anwar Hasan\",\n                \"relationship\": \"Father of Trustee\"\n              },\n              \"beneficiaries\": [\n                { \"name\": \"Dhaka Children's Hospital\",     \"relationship\": \"Charitable Organisation\", \"allocationPercentage\": 50 },\n                { \"name\": \"Hasan Educational Foundation\", \"relationship\": \"Family Foundation\",        \"allocationPercentage\": 50 }\n              ],\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 500000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"DONATION-2024-01\",\n                  \"narrative\": \"Annual donation – corporate sponsors\",\n                  \"channel\": \"Wire Transfer\",\n                  \"timestamp\": \"2024-01-15T10:00:00.000Z\"\n                },\n                {\n                  \"type\": \"transfer\",\n                  \"amount\": 200000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"GRANT-2024-01\",\n                  \"narrative\": \"Charitable grant disbursement\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-02-01T11:00:00.000Z\",\n                  \"beneficiary\": {\n                    \"name\": \"Dhaka Children's Hospital\",\n                    \"account\": \"ACC-DCH-0010\",\n                    \"institution\": \"Sonali Bank\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    },\n    {\n      \"name\": \"Beta Financial Services Ltd\",\n      \"clientType\": \"Financial\",\n      \"email\": \"info@betafinancial.com\",\n      \"userName\": \"beta.admin\",\n      \"phone\": \"+8809611002002\",\n      \"website\": \"https://www.betafinancial.com\",\n      \"registrationNumber\": \"BREG-2012-089\",\n      \"taxId\": \"TAX-BETA-002\",\n      \"status\": \"Active\",\n      \"address\": {\n        \"street\": \"Level 8, BDBL Bhaban, 12 Kawran Bazar\",\n        \"city\": \"Dhaka\",\n        \"state\": \"Dhaka Division\",\n        \"country\": \"Bangladesh\",\n        \"zipcode\": \"1215\"\n      },\n      \"legalRepresentative\": {\n        \"name\": \"Ayesha Siddiqua\",\n        \"email\": \"ceo@betafinancial.com\",\n        \"phone\": \"+8801811000099\",\n        \"designation\": \"Managing Director\"\n      },\n      \"branches\": [\n        {\n          \"name\": \"Beta Financial Gulshan Branch\",\n          \"branchCode\": \"BF-GU-001\",\n          \"branchType\": \"Corporate\",\n          \"email\": \"gulshan@betafinancial.com\",\n          \"userName\": \"beta.gulshan\",\n          \"phone\": \"+8809611002011\",\n          \"status\": \"Active\",\n          \"address\": {\n            \"street\": \"House 10, Road 90\",\n            \"city\": \"Dhaka\",\n            \"state\": \"Dhaka Division\",\n            \"country\": \"Bangladesh\",\n            \"zipcode\": \"1212\"\n          },\n          \"manager\": {\n            \"name\": \"Rakibul Islam\",\n            \"email\": \"gulshan.manager@betafinancial.com\",\n            \"phone\": \"+8801811000110\",\n            \"employeeId\": \"EMP-GU-001\"\n          },\n          \"services\": [\"Corporate Finance\", \"FX Trading\", \"Investment Advisory\"],\n          \"customers\": [\n            {\n              \"customerType\": \"government_body\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"verified\",\n              \"organization_name\": \"Bangladesh Investment Development Authority\",\n              \"department\": \"Foreign Investment Division\",\n              \"government_id\": \"GOV-BIDA-001\",\n              \"jurisdiction\": \"Government of Bangladesh\",\n              \"source_of_funds\": \"Government Budget Allocation\",\n              \"source_of_wealth\": \"Public Funds\",\n              \"account_purpose\": \"FDI Facilitation & Operational Expenses\",\n              \"contact_person\": {\n                \"given_name\": \"Shahidul\",\n                \"surname\": \"Alam\",\n                \"email\": \"shahidul.alam@bida.gov.bd\",\n                \"phone\": \"+8802223312000\",\n                \"designation\": \"Executive Director\"\n              },\n              \"address\": {\n                \"street\": \"BIDA Office, Agargaon\",\n                \"city\": \"Dhaka\",\n                \"state\": \"Dhaka Division\",\n                \"country\": \"Bangladesh\",\n                \"zipcode\": \"1207\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 5000000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"GOV-ALLOC-2024-Q4\",\n                  \"narrative\": \"Q4 2024 budget allocation – operations\",\n                  \"channel\": \"Wire Transfer\",\n                  \"timestamp\": \"2024-10-01T08:00:00.000Z\",\n                  \"sender\": {\n                    \"name\": \"Bangladesh Ministry of Finance\",\n                    \"account\": \"GOV-MOF-MAIN-001\",\n                    \"institution\": \"Sonali Bank\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                },\n                {\n                  \"type\": \"transfer\",\n                  \"amount\": 1200000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"OPER-DISBURSEMENT-Q4\",\n                  \"narrative\": \"Operational disbursement – Q4 vendor payments\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-10-15T12:00:00.000Z\"\n                }\n              ]\n            },\n            {\n              \"customerType\": \"association\",\n              \"onboardingChannel\": \"Website\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"in_review\",\n              \"association_name\": \"Bangladesh Fintech Association\",\n              \"registration_number\": \"ASC-DHAKA-2016-205\",\n              \"established_date\": \"2016-09-20\",\n              \"member_count\": 120,\n              \"purpose\": \"Promote financial technology innovation\",\n              \"source_of_funds\": \"Member Subscriptions & Sponsorships\",\n              \"source_of_wealth\": \"Industry Contributions\",\n              \"account_purpose\": \"Operational Expenses & Event Funding\",\n              \"contact_person\": {\n                \"given_name\": \"Tahmina\",\n                \"surname\": \"Haque\",\n                \"email\": \"secretary@bdfintech.org\",\n                \"phone\": \"+8801912500001\",\n                \"designation\": \"Secretary General\"\n              },\n              \"address\": {\n                \"street\": \"Suite 12B, Green Delta Bhaban, 37 Dilkusha\",\n                \"city\": \"Dhaka\",\n                \"state\": \"Dhaka Division\",\n                \"country\": \"Bangladesh\",\n                \"zipcode\": \"1000\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 800000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"MEMBER-SUBS-2024\",\n                  \"narrative\": \"Annual membership subscriptions – 2024\",\n                  \"channel\": \"Online\",\n                  \"timestamp\": \"2024-01-31T10:00:00.000Z\"\n                },\n                {\n                  \"type\": \"withdrawal\",\n                  \"amount\": 350000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"EVENT-FINTEX-2024\",\n                  \"narrative\": \"FinTex 2024 conference expenses\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-03-15T09:00:00.000Z\"\n                }\n              ]\n            }\n          ]\n        },\n        {\n          \"name\": \"Beta Financial Chittagong Branch\",\n          \"branchCode\": \"BF-CTG-002\",\n          \"branchType\": \"Retail\",\n          \"email\": \"ctg@betafinancial.com\",\n          \"userName\": \"beta.ctg\",\n          \"phone\": \"+8809611002033\",\n          \"status\": \"Active\",\n          \"address\": {\n            \"street\": \"Agrabad Commercial Area, Block C\",\n            \"city\": \"Chittagong\",\n            \"state\": \"Chattogram Division\",\n            \"country\": \"Bangladesh\",\n            \"zipcode\": \"4100\"\n          },\n          \"manager\": {\n            \"name\": \"Mahbubur Rahman\",\n            \"email\": \"ctg.manager@betafinancial.com\",\n            \"phone\": \"+8801811000120\",\n            \"employeeId\": \"EMP-CTG-002\"\n          },\n          \"services\": [\"Deposits\", \"Withdrawals\", \"Trade Finance\", \"Remittance\"],\n          \"customers\": [\n            {\n              \"customerType\": \"cooperative\",\n              \"onboardingChannel\": \"In-Branch\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"pending\",\n              \"cooperative_name\": \"Chittagong Fishermen Cooperative Society\",\n              \"registration_number\": \"COOP-CTG-2008-017\",\n              \"established_date\": \"2008-04-10\",\n              \"member_count\": 340,\n              \"source_of_funds\": \"Member Contributions & Fish Sales Revenue\",\n              \"source_of_wealth\": \"Fishing Industry\",\n              \"account_purpose\": \"Collective Savings & Micro-Loans to Members\",\n              \"contact_person\": {\n                \"given_name\": \"Abdul\",\n                \"surname\": \"Karim\",\n                \"email\": \"akarim@ctgfishcoop.org\",\n                \"phone\": \"+8801911700001\",\n                \"designation\": \"President\"\n              },\n              \"address\": {\n                \"street\": \"Fishing Ghat Road\",\n                \"city\": \"Chittagong\",\n                \"state\": \"Chattogram Division\",\n                \"country\": \"Bangladesh\",\n                \"zipcode\": \"4200\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 250000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"COOP-CONTRIBUTION-NOV24\",\n                  \"narrative\": \"November 2024 member contributions\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-11-30T10:00:00.000Z\"\n                },\n                {\n                  \"type\": \"transfer\",\n                  \"amount\": 80000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"MICROLOAN-DEC24-001\",\n                  \"narrative\": \"Micro-loan disbursement – member batch December 2024\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-12-03T11:30:00.000Z\",\n                  \"beneficiary\": {\n                    \"name\": \"Member Pool Account\",\n                    \"account\": \"ACC-MEMBER-POOL-001\",\n                    \"institution\": \"Alpha Bank Ltd\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                }\n              ]\n            },\n            {\n              \"customerType\": \"individual\",\n              \"onboardingChannel\": \"Agent\",\n              \"country\": \"Bangladesh\",\n              \"kycStatus\": \"verified\",\n              \"given_name\": \"Fatema\",\n              \"surname\": \"Begum\",\n              \"date_of_birth\": \"1975-11-03\",\n              \"email\": \"fatema.begum.ctg@gmail.com\",\n              \"phone\": \"+8801912800001\",\n              \"occupation\": \"Business Owner\",\n              \"industry\": \"Retail Trade\",\n              \"employer_name\": \"Self-Employed\",\n              \"identificationNo\": \"NID-197511987654\",\n              \"source_of_funds\": \"Business Income\",\n              \"source_of_wealth\": \"Retail Business Profits\",\n              \"account_purpose\": \"Business Transactions & Savings\",\n              \"residential_address\": {\n                \"address\": \"House 8, Nasirabad Housing Society\",\n                \"suburb\": \"Nasirabad\",\n                \"state\": \"Chattogram\",\n                \"postcode\": \"4000\",\n                \"country\": \"Bangladesh\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 150000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"BSNS-INCOME-DEC24-001\",\n                  \"narrative\": \"Business sales proceeds – December 2024\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-12-10T10:00:00.000Z\"\n                },\n                {\n                  \"type\": \"transfer\",\n                  \"amount\": 50000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"REMIT-DEC24-001\",\n                  \"narrative\": \"Family remittance – Dhaka\",\n                  \"channel\": \"Mobile App\",\n                  \"timestamp\": \"2024-12-12T14:00:00.000Z\",\n                  \"beneficiary\": {\n                    \"name\": \"Rahim Begum\",\n                    \"account\": \"ACC-RB-0022\",\n                    \"institution\": \"Bkash\",\n                    \"institutionCountry\": \"Bangladesh\"\n                  }\n                },\n                {\n                  \"type\": \"exchange\",\n                  \"amount\": 500,\n                  \"currency\": \"USD\",\n                  \"convertedAmountAUD\": 775,\n                  \"status\": \"completed\",\n                  \"reference\": \"FX-2024-DEC-001\",\n                  \"narrative\": \"Foreign currency exchange for import payment\",\n                  \"channel\": \"Branch\",\n                  \"timestamp\": \"2024-12-15T09:30:00.000Z\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "description": "Full hierarchy import covering all 7 customer types.\n\n**Creates (users auto-generated from each entity's own email + userName):**\n- 2 Client users (userType: client, role: admin)\n- 4 Branch users (userType: branch, role: user)\n- 8 Customer users (userType: customer, found by emailHash or created)\n- 2 Clients (Alpha Bank, Beta Financial)\n- 4 Branches (2 per client)\n- 8 Customers — one of each type:\n  - individual × 2, company × 1, partnership × 1\n  - trust × 1, government_body × 1, association × 1, cooperative × 1\n- 15 Transactions\n\n**Variables auto-saved:** `importedClientId`, `importedBranchId`, `importedCustomerId`"
+          },
+          "response": []
+        },
+
+        {
+          "name": "Minimal Import — quick smoke test",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('success flag is true', () => pm.expect(res.success).to.be.true);",
+                  "pm.test('1 client created', () => pm.expect(res.summary.clients.created).to.equal(1));",
+                  "pm.test('1 branch created', () => pm.expect(res.summary.branches.created).to.equal(1));",
+                  "pm.test('1 customer created', () => pm.expect(res.summary.customers.created).to.equal(1));",
+                  "pm.test('1 transaction created', () => pm.expect(res.summary.transactions.created).to.equal(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/dummy-import",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "dummy-import"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"clients\": [\n    {\n      \"name\": \"Smoke Test Bank\",\n      \"clientType\": \"Bank\",\n      \"email\": \"smoke@testbank.com\",\n      \"status\": \"Active\",\n      \"branches\": [\n        {\n          \"name\": \"Smoke Test Main Branch\",\n          \"branchCode\": \"SMOKE-001\",\n          \"branchType\": \"Main\",\n          \"customers\": [\n            {\n              \"customerType\": \"individual\",\n              \"given_name\": \"Test\",\n              \"surname\": \"User\",\n              \"email\": \"test.user@smoke.com\",\n              \"phone\": \"+8801700000001\",\n              \"date_of_birth\": \"1990-01-01\",\n              \"occupation\": \"Tester\",\n              \"source_of_funds\": \"Employment\",\n              \"residential_address\": {\n                \"address\": \"1 Test Street\",\n                \"suburb\": \"Testville\",\n                \"state\": \"Dhaka\",\n                \"postcode\": \"1000\",\n                \"country\": \"Bangladesh\"\n              },\n              \"transactions\": [\n                {\n                  \"type\": \"deposit\",\n                  \"amount\": 1000,\n                  \"currency\": \"BDT\",\n                  \"status\": \"completed\",\n                  \"reference\": \"SMOKE-TXN-001\",\n                  \"narrative\": \"Smoke test deposit\",\n                  \"channel\": \"Branch\"\n                }\n              ]\n            }\n          ]\n        }\n      ]\n    }\n  ]\n}"
+            },
+            "description": "Bare-minimum import (no users block) — 1 Client, 1 Branch, 1 individual Customer, 1 Transaction. Use this to verify the endpoint is up before running the full import."
+          },
+          "response": []
+        }
+
+      ]
+    }
+
+  ]
+}
