@@ -29,6 +29,13 @@ const PolicyHubSchema = new Schema(
     metadata: { type: Schema.Types.Mixed, default: {} },
     isActive: { type: Boolean, default: false },
 
+    // generation status
+    status: {
+      type: String,
+      enum: ["pending", "completed", "failed"],
+      default: "pending",
+    },
+
     // version control
     versionNumber: { type: Number, default: 1 }, // current version number
     versions: [{ type: Schema.Types.ObjectId, ref: "PolicyHubVersion" }],

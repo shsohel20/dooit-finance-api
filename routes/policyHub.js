@@ -9,6 +9,7 @@ const {
   filterPolicyHubSection,
   downloadPolicyHubPDF,
   generatePolicyHub,
+  generatePolicyHubWebHook,
   listPolicyHubVersions,
   getPolicyHubVersion,
   restorePolicyHubVersion,
@@ -23,7 +24,10 @@ const router = express.Router();
 // const json50mb = express.json({ limit: "50mb" });
 router.use(express.json({ limit: "15mb" }));
 
-// Protect all routes
+// Public webhook — must be registered before the auth middleware
+router.route("/:id/webhook").post(generatePolicyHubWebHook);
+
+// Protect all routes below
 router.use(protect);
 router.use(authorize("admin"));
 
