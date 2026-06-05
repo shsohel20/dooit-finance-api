@@ -10,3 +10,5 @@ public/uploads/*
 
 ai.json
 SKILL.md
+
+config/config.env
