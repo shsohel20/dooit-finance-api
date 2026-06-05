@@ -251,6 +251,14 @@ exports.getPolicyHub = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/policy-hub/:id
 // @access  Private (Admin)
 // controllers/policyHubController.js (updated updatePolicyHub)
+const nextVersionNumberFor = async (policyHubId) => {
+  const latest = await PolicyHubVersion.findOne({ policyHub: policyHubId })
+    .sort({ versionNumber: -1 })
+    .select("versionNumber")
+    .lean();
+  return (latest?.versionNumber || 0) + 1;
+};
+
 exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
   const policyHub = await PolicyHub.findById(req.params.id);
   if (!policyHub)
@@ -258,10 +266,12 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404),
     );
 
-  // Snapshot current state to new version document
+  // Use the actual next available version to avoid duplicate key on the unique index
+  const nextVN = await nextVersionNumberFor(policyHub._id);
+
   const snapshot = await PolicyHubVersion.create({
     policyHub: policyHub._id,
-    versionNumber: policyHub.versionNumber || 1,
+    versionNumber: nextVN,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
@@ -270,11 +280,9 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
     editReason: req.body.editReason || "update-snapshot",
   });
 
-  // push snapshot id
   policyHub.versions = policyHub.versions || [];
   policyHub.versions.push(snapshot._id);
 
-  // Apply incoming updates
   const { docs, filePath, metadata, isActive } = req.body;
   if (docs !== undefined) policyHub.docs = docs;
   if (filePath !== undefined) policyHub.filePath = filePath;
@@ -286,8 +294,7 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
     };
   if (isActive !== undefined) policyHub.isActive = isActive;
 
-  // increment version number for the changed main doc
-  policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
+  policyHub.versionNumber = nextVN;
 
   await policyHub.save();
 
@@ -338,9 +345,11 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
   if (!version) return next(new ErrorResponse("Version not found", 404));
 
   // snapshot current state
+  const nextVN = await nextVersionNumberFor(policyHub._id);
+
   const snapshot = await PolicyHubVersion.create({
     policyHub: policyHub._id,
-    versionNumber: policyHub.versionNumber || 1,
+    versionNumber: nextVN,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
@@ -356,7 +365,7 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
   policyHub.filePath = version.filePath;
   policyHub.metadata = version.metadata;
   policyHub.isActive = version.isActive;
-  policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
+  policyHub.versionNumber = nextVN;
 
   await policyHub.save();
 

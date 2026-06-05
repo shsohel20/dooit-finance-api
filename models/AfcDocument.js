@@ -18,18 +18,6 @@ const metadataSchema = new Schema(
 
 const AfcDocumentSchema = new Schema(
   {
-    client: {
-      type: Schema.Types.ObjectId,
-      ref: "Client",
-      required: false,
-      index: true,
-    },
-    branch: {
-      type: Schema.Types.ObjectId,
-      ref: "Branch",
-      required: false,
-      index: true,
-    },
     filePath: { type: String, default: "", index: true },
     contentMd: { type: String, default: "" },
     contentB64: { type: String, default: "" },

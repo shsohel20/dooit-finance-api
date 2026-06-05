@@ -46,9 +46,9 @@ router.use(authorize("admin"));
 
 router
   .route("/")
-  .get(advancedResults(AfcDocument, ["client", "branch", "createdBy"]), getAfcDocuments)
+  .get(advancedResults(AfcDocument, ["createdBy"], null, { skipClientFilter: true }), getAfcDocuments)
   .post(
-    advancedResults(AfcDocument, ["client", "branch", "createdBy"], filterAfcDocumentSection),
+    advancedResults(AfcDocument, ["createdBy"], filterAfcDocumentSection, { skipClientFilter: true }),
     getAfcDocumentsPost
   );
 

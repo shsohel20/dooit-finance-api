@@ -341,6 +341,46 @@
       ]
     },
     {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "AI Generation Webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('policyHubId', res.data._id);",
+                  "  console.log('policyHubId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file_path\": \"/app/output/fintech/TechFlow_Financial_Pty_Ltd/risk_management_policy_TechFlow_Financial_Pty_Ltd_v2.md\",\n  \"content_md\": \"# TechFlow Financial Pty Ltd Risk Management Policy\\n\\n## Purpose\\nRisk is an inherent part of TechFlow Financial Pty Ltd's business...\",\n  \"metadata\": {\n    \"company\": \"TechFlow Financial Pty Ltd\",\n    \"industry\": \"fintech\",\n    \"document_type\": \"risk_management_policy\",\n    \"compliance_officer\": \"Sarah Johnson\",\n    \"version\": 2,\n    \"model\": \"qwen3-vl:235b-cloud\",\n    \"generated_at\": \"2026-05-19T06:10:12.942314\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub/{{policyHubId}}/webhook",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub", "{{policyHubId}}", "webhook"]
+            },
+            "description": "Public endpoint — no auth required. Called by the AI service to deliver generated document content back to the PolicyHub."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
       "name": "Template Actions",
       "item": [
         {

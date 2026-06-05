@@ -27,6 +27,9 @@ const normalizeMetadata = (metadata = {}) => ({
   generatedAt: metadata.generated_at || metadata.generatedAt || null,
 });
 
+// Resolves content from either camelCase (API-created) or snake_case (AI-direct-write) fields
+const resolveContent = (doc) => doc.contentMd || doc.get("content_md") || doc._doc?.content_md || "";
+
 exports.filterAfcDocumentSection = (doc, requestBody) => {
   if (requestBody.contentMd) {
     return doc.contentMd?.toLowerCase().includes(requestBody.contentMd.toLowerCase());
@@ -52,13 +55,6 @@ exports.getAfcDocumentsPost = asyncHandler(async (req, res) => {
 // @route   POST /api/v1/afc-documents/new
 // @access  Private (Admin)
 exports.createAfcDocument = asyncHandler(async (req, res, next) => {
-  const client = req?.user?.client?._id || null;
-  const branch = req?.user?.branch?._id || null;
-
-  if (!client) {
-    return next(new ErrorResponse("Unauthorized client", 401));
-  }
-
   const {
     file_path, filePath,
     content_md, contentMd,
@@ -68,8 +64,6 @@ exports.createAfcDocument = asyncHandler(async (req, res, next) => {
   } = req.body;
 
   const doc = await AfcDocument.create({
-    client,
-    branch,
     filePath: file_path || filePath || "",
     contentMd: content_md || contentMd || "",
     contentB64: content_b64 || contentB64 || "",
@@ -86,8 +80,6 @@ exports.createAfcDocument = asyncHandler(async (req, res, next) => {
 // @access  Private (Admin)
 exports.getAfcDocument = asyncHandler(async (req, res, next) => {
   const doc = await AfcDocument.findById(req.params.id)
-    .populate("client", "name")
-    .populate("branch", "name")
     .populate("createdBy", "name email");
 
   if (!doc) {
@@ -124,13 +116,13 @@ exports.updateAfcDocument = asyncHandler(async (req, res, next) => {
   if (status !== undefined) doc.status = status;
   if (metadata !== undefined) {
     doc.metadata = {
-      company:           metadata.company           ?? doc.metadata.company,
-      industry:          metadata.industry          ?? doc.metadata.industry,
-      documentType:      metadata.document_type     ?? metadata.documentType      ?? doc.metadata.documentType,
+      company:           metadata.company            ?? doc.metadata.company,
+      industry:          metadata.industry           ?? doc.metadata.industry,
+      documentType:      metadata.document_type      ?? metadata.documentType      ?? doc.metadata.documentType,
       complianceOfficer: metadata.compliance_officer ?? metadata.complianceOfficer ?? doc.metadata.complianceOfficer,
-      version:           metadata.version           ?? doc.metadata.version,
-      model:             metadata.model             ?? doc.metadata.model,
-      generatedAt:       metadata.generated_at      ?? metadata.generatedAt       ?? doc.metadata.generatedAt,
+      version:           metadata.version            ?? doc.metadata.version,
+      model:             metadata.model              ?? doc.metadata.model,
+      generatedAt:       metadata.generated_at       ?? metadata.generatedAt       ?? doc.metadata.generatedAt,
     };
   }
 
@@ -163,7 +155,7 @@ exports.downloadAfcDocumentPDF = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`AFC document not found with id ${req.params.id}`, 404));
   }
 
-  const htmlBody = marked.parse(doc.contentMd || "");
+  const htmlBody = marked.parse(resolveContent(doc));
   const html = `
     <html>
       <head>
@@ -206,7 +198,7 @@ exports.exportAfcDocumentDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`AFC document not found with id ${req.params.id}`, 404));
   }
 
-  const htmlBody = marked.parse(doc.contentMd || "");
+  const htmlBody = marked.parse(resolveContent(doc));
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${htmlBody}</body></html>`;
 
   const docxBuffer = await HTMLtoDOCX(html, null, {
@@ -224,13 +216,6 @@ exports.exportAfcDocumentDocx = asyncHandler(async (req, res, next) => {
 // @route   POST /api/v1/afc-documents/import-docx
 // @access  Private (Admin)
 exports.importAfcDocumentDocx = asyncHandler(async (req, res, next) => {
-  const client = req?.user?.client?._id || null;
-  const branch = req?.user?.branch?._id || null;
-
-  if (!client) {
-    return next(new ErrorResponse("Unauthorized client", 401));
-  }
-
   if (!req.file) {
     return next(new ErrorResponse("No .docx file uploaded", 400));
   }
@@ -243,8 +228,6 @@ exports.importAfcDocumentDocx = asyncHandler(async (req, res, next) => {
     : {};
 
   const doc = await AfcDocument.create({
-    client,
-    branch,
     filePath: "",
     contentMd: htmlContent,
     contentB64: Buffer.from(htmlContent).toString("base64"),
@@ -264,7 +247,7 @@ exports.upsertAfcDocument = asyncHandler(async (req, res, next) => {
 
   const filePath = _id || file_path;
   if (!filePath) {
-    return next(new ErrorResponse("file_path or _id is required", 400));
+    return next(new ErrorResponse("_id or file_path is required", 400));
   }
 
   const update = {
@@ -291,17 +274,12 @@ exports.afcDocumentToPolicyHub = asyncHandler(async (req, res, next) => {
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
 
-  if (!client) {
-    return next(new ErrorResponse("Unauthorized client", 401));
-  }
-
   const afcDoc = await AfcDocument.findById(req.params.id);
   if (!afcDoc) {
     return next(new ErrorResponse(`AFC document not found with id ${req.params.id}`, 404));
   }
 
-  // Convert markdown → sanitized HTML
-  const rawHtml = marked.parse(afcDoc.contentMd || "");
+  const rawHtml = marked.parse(resolveContent(afcDoc));
   const htmlContent = sanitizeHtml(rawHtml, SANITIZE_OPTIONS);
 
   const {
