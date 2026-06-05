@@ -249,6 +249,19 @@
             }
           },
           "response": []
+        },
+        {
+          "name": "Export Template as PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}/export-pdf",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}", "export-pdf"]
+            }
+          },
+          "response": []
         }
       ]
     },

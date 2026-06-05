@@ -12,6 +12,7 @@ const {
   filterPolicyHubTemplateSection,
   importFromDocx,
   exportToDocx,
+  exportToPdf,
 } = require("../controllers/policyHubTemplateController");
 
 const PolicyHubTemplate = require("../models/PolicyHubTemplate");
@@ -71,6 +72,9 @@ router
 
 // Export template docs as .docx download
 router.route("/:id/export-docx").get(exportToDocx);
+
+// Export template docs as PDF download
+router.route("/:id/export-pdf").get(exportToPdf);
 
 // Create a new PolicyHub from a template
 router.route("/:id/use").post(useTemplate);

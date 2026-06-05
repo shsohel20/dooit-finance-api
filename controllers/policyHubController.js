@@ -8,6 +8,8 @@ const { marked } = require("marked");
 const Diff = require("diff");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
 const sanitizeHtml = require("sanitize-html");
+const mammoth = require("mammoth");
+const HTMLtoDOCX = require("html-to-docx");
 
 /**
  * Filter helper for POST search
@@ -455,4 +457,88 @@ exports.downloadPolicyHubPDF = asyncHandler(async (req, res, next) => {
   } finally {
     if (browser) await browser.close();
   }
+});
+
+// @desc    Export PolicyHub docs as a .docx file
+// @route   GET /api/v1/policy-hub/:id/export-docx
+// @access  Private (Admin)
+exports.exportPolicyHubDocx = asyncHandler(async (req, res, next) => {
+  const policyHub = await PolicyHub.findById(req.params.id);
+  if (!policyHub) {
+    return next(new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404));
+  }
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${policyHub.docs}</body></html>`;
+
+  const docxBuffer = await HTMLtoDOCX(html, null, {
+    table: { row: { cantSplit: true } },
+    footer: true,
+    pageNumber: true,
+  });
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  res.setHeader("Content-Disposition", `attachment; filename=policyhub-${policyHub._id}.docx`);
+  res.send(docxBuffer);
+});
+
+// @desc    Import a .docx file and create a new PolicyHub from it
+// @route   POST /api/v1/policy-hub/import-docx
+// @access  Private (Admin)
+exports.importPolicyHubDocx = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
+  if (!client) {
+    return next(new ErrorResponse("Unauthorized client", 401));
+  }
+
+  if (!req.file) {
+    return next(new ErrorResponse("No .docx file uploaded", 400));
+  }
+
+  // Convert .docx buffer → sanitized HTML
+  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
+  const unsafeHtml = result.value;
+  const htmlContent = sanitizeHtml(unsafeHtml, {
+    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+      "h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td",
+    ]),
+    allowedAttributes: {
+      a: ["href", "name", "target"],
+      img: ["src", "alt", "width", "height"],
+    },
+  });
+
+  const metadata = req.body.metadata
+    ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)
+    : {};
+
+  const policyHub = await PolicyHub.create({
+    client,
+    branch,
+    docs: htmlContent,
+    filePath: "",
+    generatedBy: req.user?._id,
+    metadata: { source: "docx-import", ...metadata },
+    isActive: false,
+    status: "completed",
+    versionNumber: 1,
+    versions: [],
+  });
+
+  const versionDoc = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
+    versionNumber: 1,
+    docs: htmlContent,
+    filePath: "",
+    metadata: policyHub.metadata,
+    isActive: false,
+    editedBy: req.user?._id,
+    editReason: "docx-import",
+  });
+
+  policyHub.versions.push(versionDoc._id);
+  await policyHub.save();
+
+  res.status(201).json({ success: true, data: policyHub });
 });

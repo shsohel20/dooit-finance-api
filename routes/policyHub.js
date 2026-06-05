@@ -1,4 +1,6 @@
 const express = require("express");
+const multer = require("multer");
+const path = require("path");
 const {
   getPolicyHubs,
   getPolicyHubsPost,
@@ -14,7 +16,23 @@ const {
   getPolicyHubVersion,
   restorePolicyHubVersion,
   diffPolicyHubVersions,
+  exportPolicyHubDocx,
+  importPolicyHubDocx,
 } = require("../controllers/policyHubController");
+
+const docxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const mime = file.mimetype;
+    const allowed =
+      ext === ".docx" ||
+      mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    if (allowed) cb(null, true);
+    else cb(new Error("Only .docx files are allowed"), false);
+  },
+});
 
 const { saveAsTemplate } = require("../controllers/policyHubTemplateController");
 
@@ -52,6 +70,7 @@ router
 // Create PolicyHub
 router.route("/new").post(createPolicyHub);
 router.route("/generate").post(generatePolicyHub);
+router.route("/import-docx").post(docxUpload.single("file"), importPolicyHubDocx);
 
 // const json2mb = [
 //     express.json({ limit: "25mb" }),
@@ -66,6 +85,7 @@ router
   .delete(deletePolicyHub);
 
 router.route("/:id/download").get(downloadPolicyHubPDF);
+router.route("/:id/export-docx").get(exportPolicyHubDocx);
 
 ///Version control
 

@@ -68,6 +68,9 @@ const ewraDashboard = require("./ewra-dashboard");
 // ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
 const rgMapper = require("./rg-mapper");
 
+// ── AFC Documents ─────────────────────────────────────────────────────────────
+const afcDocument = require("./afc-document");
+
 // Mount routes
 router.use("/fileupload", fileUpload);
 router.use("/file-vault", fileVault);
@@ -140,5 +143,8 @@ router.use("/ewra-dashboard",     ewraDashboard);
 
 // ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
 router.use("/rg-mapper",          rgMapper);
+
+// ── AFC Documents ─────────────────────────────────────────────────────────────
+router.use("/afc-documents",      afcDocument);
 
 module.exports = router;

@@ -1,0 +1,313 @@
+{
+  "info": {
+    "name": "AFC Documents",
+    "description": "Full CRUD, import/export (.docx & PDF), and AI webhook upsert for AFC documents (collection: afc-documents).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "afcDocumentId",
+      "value": "",
+      "type": "string",
+      "description": "AfcDocument ObjectId — auto-set by Create / Import requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "CRUD",
+      "item": [
+        {
+          "name": "Create AFC Document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('afcDocumentId', res.data._id);",
+                  "  console.log('afcDocumentId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file_path\": \"/app/output/fintech/TechFlow_Financial_Pty_Ltd/risk_management_policy_v1.md\",\n  \"content_md\": \"# Risk Management Policy\\n\\n## Purpose\\nThis policy outlines risk management procedures...\",\n  \"content_b64\": \"\",\n  \"metadata\": {\n    \"company\": \"TechFlow Financial Pty Ltd\",\n    \"industry\": \"fintech\",\n    \"document_type\": \"risk_management_policy\",\n    \"compliance_officer\": \"Sarah Johnson\",\n    \"version\": 1,\n    \"model\": \"qwen3-vl:235b-cloud\",\n    \"generated_at\": \"2026-05-19T06:10:12.942314\"\n  },\n  \"status\": \"completed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/new",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "new"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List AFC Documents (GET)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents?page=1&limit=20",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "sort", "value": "-createdAt", "disabled": true }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List AFC Documents (POST filter)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentMd\": \"Risk Management\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents?page=1&limit=20",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get AFC Document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update AFC Document",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content_md\": \"# Risk Management Policy (Updated)\\n\\n## Purpose\\nRevised content...\",\n  \"status\": \"completed\",\n  \"metadata\": {\n    \"version\": 2,\n    \"compliance_officer\": \"Jane Smith\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete AFC Document",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Import / Export",
+      "item": [
+        {
+          "name": "Import from DOCX",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('afcDocumentId', res.data._id);",
+                  "  console.log('afcDocumentId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a .docx file to import"
+                },
+                {
+                  "key": "metadata",
+                  "value": "{\"company\":\"TechFlow Financial Pty Ltd\",\"industry\":\"fintech\",\"document_type\":\"risk_management_policy\",\"compliance_officer\":\"Sarah Johnson\"}",
+                  "type": "text",
+                  "description": "JSON object string"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/import-docx",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "import-docx"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export as PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}/download",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}", "download"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export as DOCX",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}/export-docx",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}", "export-docx"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "PolicyHub Actions",
+      "item": [
+        {
+          "name": "Push to PolicyHub",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('policyHubId', res.data._id);",
+                  "  console.log('policyHubId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false,\n  \"editReason\": \"afc-import\",\n  \"company\": \"TechFlow Financial Pty Ltd\",\n  \"industry\": \"fintech\",\n  \"documentType\": \"risk_management_policy\",\n  \"complianceOfficer\": \"Sarah Johnson\",\n  \"model\": \"qwen3-vl:235b-cloud\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/{{afcDocumentId}}/to-policy-hub",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "{{afcDocumentId}}", "to-policy-hub"]
+            },
+            "description": "Converts the AFC document's markdown content to HTML and creates a new PolicyHub document (with version 1 snapshot)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhook",
+      "item": [
+        {
+          "name": "Upsert by filePath (AI webhook)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('afcDocumentId', res.data._id);",
+                  "  console.log('afcDocumentId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"_id\": \"/app/output/fintech/TechFlow_Financial_Pty_Ltd/risk_management_policy_TechFlow_Financial_Pty_Ltd_v2.md\",\n  \"file_path\": \"/app/output/fintech/TechFlow_Financial_Pty_Ltd/risk_management_policy_TechFlow_Financial_Pty_Ltd_v2.md\",\n  \"content_md\": \"# TechFlow Financial Pty Ltd Risk Management Policy\\n\\n## Purpose\\nRisk is an inherent part of TechFlow Financial Pty Ltd's business...\",\n  \"content_b64\": \"IyBUZWNoRmxvdyBGaW5hbmNpYWwgUHR5IEx0ZCBSaXNrIE1hbmFnZW1lbnQgUG9saWN5\",\n  \"metadata\": {\n    \"company\": \"TechFlow Financial Pty Ltd\",\n    \"industry\": \"fintech\",\n    \"document_type\": \"risk_management_policy\",\n    \"compliance_officer\": \"Sarah Johnson\",\n    \"version\": 2,\n    \"model\": \"qwen3-vl:235b-cloud\",\n    \"generated_at\": \"2026-05-19T06:10:12.942314\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/afc-documents/upsert",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "afc-documents", "upsert"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

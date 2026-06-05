@@ -5,6 +5,7 @@ const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
 const mammoth = require("mammoth");
 const HTMLtoDOCX = require("html-to-docx");
+const puppeteer = require("puppeteer");
 
 /**
  * Filter helper for POST search on templates
@@ -274,4 +275,51 @@ exports.exportToDocx = asyncHandler(async (req, res, next) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(docxBuffer);
+});
+
+// @desc    Export a template's docs as a PDF file
+// @route   GET /api/v1/policy-hub-templates/:id/export-pdf
+// @access  Private (Admin)
+exports.exportToPdf = asyncHandler(async (req, res, next) => {
+  const template = await PolicyHubTemplate.findById(req.params.id);
+  if (!template) {
+    return next(new ErrorResponse(`Template not found with id ${req.params.id}`, 404));
+  }
+
+  const htmlContent = `
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${template.name}</title>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          h1 { text-align: center; }
+        </style>
+      </head>
+      <body>
+        <h1>${template.name}</h1>
+        <div>${template.docs}</div>
+      </body>
+    </html>
+  `;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({ format: "A4" });
+
+    const filename = `template-${template._id}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    return next(new ErrorResponse("Error generating PDF", 500));
+  } finally {
+    if (browser) await browser.close();
+  }
 });
