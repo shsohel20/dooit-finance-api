@@ -16,6 +16,8 @@ const {
   diffPolicyHubVersions,
 } = require("../controllers/policyHubController");
 
+const { saveAsTemplate } = require("../controllers/policyHubTemplateController");
+
 const PolicyHub = require("../models/PolicyHub");
 const advancedResults = require("../middleware/advancedResults");
 const { protect, authorize } = require("../middleware/auth");
@@ -72,5 +74,7 @@ router.route("/:id/versions/:versionNumber").get(getPolicyHubVersion);
 router.route("/:id/restore/:versionNumber").post(restorePolicyHubVersion);
 
 router.route("/:id/diff").get(diffPolicyHubVersions);
+
+router.route("/:id/save-as-template").post(saveAsTemplate);
 
 module.exports = router;
