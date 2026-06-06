@@ -715,7 +715,7 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
   const INVITE_BASE =
     process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
 
-  const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
+  const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}?client=${client}`;
 
   // ---------------------------
   // Send email / sms
