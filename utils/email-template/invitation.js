@@ -8,33 +8,37 @@ const InvitationEmailTemplate = (companyName, inviteLink) => {
   <title>You've Been Invited to ${companyName}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
-    body{background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0f172a}
+    body{background:#eef2ff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0f172a}
     .wrap{padding:40px 16px}
-    .card{max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
-    .hdr{background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:48px 40px;text-align:center}
-    .hdr .brand{color:rgba(255,255,255,.85);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:20px}
-    .hdr .icon-wrap{width:72px;height:72px;background:rgba(255,255,255,.15);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:20px;font-size:30px;line-height:72px;border:2px solid rgba(255,255,255,.25)}
-    .hdr h1{color:#fff;font-size:26px;font-weight:700;letter-spacing:-.4px;margin-bottom:10px}
-    .hdr p{color:rgba(255,255,255,.75);font-size:15px;line-height:1.5}
+    .card{max-width:600px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 24px rgba(79,70,229,.12)}
+    .hdr{background:linear-gradient(135deg,#0f172a 0%,#312e81 50%,#4f46e5 100%);padding:52px 40px 44px;text-align:center;position:relative}
+    .hdr .brand{color:rgba(199,210,254,.9);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:2.5px;margin-bottom:22px}
+    .hdr .icon-wrap{width:76px;height:76px;background:rgba(255,255,255,.12);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:22px;font-size:32px;line-height:76px;border:2px solid rgba(199,210,254,.35)}
+    .hdr h1{color:#fff;font-size:28px;font-weight:700;letter-spacing:-.5px;margin-bottom:10px}
+    .hdr p{color:rgba(199,210,254,.85);font-size:15px;line-height:1.6}
+    .hdr p strong{color:#fff}
+    .accent-bar{height:4px;background:linear-gradient(90deg,#818cf8,#a78bfa,#c4b5fd)}
     .body{padding:44px 40px}
-    .steps{counter-reset:steps;list-style:none;margin:24px 0}
-    .steps li{display:flex;align-items:flex-start;gap:16px;padding:16px 0;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;line-height:1.5}
+    .greeting{font-size:16px;color:#1e293b;line-height:1.7;margin-bottom:24px}
+    .divider{border:none;border-top:1px solid #e0e7ff;margin:28px 0}
+    .section-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#818cf8;margin-bottom:12px}
+    .steps{list-style:none;margin:0 0 8px}
+    .steps li{display:flex;align-items:flex-start;gap:14px;padding:14px 0;border-bottom:1px solid #f0f4ff;font-size:14px;color:#374151;line-height:1.6}
     .steps li:last-child{border-bottom:none}
-    .step-num{flex-shrink:0;width:28px;height:28px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#2563eb;line-height:1}
-    .text{font-size:15px;color:#475569;line-height:1.7;margin-bottom:20px}
-    .divider{border:none;border-top:1px solid #f1f5f9;margin:28px 0}
-    .cta-wrap{text-align:center;margin:36px 0}
-    .cta-btn{display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;text-decoration:none;padding:15px 40px;border-radius:8px;font-size:16px;font-weight:600;letter-spacing:-.1px;box-shadow:0 4px 12px rgba(37,99,235,.35)}
-    .fallback{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-top:24px}
-    .fallback p{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:8px}
-    .fallback a{color:#2563eb;font-size:12px;word-break:break-all;text-decoration:none}
-    .expiry-note{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px;margin-top:24px}
-    .expiry-note p{font-size:13px;color:#92400e;line-height:1.5}
-    .signature{margin-top:28px;font-size:15px;color:#374151;line-height:1.7}
-    .ftr{background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;text-align:center}
-    .ftr p{color:#94a3b8;font-size:12px;line-height:1.7}
-    .ftr a{color:#64748b;text-decoration:none}
-    @media(max-width:600px){.hdr,.body{padding:32px 20px}.ftr{padding:16px 20px}.cta-btn{padding:13px 28px;font-size:15px}}
+    .step-num{flex-shrink:0;width:30px;height:30px;background:linear-gradient(135deg,#e0e7ff,#c7d2fe);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#4338ca;line-height:1}
+    .cta-wrap{text-align:center;margin:36px 0 28px}
+    .cta-btn{display:inline-block;background-color:#4f46e5;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);color:#ffffff!important;text-decoration:none;padding:16px 44px;border-radius:10px;font-size:16px;font-weight:700;letter-spacing:-.1px;box-shadow:0 6px 20px rgba(79,70,229,.4)}
+    .fallback{background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:16px 20px;margin-top:4px}
+    .fallback p{font-size:13px;color:#6d28d9;line-height:1.6;margin-bottom:6px}
+    .fallback a{color:#4f46e5;font-size:12px;word-break:break-all;text-decoration:none}
+    .expiry-note{background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:16px 20px;margin-top:20px}
+    .expiry-note p{font-size:13px;color:#92400e;line-height:1.6}
+    .signature{margin-top:32px;font-size:15px;color:#374151;line-height:1.9;padding-top:24px;border-top:1px solid #e0e7ff}
+    .signature strong{color:#4338ca}
+    .ftr{background:#f5f3ff;border-top:1px solid #ddd6fe;padding:24px 40px;text-align:center}
+    .ftr p{color:#7c6fd4;font-size:12px;line-height:1.7}
+    .ftr a{color:#6d28d9;text-decoration:none}
+    @media(max-width:600px){.hdr,.body{padding:32px 20px}.ftr{padding:16px 20px}.cta-btn{padding:14px 30px;font-size:15px}}
   </style>
 </head>
 <body>
@@ -44,18 +48,19 @@ const InvitationEmailTemplate = (companyName, inviteLink) => {
         <div class="brand">${companyName}</div>
         <div class="icon-wrap">&#128231;</div>
         <h1>You've Been Invited</h1>
-        <p>You have been invited to join the <strong style="color:#fff">${companyName}</strong> platform.<br/>
+        <p>You have been invited to join the <strong>${companyName}</strong> platform.<br/>
         Accept your invitation to get started.</p>
       </div>
+      <div class="accent-bar"></div>
       <div class="body">
-        <p class="text">
+        <p class="greeting">
           Hello,<br/><br/>
           A member of the <strong>${companyName}</strong> team has invited you to create
           your account on the Dooit compliance platform. Click the button below to accept
           your invitation and complete your registration.
         </p>
         <hr class="divider"/>
-        <p style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:4px">Getting Started</p>
+        <p class="section-label">Getting Started</p>
         <ul class="steps">
           <li>
             <span class="step-num">1</span>
@@ -71,7 +76,7 @@ const InvitationEmailTemplate = (companyName, inviteLink) => {
           </li>
         </ul>
         <div class="cta-wrap">
-          <a href="${inviteLink}" class="cta-btn">Accept Invitation &rarr;</a>
+          <a href="${inviteLink}" class="cta-btn" style="display:inline-block;background-color:#4f46e5;background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);color:#ffffff!important;text-decoration:none;padding:16px 44px;border-radius:10px;font-size:16px;font-weight:700">Accept Invitation &rarr;</a>
         </div>
         <div class="fallback">
           <p>Button not working? Copy and paste this link into your browser:</p>
