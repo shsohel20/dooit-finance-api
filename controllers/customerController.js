@@ -24,6 +24,7 @@ const {
   findOrCreateJourney,
   syncJourneyStatus,
 } = require("../services/journeyService");
+const OnboardingJourney = require("../models/OnboardingJourney");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -52,6 +53,13 @@ exports.getCustomers = asyncHandler(async (req, res, next) => {
 // @route  /api/v1/clients/:id
 // @access Public
 exports.getCustomer = asyncHandler(async (req, res, next) => {
+
+  const client =
+    req?.user?.client?._id || null;
+
+  const branch =
+    req?.user?.branch?._id || null;
+
   const customer = await Customer.findById(req.params.id).populate("user");
   if (!customer) {
     return next(
@@ -67,9 +75,20 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
     data.user = customer.user.decryptForRole(userRole);
   }
 
+  const filter = { customer: req.params.id };
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+
+  const journeys = await OnboardingJourney.find(filter)
+    .populate({ path: "client", select: "name" })
+    .populate({ path: "branch", select: "name" })
+    .sort({ createdAt: -1 })
+    .lean({ virtuals: true });
+
   res.status(200).json({
     success: true,
     data,
+    journeys
   });
 });
 

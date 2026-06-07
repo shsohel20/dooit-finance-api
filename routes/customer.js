@@ -73,8 +73,8 @@ router.get(
 
 
 router
-  .route("/:id", protect, authorize("admin", "client", "branch"))
-  .get(getCustomer);
+  .route("/:id")
+  .get(protect, authorize("admin", "client", "branch"), getCustomer);
 // .put(updateClient)
 // .delete(deleteClient);
 
