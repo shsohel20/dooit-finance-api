@@ -25,6 +25,7 @@ const {
   syncJourneyStatus,
 } = require("../services/journeyService");
 const OnboardingJourney = require("../models/OnboardingJourney");
+const { buildSeedJourney } = require("../utils/journeyUtils");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -85,10 +86,12 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
     .sort({ createdAt: -1 })
     .lean({ virtuals: true });
 
+  const journeyData = journeys.length > 0 ? journeys : [buildSeedJourney(customer)];
+
   res.status(200).json({
     success: true,
     data,
-    journeys
+    journeys: journeyData,
   });
 });
 
@@ -2188,12 +2191,6 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
   }
 });
 
-// small helper to safely escape regex chars for name search
-function escapeRegExp(string) {
-  return String(string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-// small helper to safely escape regex chars for name search
 function escapeRegExp(string) {
   return String(string || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
