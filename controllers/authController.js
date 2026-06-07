@@ -6,20 +6,9 @@ const Otp = require("../models/Otp");
 const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
-const { hashForSearch, decrypt } = require("../utils/encryption");
-const mongoose = require("mongoose");
-
-// Fetches the raw email from MongoDB, bypassing all Mongoose hooks.
-// post("init") mutates user.email to "***" before any controller code runs,
-// so we must go to the raw collection to get the encrypted value and decrypt it.
-const getRawEmail = async (userId) => {
-  const raw = await mongoose.connection.db
-    .collection("users")
-    .findOne({ _id: userId }, { projection: { email: 1, isDataEncrypted: 1 } });
-  if (!raw) return null;
-  if (raw.isDataEncrypted) return decrypt(raw.email);
-  return raw.email;
-};
+const { hashForSearch } = require("../utils/encryption");
+const { otpVerificationHtml, passwordResetHtml } = require("../utils/email-template/otpEmailTemplate");
+const { getRawEmail, getRawName } = require("../utils/rawUserFields");
 
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
@@ -161,8 +150,8 @@ exports.register = asyncHandler(async (req, res, next) => {
   if (!otp) {
     return next(new ErrorResponse(`Otp Created Failed`), 404);
   }
-  const subject = "Confirmation Token";
-  const message = `You need to confirm your account through the <strong>OTP</strong>, \n\n ${code}`;
+  const subject = "Verify Your Account – Confirmation Code";
+  const message = otpVerificationHtml(code, user.name);
   sendTokenResponse(user, 200, res);
   optSend(user, message, subject, res, next);
 
@@ -508,13 +497,12 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
 
   const resetUrl = `${req.body.clientUrl}/auth/reset-password/${resetToken}`;
 
-  const message = `You are receiving this email because you has requested the reset
-  of a password, Please make a PUT request to: \n\n ${resetUrl}`;
+  const message = passwordResetHtml(resetUrl, await getRawName(user._id));
 
   try {
     await sendEmail({
       email: await getRawEmail(user._id),
-      subject: "Password reset token",
+      subject: "Reset Your Password – Dooit",
       message,
     });
     res.status(200).json({
@@ -756,10 +744,9 @@ const createAndSendOtp = async (user, res, next) => {
     return next(new ErrorResponse("Otp Creation Failed", 500));
   }
 
-  const subject = "Confirmation Token";
-  const message = `You need to confirm your account through the <strong>OTP</strong>: \n\n ${code}`;
+  const subject = "Verify Your Account – Confirmation Code";
+  const message = otpVerificationHtml(code, user.name);
 
-  // use your existing optSend which sends the HTTP response
   return optSend(user, message, subject, res, next);
 };
 // New endpoint: resend OTP

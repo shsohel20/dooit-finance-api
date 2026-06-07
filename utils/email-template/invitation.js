@@ -1,92 +1,99 @@
 const InvitationEmailTemplate = (companyName, inviteLink) => {
+  const year = new Date().getFullYear();
   return `<!DOCTYPE html>
-<html lang="en" style="font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>You're Invited!</title>
-    <style>
-      body {
-        background-color: #f8f9fb;
-        margin: 0;
-        padding: 0;
-        color: #333333;
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      }
-      .container {
-        max-width: 600px;
-        background: #ffffff;
-        margin: 30px auto;
-        padding: 40px;
-        border-radius: 12px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.08);
-      }
-      .logo {
-        text-align: center;
-        margin-bottom: 20px;
-      }
-      .logo h1 {
-        color: #4caf50;
-        font-size: 28px;
-        margin: 0;
-      }
-      .content {
-        line-height: 1.6;
-        font-size: 16px;
-      }
-      .btn {
-        display: inline-block;
-        background-color: #4caf50;
-        color: #ffffff;
-        text-decoration: none;
-        padding: 12px 24px;
-        border-radius: 6px;
-        margin-top: 20px;
-        font-weight: 600;
-      }
-      .btn:hover {
-        background-color: #43a047;
-      }
-      .footer {
-        text-align: center;
-        font-size: 13px;
-        color: #999999;
-        margin-top: 40px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <div class="logo">
-        <h1>${companyName}</h1>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>You've Been Invited to ${companyName}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0f172a}
+    .wrap{padding:40px 16px}
+    .card{max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    .hdr{background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:48px 40px;text-align:center}
+    .hdr .brand{color:rgba(255,255,255,.85);font-size:13px;font-weight:600;text-transform:uppercase;letter-spacing:2px;margin-bottom:20px}
+    .hdr .icon-wrap{width:72px;height:72px;background:rgba(255,255,255,.15);border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-bottom:20px;font-size:30px;line-height:72px;border:2px solid rgba(255,255,255,.25)}
+    .hdr h1{color:#fff;font-size:26px;font-weight:700;letter-spacing:-.4px;margin-bottom:10px}
+    .hdr p{color:rgba(255,255,255,.75);font-size:15px;line-height:1.5}
+    .body{padding:44px 40px}
+    .steps{counter-reset:steps;list-style:none;margin:24px 0}
+    .steps li{display:flex;align-items:flex-start;gap:16px;padding:16px 0;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;line-height:1.5}
+    .steps li:last-child{border-bottom:none}
+    .step-num{flex-shrink:0;width:28px;height:28px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#2563eb;line-height:1}
+    .text{font-size:15px;color:#475569;line-height:1.7;margin-bottom:20px}
+    .divider{border:none;border-top:1px solid #f1f5f9;margin:28px 0}
+    .cta-wrap{text-align:center;margin:36px 0}
+    .cta-btn{display:inline-block;background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff;text-decoration:none;padding:15px 40px;border-radius:8px;font-size:16px;font-weight:600;letter-spacing:-.1px;box-shadow:0 4px 12px rgba(37,99,235,.35)}
+    .fallback{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px 20px;margin-top:24px}
+    .fallback p{font-size:13px;color:#64748b;line-height:1.6;margin-bottom:8px}
+    .fallback a{color:#2563eb;font-size:12px;word-break:break-all;text-decoration:none}
+    .expiry-note{background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:16px 20px;margin-top:24px}
+    .expiry-note p{font-size:13px;color:#92400e;line-height:1.5}
+    .signature{margin-top:28px;font-size:15px;color:#374151;line-height:1.7}
+    .ftr{background:#f8fafc;border-top:1px solid #e2e8f0;padding:24px 40px;text-align:center}
+    .ftr p{color:#94a3b8;font-size:12px;line-height:1.7}
+    .ftr a{color:#64748b;text-decoration:none}
+    @media(max-width:600px){.hdr,.body{padding:32px 20px}.ftr{padding:16px 20px}.cta-btn{padding:13px 28px;font-size:15px}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="hdr">
+        <div class="brand">${companyName}</div>
+        <div class="icon-wrap">&#128231;</div>
+        <h1>You've Been Invited</h1>
+        <p>You have been invited to join the <strong style="color:#fff">${companyName}</strong> platform.<br/>
+        Accept your invitation to get started.</p>
       </div>
-
-      <div class="content">
-        <h2>Hello,</h2>
-        <p>
-          You've been invited by <strong>${companyName}</strong> to create your account on our platform.
+      <div class="body">
+        <p class="text">
+          Hello,<br/><br/>
+          A member of the <strong>${companyName}</strong> team has invited you to create
+          your account on the Dooit compliance platform. Click the button below to accept
+          your invitation and complete your registration.
         </p>
-        <p>
-          Please click the button below to complete your registration and get started.
-        </p>
-
-        <p style="text-align: center;">
-          <a href="${inviteLink}" class="btn">Accept Invitation</a>
-        </p>
-
-        <p>
-          If the button doesn’t work, you can copy and paste this link into your browser:<br />
+        <hr class="divider"/>
+        <p style="font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:4px">Getting Started</p>
+        <ul class="steps">
+          <li>
+            <span class="step-num">1</span>
+            <span><strong>Accept the invitation</strong> by clicking the button below</span>
+          </li>
+          <li>
+            <span class="step-num">2</span>
+            <span><strong>Create your account</strong> by setting a secure password</span>
+          </li>
+          <li>
+            <span class="step-num">3</span>
+            <span><strong>Access the platform</strong> and start collaborating with your team</span>
+          </li>
+        </ul>
+        <div class="cta-wrap">
+          <a href="${inviteLink}" class="cta-btn">Accept Invitation &rarr;</a>
+        </div>
+        <div class="fallback">
+          <p>Button not working? Copy and paste this link into your browser:</p>
           <a href="${inviteLink}">${inviteLink}</a>
-        </p>
-
-        <p>Thank you,<br />The <strong>${companyName}</strong> Team</p>
+        </div>
+        <div class="expiry-note">
+          <p>&#9200; This invitation link will expire in <strong>72 hours</strong>.
+          If you did not expect this email, you can safely ignore it — no account will be created without your action.</p>
+        </div>
+        <div class="signature">
+          Regards,<br/>
+          <strong>The ${companyName} Team</strong>
+        </div>
       </div>
-
-      <div class="footer">
-        &copy; 2025 ${companyName}. All rights reserved.
+      <div class="ftr">
+        <p>&copy; ${year} ${companyName}. All rights reserved.<br/>
+        You received this invitation because someone at ${companyName} added your email address.</p>
       </div>
     </div>
-  </body>
+  </div>
+</body>
 </html>`;
 };
+
 module.exports = InvitationEmailTemplate;

@@ -156,129 +156,294 @@ cc: Senior Compliance Officer`,
 /**
  * HTML Email Templates with responsive design
  */
+const sharedEmailStyles = `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#0f172a}
+    .wrap{padding:40px 16px}
+    .card{max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08)}
+    .hdr{padding:32px 40px;text-align:center}
+    .hdr .overline{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:rgba(255,255,255,.7);margin-bottom:10px}
+    .hdr h1{color:#fff;font-size:20px;font-weight:700;letter-spacing:-.3px;margin-bottom:6px}
+    .hdr .sub{color:rgba(255,255,255,.75);font-size:13px}
+    .body{padding:36px 40px}
+    .greeting{font-size:15px;color:#1e293b;margin-bottom:20px;line-height:1.6}
+    .text{font-size:14px;color:#475569;line-height:1.7;margin-bottom:16px}
+    .divider{border:none;border-top:1px solid #f1f5f9;margin:24px 0}
+    .section-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:12px}
+    .case-grid{display:flex;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;margin:20px 0}
+    .case-cell{flex:1;padding:14px 18px;background:#f8fafc;border-right:1px solid #e2e8f0}
+    .case-cell:last-child{border-right:none}
+    .cell-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#94a3b8;margin-bottom:4px}
+    .cell-value{font-size:13px;color:#1e293b;font-weight:600}
+    .items-box{background:#f8fafc;border-radius:8px;padding:20px;margin:20px 0;border:1px solid #e2e8f0}
+    .items-box h3{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#64748b;margin-bottom:14px}
+    .items-list{list-style:none}
+    .items-list li{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:14px;color:#374151;line-height:1.5}
+    .items-list li:last-child{border-bottom:none}
+    .item-dot{flex-shrink:0;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;line-height:1}
+    .deadline-box{border-left:4px solid;border-radius:0 8px 8px 0;padding:18px 20px;margin:20px 0}
+    .deadline-label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:6px}
+    .deadline-date{font-size:20px;font-weight:800;color:#0f172a}
+    .consequence-box{border-radius:8px;padding:20px;margin:20px 0}
+    .consequence-box h3{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px}
+    .action-row{text-align:center;margin:28px 0;display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+    .btn{display:inline-block;padding:12px 24px;border-radius:7px;font-size:14px;font-weight:600;text-decoration:none;letter-spacing:-.1px}
+    .btn-primary{background:#2563eb;color:#fff}
+    .btn-secondary{background:#64748b;color:#fff}
+    .signature{margin-top:24px;font-size:14px;color:#374151;line-height:1.7}
+    .ftr{padding:20px 40px;text-align:center;border-top:1px solid #e2e8f0}
+    .ftr p{color:#94a3b8;font-size:12px;line-height:1.6}
+    .ftr a{color:#64748b;text-decoration:none}
+    @media(max-width:600px){
+      .hdr,.body{padding:24px 20px}
+      .ftr{padding:16px 20px}
+      .case-grid{flex-direction:column}
+      .case-cell{border-right:none;border-bottom:1px solid #e2e8f0}
+      .case-cell:last-child{border-bottom:none}
+      .action-row{flex-direction:column;align-items:center}
+      .btn{width:100%;max-width:260px;text-align:center}
+    }`;
+
 const htmlTemplates = {
+  initial: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Compliance Information Request</title>
+  <style>${sharedEmailStyles}</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="hdr" style="background:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%)">
+        <div class="overline">Compliance Department</div>
+        <h1>Information Request</h1>
+        <div class="sub">Case: {{Case_Number}} &mdash; {{Customer_Name}}</div>
+      </div>
+      <div class="body">
+        <p class="greeting">Dear {{Primary_Contact_Name}},</p>
+        <p class="text">
+          As part of our standard compliance review for <strong>{{Customer_Name}}</strong>,
+          we require the following information and documentation. Please provide all items
+          by the deadline stated below.
+        </p>
+        <div class="section-title">Case Reference</div>
+        <div class="case-grid">
+          <div class="case-cell">
+            <div class="cell-label">Customer</div>
+            <div class="cell-value">{{Customer_Name}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">Case Number</div>
+            <div class="cell-value">{{Case_Number}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">UID</div>
+            <div class="cell-value">{{UID}}</div>
+          </div>
+        </div>
+        <hr class="divider"/>
+        <div class="section-title">Items Required</div>
+        <div class="items-box">
+          <ul class="items-list">{{Requested_Items_HTML}}</ul>
+        </div>
+        <div class="deadline-box" style="background:#eff6ff;border-color:#2563eb">
+          <div class="deadline-label" style="color:#2563eb">Response Deadline</div>
+          <div class="deadline-date">{{Response_Deadline}}</div>
+        </div>
+        <div class="section-title">Submission Instructions</div>
+        <p class="text">
+          Please email your response to <a href="mailto:{{Reply_To_Email}}" style="color:#2563eb;font-weight:600">{{Reply_To_Email}}</a>
+          with the case number in the subject line. Documents should be provided as PDF
+          or clear scanned copies. If any item is unavailable, please provide a written
+          explanation and expected availability date.
+        </p>
+        <div class="action-row">
+          <a href="mailto:{{Reply_To_Email}}?subject=Compliance Response - {{Case_Number}}" class="btn btn-primary">Submit Documents</a>
+          <a href="mailto:{{Reply_To_Email}}?subject=Query - {{Case_Number}}" class="btn btn-secondary">Ask a Question</a>
+        </div>
+        <p class="signature">
+          Sincerely,<br/>
+          <strong>Compliance Department</strong><br/>
+          {{Client_Name}}
+        </p>
+      </div>
+      <div class="ftr" style="background:#f8fafc">
+        <p>Contact: <a href="mailto:{{Reply_To_Email}}">{{Reply_To_Email}}</a> &mdash; Case Ref: {{Case_Number}}</p>
+        <p style="margin-top:10px">This email contains confidential information intended solely for the addressed recipient.<br/>If you are not the intended recipient, please notify us immediately and delete this message.</p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`,
+
   followup: `<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Compliance Follow-up Required</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #333; background-color: #f6f6f6; padding: 20px; }
-        .email-container { max-width: 600px; margin: 0 auto; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #1e3c72, #2a5298); color: white; padding: 30px; text-align: center; }
-        .header h1 { font-size: 24px; margin-bottom: 8px; font-weight: 600; }
-        .header .subtitle { font-size: 16px; opacity: 0.9; }
-        .content { padding: 30px; }
-        .urgency-banner { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin-bottom: 25px; display: flex; align-items: center; gap: 12px; }
-        .urgency-banner .icon { font-size: 20px; color: #e74c3c; }
-        .deadline-section { background: #f8f9fa; border-left: 4px solid #e74c3c; padding: 20px; margin: 25px 0; border-radius: 0 4px 4px 0; }
-        .deadline-label { font-weight: 600; color: #e74c3c; margin-bottom: 8px; }
-        .deadline-date { font-size: 18px; font-weight: 700; color: #2c3e50; }
-        .requested-items { background: #f8f9fa; border-radius: 6px; padding: 20px; margin: 25px 0; }
-        .requested-items h3 { color: #2c3e50; margin-bottom: 15px; font-size: 16px; }
-        .items-list { list-style: none; }
-        .items-list li { padding: 10px 0; border-bottom: 1px solid #e9ecef; display: flex; align-items: flex-start; gap: 10px; }
-        .items-list li:last-child { border-bottom: none; }
-        .item-bullet { color: #3498db; font-weight: bold; min-width: 20px; }
-        .consequences { background: #ffeaa7; border-radius: 6px; padding: 20px; margin: 25px 0; }
-        .consequences h3 { color: #e74c3c; margin-bottom: 15px; font-size: 16px; }
-        .action-buttons { text-align: center; margin: 30px 0; }
-        .btn { display: inline-block; padding: 12px 30px; background: #3498db; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 0 10px; transition: background 0.3s ease; }
-        .btn-primary { background: #3498db; }
-        .btn-primary:hover { background: #2980b9; }
-        .btn-secondary { background: #95a5a6; }
-        .btn-secondary:hover { background: #7f8c8d; }
-        .footer { background: #2c3e50; color: white; padding: 30px; text-align: center; }
-        .footer a { color: #3498db; text-decoration: none; }
-        .case-details { background: #ecf0f1; padding: 15px; border-radius: 6px; margin: 20px 0; font-size: 14px; }
-        .detail-row { display: flex; justify-content: space-between; margin-bottom: 8px; }
-        .detail-label { font-weight: 600; color: #7f8c8d; }
-        @media (max-width: 600px) {
-            .content { padding: 20px; }
-            .header { padding: 20px; }
-            .header h1 { font-size: 20px; }
-            .action-buttons { text-align: left; }
-            .btn { display: block; margin: 10px 0; text-align: center; }
-            .detail-row { flex-direction: column; }
-        }
-    </style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Compliance Follow-up Required</title>
+  <style>${sharedEmailStyles}</style>
 </head>
 <body>
-    <div class="email-container">
-        <div class="header">
-            <h1>COMPLIANCE FOLLOW-UP REQUIRED</h1>
-            <div class="subtitle">Case: {{Case_Number}} - {{Customer_Name}}</div>
+  <div class="wrap">
+    <div class="card">
+      <div class="hdr" style="background:linear-gradient(135deg,#92400e 0%,#d97706 100%)">
+        <div class="overline">Second Request &mdash; Compliance Department</div>
+        <h1>Follow-Up Required</h1>
+        <div class="sub">Case: {{Case_Number}} &mdash; {{Customer_Name}}</div>
+      </div>
+      <div class="body">
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;margin-bottom:24px;display:flex;gap:12px;align-items:flex-start">
+          <span style="font-size:18px;flex-shrink:0">&#9888;&#65039;</span>
+          <div>
+            <strong style="font-size:14px;color:#92400e">Urgent Attention Required</strong><br/>
+            <span style="font-size:13px;color:#b45309">Items from our initial request dated {{Initial_Request_Date}} remain outstanding.</span>
+          </div>
         </div>
-        
-        <div class="content">
-            <div class="urgency-banner">
-                <div class="icon">⚠️</div>
-                <div>
-                    <strong>URGENT ATTENTION REQUIRED</strong><br>
-                    Second request for outstanding compliance information
-                </div>
-            </div>
-            
-            <p>Dear {{Primary_Contact_Name}},</p>
-            
-            <p>We note that the following requested items remain outstanding from our initial communication dated {{Initial_Request_Date}}.</p>
-            
-            <div class="case-details">
-                <div class="detail-row">
-                    <span class="detail-label">Customer:</span>
-                    <span>{{Customer_Name}}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Case Number:</span>
-                    <span>{{Case_Number}}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">UID:</span>
-                    <span>{{UID}}</span>
-                </div>
-            </div>
-            
-            <div class="requested-items">
-                <h3>OUTSTANDING ITEMS REQUIRED:</h3>
-                <ul class="items-list">
-                    {{Requested_Items_HTML}}
-                </ul>
-            </div>
-            
-            <div class="deadline-section">
-                <div class="deadline-label">FINAL SUBMISSION DEADLINE</div>
-                <div class="deadline-date">{{Followup_Deadline}}</div>
-            </div>
-            
-            <div class="consequences">
-                <h3>IMPORTANT: FAILURE TO PROVIDE REQUESTED INFORMATION MAY RESULT IN:</h3>
-                <ul class="items-list">
-                    <li><span class="item-bullet">•</span><span>Temporary restrictions on account activities</span></li>
-                    <li><span class="item-bullet">•</span><span>Compliance holds on transactions</span></li>
-                    <li><span class="item-bullet">•</span><span>Escalation to senior management</span></li>
-                </ul>
-            </div>
-            
-            <p><strong>Please prioritize this request</strong> and provide the outstanding items by the deadline above.</p>
-            
-            <p>We are available to discuss any challenges you may be facing in gathering this information.</p>
-            
-            <div class="action-buttons">
-                <a href="mailto:{{Reply_To_Email}}?subject=Compliance Response - {{Case_Number}}&body=Dear Compliance Team,%0A%0APlease find attached the requested documents for case {{Case_Number}}." class="btn btn-primary">📎 Submit Documents</a>
-                <a href="mailto:{{Reply_To_Email}}?subject=Discussion Required - {{Case_Number}}&body=Dear Compliance Team,%0A%0AI would like to schedule a call to discuss the requested items for case {{Case_Number}}." class="btn btn-secondary">📞 Request Discussion</a>
-            </div>
-            
-            <p>Regards,</p>
-            <p><strong>Compliance Department</strong><br>{{Client_Name}}</p>
+        <p class="greeting">Dear {{Primary_Contact_Name}},</p>
+        <p class="text">
+          We note that the following items remain outstanding from our initial compliance
+          communication. Please provide them by the deadline below to avoid any impact
+          on account activities.
+        </p>
+        <div class="section-title">Case Reference</div>
+        <div class="case-grid">
+          <div class="case-cell">
+            <div class="cell-label">Customer</div>
+            <div class="cell-value">{{Customer_Name}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">Case Number</div>
+            <div class="cell-value">{{Case_Number}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">UID</div>
+            <div class="cell-value">{{UID}}</div>
+          </div>
         </div>
-        
-        <div class="footer">
-            <p><strong>Contact Information</strong><br>Email: <a href="mailto:{{Reply_To_Email}}">{{Reply_To_Email}}</a><br>Case Reference: {{Case_Number}}</p>
-            <p style="margin-top: 20px; font-size: 12px; opacity: 0.8;">This email contains confidential information and is intended only for the addressed recipient.<br>If you are not the intended recipient, please notify us immediately and delete this email.</p>
+        <hr class="divider"/>
+        <div class="section-title">Outstanding Items</div>
+        <div class="items-box">
+          <ul class="items-list">{{Requested_Items_HTML}}</ul>
         </div>
+        <div class="deadline-box" style="background:#fffbeb;border-color:#d97706">
+          <div class="deadline-label" style="color:#d97706">Submission Deadline</div>
+          <div class="deadline-date">{{Followup_Deadline}}</div>
+        </div>
+        <div class="consequence-box" style="background:#fef3c7;border:1px solid #fde68a">
+          <h3 style="color:#92400e">Non-Compliance May Result In:</h3>
+          <ul class="items-list">
+            <li><span class="item-dot" style="background:#fde68a;color:#92400e">&#8226;</span><span>Temporary restrictions on account activities</span></li>
+            <li><span class="item-dot" style="background:#fde68a;color:#92400e">&#8226;</span><span>Compliance holds on transactions</span></li>
+            <li><span class="item-dot" style="background:#fde68a;color:#92400e">&#8226;</span><span>Escalation to senior management</span></li>
+          </ul>
+        </div>
+        <p class="text">We are available to discuss any challenges you face in gathering this information.</p>
+        <div class="action-row">
+          <a href="mailto:{{Reply_To_Email}}?subject=Compliance Response - {{Case_Number}}" class="btn btn-primary">Submit Documents</a>
+          <a href="mailto:{{Reply_To_Email}}?subject=Discussion Required - {{Case_Number}}" class="btn btn-secondary">Request a Discussion</a>
+        </div>
+        <p class="signature">
+          Regards,<br/>
+          <strong>Compliance Department</strong><br/>
+          {{Client_Name}}
+        </p>
+      </div>
+      <div class="ftr" style="background:#f8fafc">
+        <p>Contact: <a href="mailto:{{Reply_To_Email}}">{{Reply_To_Email}}</a> &mdash; Case Ref: {{Case_Number}}</p>
+        <p style="margin-top:10px">This email contains confidential information intended solely for the addressed recipient.<br/>If you are not the intended recipient, please notify us immediately and delete this message.</p>
+      </div>
     </div>
+  </div>
+</body>
+</html>`,
+
+  final: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Final Compliance Notice</title>
+  <style>${sharedEmailStyles}</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="hdr" style="background:linear-gradient(135deg,#7f1d1d 0%,#dc2626 100%)">
+        <div class="overline">Final Notice &mdash; Compliance Department</div>
+        <h1>Immediate Action Required</h1>
+        <div class="sub">Case: {{Case_Number}} &mdash; {{Customer_Name}}</div>
+      </div>
+      <div class="body">
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:14px 18px;margin-bottom:24px;display:flex;gap:12px;align-items:flex-start">
+          <span style="font-size:18px;flex-shrink:0">&#128721;</span>
+          <div>
+            <strong style="font-size:14px;color:#991b1b">Final Notice — Immediate Response Required</strong><br/>
+            <span style="font-size:13px;color:#b91c1c">This is your final opportunity to provide the requested compliance information before enforcement actions are implemented.</span>
+          </div>
+        </div>
+        <p class="greeting">Dear {{Primary_Contact_Name}},</p>
+        <p class="text">
+          This constitutes our final request for outstanding compliance documentation for
+          <strong>{{Customer_Name}}</strong>. We have not received the required information
+          despite previous communications. You must provide all items by the absolute deadline below.
+        </p>
+        <div class="section-title">Case Reference</div>
+        <div class="case-grid">
+          <div class="case-cell">
+            <div class="cell-label">Customer</div>
+            <div class="cell-value">{{Customer_Name}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">Case Number</div>
+            <div class="cell-value">{{Case_Number}}</div>
+          </div>
+          <div class="case-cell">
+            <div class="cell-label">UID</div>
+            <div class="cell-value">{{UID}}</div>
+          </div>
+        </div>
+        <hr class="divider"/>
+        <div class="section-title">Outstanding Items</div>
+        <div class="items-box">
+          <ul class="items-list">{{Requested_Items_HTML}}</ul>
+        </div>
+        <div class="deadline-box" style="background:#fef2f2;border-color:#dc2626">
+          <div class="deadline-label" style="color:#dc2626">Absolute Deadline</div>
+          <div class="deadline-date">{{Final_Deadline}}</div>
+        </div>
+        <div class="consequence-box" style="background:#fef2f2;border:1px solid #fecaca">
+          <h3 style="color:#991b1b">Failure to Comply Will Result In:</h3>
+          <ul class="items-list">
+            <li><span class="item-dot" style="background:#fecaca;color:#991b1b">&#8226;</span><span>Immediate suspension of related business activities</span></li>
+            <li><span class="item-dot" style="background:#fecaca;color:#991b1b">&#8226;</span><span>Formal escalation to the regulatory compliance committee</span></li>
+            <li><span class="item-dot" style="background:#fecaca;color:#991b1b">&#8226;</span><span>Potential account restrictions per our compliance framework</span></li>
+          </ul>
+        </div>
+        <p class="text">
+          To avoid these consequences, please provide all outstanding documentation by
+          <strong>{{Final_Deadline}}</strong>. Contact us immediately if you require
+          an extension or wish to discuss this matter.
+        </p>
+        <div class="action-row">
+          <a href="mailto:{{Reply_To_Email}}?subject=FINAL RESPONSE - {{Case_Number}}" class="btn btn-primary" style="background:#dc2626">Submit Documents Now</a>
+          <a href="mailto:{{Reply_To_Email}}?subject=Urgent Discussion - {{Case_Number}}" class="btn btn-secondary">Contact Compliance Team</a>
+        </div>
+        <p class="signature">
+          Sincerely,<br/>
+          <strong>Compliance Department</strong><br/>
+          {{Client_Name}}<br/>
+          <span style="font-size:12px;color:#64748b">cc: Senior Compliance Officer</span>
+        </p>
+      </div>
+      <div class="ftr" style="background:#f8fafc">
+        <p>Contact: <a href="mailto:{{Reply_To_Email}}">{{Reply_To_Email}}</a> &mdash; Case Ref: {{Case_Number}}</p>
+        <p style="margin-top:10px">This email contains confidential information intended solely for the addressed recipient.<br/>If you are not the intended recipient, please notify us immediately and delete this message.</p>
+      </div>
+    </div>
+  </div>
 </body>
 </html>`,
 };
@@ -327,18 +492,15 @@ function fillHtmlTemplate(type = "followup", context = {}) {
 
   let html = replacePlaceholders(tpl, context, true);
 
-  // Special handling for requested items in HTML
+  // Build item list HTML
   const items = context.requestedItems || [];
   const itemsHtml = items
     .slice(0, 8)
     .map(
       (item) =>
-        `<li>
-        <span class="item-bullet">•</span>
-        <span>${escapeHtml(
+        `<li><span class="item-dot" style="background:#dbeafe;color:#1d4ed8">&#8226;</span><span>${escapeHtml(
           typeof item === "string" ? item : item.text || ""
-        )}</span>
-      </li>`
+        )}</span></li>`
     )
     .join("\n");
 
@@ -456,11 +618,12 @@ function getTemplateSummary(type) {
     initial: "Standard initial information request",
     followup: "Follow-up reminder for outstanding items",
     final: "Final notice with consequences warning",
-    "professional.initial":
-      "Professional initial request with clear instructions",
+    "professional.initial": "Professional initial request with clear instructions",
     "professional.followup": "Urgent follow-up with consequence warnings",
     "professional.final": "Final notice with immediate action required",
+    "html.initial": "Responsive HTML email template for initial requests",
     "html.followup": "Responsive HTML email template for follow-ups",
+    "html.final": "Responsive HTML email template for final notices",
   };
 
   return summaries[type] || "Compliance communication template";
