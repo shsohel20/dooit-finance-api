@@ -19,7 +19,13 @@ const Customer = require("../models/Customer");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { hashToken } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
-const { sumsubPost, sumsubGet, sumsubPatch } = require("../utils/sumsubClient");
+const {
+  sumsubPost,
+  sumsubGet,
+  sumsubPatch,
+  sumsubPostForm,
+  buildDocFormData,
+} = require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 const { syncJourneyStatus } = require("./journeyService");
 
@@ -628,6 +634,164 @@ const syncApplicantFromOcr = (applicantId, ocrFields) => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 10. uploadDocToSumsub  — upload a single document image to Sumsub
+// ─────────────────────────────────────────────────────────────────────────────
+
+// OCR card_type (lowercase) → Sumsub idDocType
+const OCR_CARD_TYPE_TO_SUMSUB_DOC_TYPE = {
+  passport: "PASSPORT",
+  "driving license": "DRIVERS",
+  "driving licence": "DRIVERS",
+  nid: "ID_CARD",
+  "id card": "ID_CARD",
+  "medical card": "ID_CARD",
+};
+
+// docType key → Sumsub idDocSubType
+const DOC_TYPE_TO_SUMSUB_SUBTYPE = {
+  id_front: "FRONT_SIDE",
+  front: "FRONT_SIDE",
+  id_back: "BACK_SIDE",
+  back: "BACK_SIDE",
+};
+
+/**
+ * Build the Sumsub /info/idDoc metadata object from OCR results.
+ *
+ * @param {Object} ocrFields    — merged OCR fields (data property from OCR response)
+ * @param {string} ocrCardType  — e.g. "Passport", "Driving License", "NID"
+ * @param {string} docType      — e.g. "id_front", "passport", "id_back"
+ * @param {string} fallbackCountry — alpha-2/3 country code used when OCR has no issuing_country
+ * @returns {Object} — Sumsub idDoc metadata (idDocType + optional fields)
+ */
+const buildIdDocMetadata = (ocrFields = {}, ocrCardType, docType, fallbackCountry) => {
+  const cardTypeLower = (ocrCardType || "").toLowerCase();
+  const idDocType = OCR_CARD_TYPE_TO_SUMSUB_DOC_TYPE[cardTypeLower] || "OTHER";
+  const idDocSubType = DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null;
+
+  const rawCountry = ocrFields.issuing_country || fallbackCountry || null;
+  const docCountry = rawCountry ? (toAlpha3(rawCountry) || null) : null;
+
+  // Name — prefer explicit first/last, fall back to splitting full_name
+  let firstName = ocrFields.first_name || null;
+  let lastName = ocrFields.last_name || ocrFields.surname || null;
+  if (!firstName && !lastName) {
+    const fullName = (ocrFields.full_name || "").trim();
+    if (fullName) {
+      const parts = fullName.split(/\s+/);
+      lastName = parts.length > 1 ? parts.pop() : null;
+      firstName = parts.join(" ") || null;
+    }
+  }
+
+  const parseIso = (raw) => {
+    if (!raw) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d.toISOString().split("T")[0];
+  };
+
+  const dob = parseIso(ocrFields.date_of_birth);
+  const issuedDate = parseIso(ocrFields.issue_date || ocrFields.issued_date);
+  const validUntil = parseIso(
+    ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until,
+  );
+  const number =
+    ocrFields.document_number || ocrFields.passport_number || ocrFields.id_number || null;
+  const placeOfBirth = ocrFields.place_of_birth || null;
+
+  const metadata = { idDocType };
+  if (idDocSubType)  metadata.idDocSubType = idDocSubType;
+  if (docCountry)    metadata.country      = docCountry;
+  if (firstName)     metadata.firstName    = firstName;
+  if (lastName)      metadata.lastName     = lastName;
+  if (dob)           metadata.dob          = dob;
+  if (issuedDate)    metadata.issuedDate   = issuedDate;
+  if (validUntil)    metadata.validUntil   = validUntil;
+  if (number)        metadata.number       = number;
+  if (placeOfBirth)  metadata.placeOfBirth = placeOfBirth;
+
+  return metadata;
+};
+
+/**
+ * Upload one document image with OCR-derived metadata to Sumsub.
+ * Reusable — call directly whenever you have a buffer + metadata.
+ *
+ * @param {string} applicantId
+ * @param {Buffer} imageBuffer
+ * @param {string} mimeType     — e.g. "image/jpeg"
+ * @param {string} filename     — e.g. "passport.jpg"
+ * @param {Object} metadata     — Sumsub idDoc metadata (idDocType + optional fields)
+ * @returns {Promise<{ status: number, data: object, headers: object }>}
+ */
+const uploadDocToSumsub = (applicantId, imageBuffer, mimeType, filename, metadata) => {
+  const form = buildDocFormData(metadata, imageBuffer, mimeType, filename);
+  return sumsubPostForm(`/resources/applicants/${applicantId}/info/idDoc`, form);
+};
+
+/**
+ * Fire-and-forget: upload each successfully OCR'd document image to Sumsub.
+ * Errors are logged but never propagated — response has already been sent.
+ *
+ * @param {string} applicantId
+ * @param {Array}  ocrItems — [{ doc, buffer, contentType, ext, ocrData }]
+ *   ocrData: the raw OCR API response object ({ card_type, data (fields), side })
+ * @param {string} [fallbackCountry] — used when OCR fields have no issuing_country
+ */
+const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry) => {
+  if (!applicantId || !ocrItems?.length) return;
+
+  const TAG = "[SumsubDocUpload]";
+
+  Promise.all(
+    ocrItems.map(async ({ doc, buffer, contentType, ext, ocrData }) => {
+      try {
+        const metadata = buildIdDocMetadata(
+          ocrData.data || {},
+          ocrData.card_type,
+          doc.docType,
+          fallbackCountry,
+        );
+        const safeFilename = (doc.name || `document.${ext || "jpg"}`).replace(
+          /[^\w.\-]/g,
+          "_",
+        );
+
+        const { status, data } = await uploadDocToSumsub(
+          applicantId,
+          buffer,
+          contentType,
+          safeFilename,
+          metadata,
+        );
+
+        if (status >= 400) {
+          console.error(
+            `${TAG} Upload failed for ${doc.docType || "doc"} (${status}):`,
+            data?.description || data?.message || JSON.stringify(data),
+          );
+        } else {
+          console.log(
+            `${TAG} Uploaded ${doc.docType || "doc"} → idDocType=${metadata.idDocType} (${status})`,
+          );
+        }
+        if (data?.errors?.length) {
+          console.error(`${TAG} Doc errors:`, JSON.stringify(data.errors));
+        }
+        if (data?.warnings?.length) {
+          console.warn(`${TAG} Doc warnings:`, JSON.stringify(data.warnings));
+        }
+      } catch (err) {
+        console.error(
+          `${TAG} Exception uploading ${doc.docType || "doc"}:`,
+          err.message,
+        );
+      }
+    }),
+  ).catch((err) => console.error(`${TAG} unexpected error:`, err.message));
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 module.exports = {
@@ -640,4 +804,7 @@ module.exports = {
   handleKycResult,
   handleAmlResult,
   syncApplicantFromOcr,
+  buildIdDocMetadata,
+  uploadDocToSumsub,
+  pushOcrDocsToSumsub,
 };

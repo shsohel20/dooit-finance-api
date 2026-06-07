@@ -18,7 +18,10 @@ const {
   postJourneyStepBackground,
 } = require("../services/journeyService");
 
-const { syncApplicantFromOcr } = require("../services/sumsubService");
+const {
+  syncApplicantFromOcr,
+  pushOcrDocsToSumsub,
+} = require("../services/sumsubService");
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const { fetchImageAsBase64, fetchImageData } = require("../utils/imageUtils");
@@ -921,11 +924,33 @@ exports.ocrDocument = asyncHandler(async (req, res, next) => {
   syncJourneyStatus(journey);
   await journey.save();
 
-  // ── Push OCR data to Sumsub in background (non-blocking, with retries) ────
-  // Fires after the journey is saved so the response is never delayed.
-  // syncApplicantFromOcr only sends non-null mappable fields.
-  if (allSucceeded && customer.sumsubApplicantId) {
-    syncApplicantFromOcr(customer.sumsubApplicantId, ocrPayload.fields);
+  // ── Push OCR data + document images to Sumsub in background ─────────────
+  // Both calls are fire-and-forget; the response has already been formed.
+  if (customer.sumsubApplicantId) {
+    if (allSucceeded) {
+      syncApplicantFromOcr(customer.sumsubApplicantId, ocrPayload.fields);
+    }
+
+    // Upload document images with OCR-derived metadata to Sumsub /info/idDoc
+    const successItems = ocrResults
+      .filter((r) => r.data?.success)
+      .map((r) => {
+        const dl = downloaded.find((d) => d.doc === r.doc);
+        return {
+          doc: r.doc,
+          buffer: dl.buffer,
+          contentType: dl.contentType,
+          ext: dl.ext,
+          ocrData: r.data,
+        };
+      });
+    if (successItems.length) {
+      pushOcrDocsToSumsub(
+        customer.sumsubApplicantId,
+        successItems,
+        customer.country,
+      );
+    }
   }
 
   const httpStatus = stepStatus === "rejected" ? 400 : 200;
