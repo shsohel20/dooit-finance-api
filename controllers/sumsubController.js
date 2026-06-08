@@ -105,7 +105,7 @@ exports.createApplicant = asyncHandler(async (req, res, next) => {
     journey.provider = "sumsub";
     journey.providerRef = result.applicantId;
     journey.recordEvent({
-      action: "sumsub_applicant_created",
+      action: "applicant_created",
       note: `Applicant created: ${result.applicantId}`,
       actorRole: "customer",
       payload: { applicantId: result.applicantId, inspectionId: result.inspectionId },
@@ -232,7 +232,7 @@ exports.uploadDocument = asyncHandler(async (req, res, next) => {
 
       journey.recordEvent({
         step: stepType,
-        action: "sumsub_doc_uploaded",
+        action: "doc_uploaded",
         status: stepStatus,
         note: note || "",
         actorRole: "customer",
@@ -315,8 +315,8 @@ exports.requestCheck = asyncHandler(async (req, res, next) => {
       provider: "sumsub",
     });
     journey.recordEvent({
-      action: "sumsub_check_requested",
-      note: "Applicant moved to pending — Sumsub AI verification started",
+      action: "check_requested",
+      note: "Applicant moved to pending — AI verification started",
       actorRole: "customer",
       payload: { applicantId: customer.sumsubApplicantId },
       ip: req.ip,
@@ -461,12 +461,20 @@ exports.getAmlCase = asyncHandler(async (req, res, next) => {
 //   customer.kycStatus === 'verified'  →  AML result  →  handleAmlResult
 // ─────────────────────────────────────────────────────────────────────────────
 exports.sumsubWebhook = asyncHandler(async (req, res) => {
+
+  // console.log(req.headers)
+  // console.log(req.body)
   // ── 1. Verify HMAC-SHA256 signature ───────────────────────────────────────
   const received = req.headers["x-payload-digest"];
+  const webhookSecret = process.env.NODE_ENV === "production"
+    ? process.env.SUMSUB_WEBHOOK_SECRET
+    : process.env.SUMSUB_WEBHOOK_SECRET2;
   const expected = crypto
-    .createHmac("sha256", process.env.SUMSUB_WEBHOOK_SECRET || "")
+    .createHmac("sha256", webhookSecret || "")
     .update(req.body) // Buffer from express.raw()
     .digest("hex");
+
+     
 
   if (!received || received !== expected) {
     return res.status(403).json({ error: "Invalid webhook signature" });
@@ -480,7 +488,8 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: "Malformed JSON payload" });
   }
 
-  const { type, externalUserId, applicantId, reviewResult } = payload;
+
+  const { type, externalUserId, applicantId, reviewResult , reviewStatus} = payload;
 
   // Acknowledge non-review events immediately — Sumsub retries on non-200
   if (type !== "applicantReviewed") {
@@ -498,9 +507,13 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
   const effectiveApplicantId = applicantId || customer.sumsubApplicantId;
 
   if (customer.kycStatus !== "verified") {
+    console.log('I am for here not verified')
     // KYC result — customer hasn't been verified yet
-    await handleKycResult(customer, reviewResult || {}, effectiveApplicantId);
+   
+    await handleKycResult(customer, reviewResult || {}, effectiveApplicantId, reviewStatus);
   } else {
+    console.log('I am for here AML result')
+
     // AML result — KYC already GREEN, this must be AML
     await handleAmlResult(
       customer,

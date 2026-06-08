@@ -258,12 +258,20 @@ const triggerAmlCheck = async (customer) => {
  *   - Auto-triggers AML check if GREEN
  *
  * @param {Customer} customer
- * @param {Object}   reviewResult  — from Sumsub webhook payload.reviewResult
- * @param {string}   applicantId   — Sumsub applicantId (for journey lookup)
+ * @param {Object}   reviewResult   — from Sumsub webhook payload.reviewResult
+ * @param {string}   applicantId    — Sumsub applicantId (for journey lookup)
+ * @param {string}   reviewStatus   — top-level webhook reviewStatus (e.g. "completed")
+ * @param {string}   clientComment  — human-readable rejection reason from reviewResult
  */
-const handleKycResult = async (customer, reviewResult = {}, applicantId) => {
+const handleKycResult = async (
+  customer,
+  reviewResult = {},
+  applicantId,
+  reviewStatus,
+) => {
   const { reviewAnswer, reviewRejectType, rejectLabels, moderationComment } =
     reviewResult;
+  const effectiveClientComment = reviewResult.clientComment || "";
 
   // ── Map Sumsub result → our kycStatus enum ─────────────────────────────────
   let kycStatus, kycNote, stepStatus, rejectionReason;
@@ -271,19 +279,20 @@ const handleKycResult = async (customer, reviewResult = {}, applicantId) => {
   if (reviewAnswer === "GREEN") {
     kycStatus = "verified";
     stepStatus = "approved";
-    kycNote = "Sumsub KYC verified";
+    // kycNote = "Sumsub KYC verified";
+    kycNote = "KYC verified";
   } else if (reviewRejectType === "RETRY") {
     kycStatus = "pending"; // allow customer to re-upload
     stepStatus = "rejected";
     kycNote =
       moderationComment || (rejectLabels || []).join(", ") || "Retry required";
-    rejectionReason = kycNote;
+    rejectionReason = effectiveClientComment || kycNote;
   } else {
     // RED + FINAL — permanent rejection
     kycStatus = "rejected";
     stepStatus = "rejected";
     kycNote = (rejectLabels || []).join(", ") || "Permanently rejected";
-    rejectionReason = kycNote;
+    rejectionReason = effectiveClientComment || kycNote;
   }
 
   // ── Update Customer ────────────────────────────────────────────────────────
@@ -307,8 +316,10 @@ const handleKycResult = async (customer, reviewResult = {}, applicantId) => {
   const providerData = {
     sumsubReviewAnswer: reviewAnswer,
     sumsubRejectType: reviewRejectType,
+    reviewStatus,
     rejectLabels,
     moderationComment,
+    clientComment: effectiveClientComment,
     checkedAt: new Date(),
   };
 
@@ -325,11 +336,18 @@ const handleKycResult = async (customer, reviewResult = {}, applicantId) => {
     });
     journey.recordEvent({
       step: "id_document",
-      action: "sumsub_kyc_result",
+      action: "kyc_result",
       status: stepStatus,
       note: kycNote,
       actorRole: "system",
-      payload: { reviewAnswer, reviewRejectType, rejectLabels, applicantId },
+      payload: {
+        reviewAnswer,
+        reviewRejectType,
+        reviewStatus,
+        rejectLabels,
+        clientComment: effectiveClientComment,
+        applicantId,
+      },
     });
     syncJourneyStatus(journey);
     await journey.save();
@@ -418,7 +436,7 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
     });
     journey.recordEvent({
       step: "review",
-      action: "sumsub_aml_result",
+      action: "aml_result",
       status: reviewStepStatus,
       note: amlNote,
       actorRole: "system",
@@ -547,41 +565,40 @@ const buildInfoPayloadFromOcr = (f = {}) => {
   const placeOfBirth = f.place_of_birth || null;
   const countryOfBirth = f.place_of_birth || null;
 
-
   // ── Address ───────────────────────────────────────────────────────────────
   // Prefer address_breakdown fields; fall back to issuing country for country.
   const aCountry = f?.address_breakdown?.country
     ? toAlpha3(f.address_breakdown.country)
     : country;
-  const street       = f?.address_breakdown?.street   || null;
-  const town         = f?.address_breakdown?.city     || null;
-  const state        = f?.address_breakdown?.state    || null;
-  const postCode     = f?.address_breakdown?.postcode || null;
-  const formattedAddress = f?.address               || null;
+  const street = f?.address_breakdown?.street || null;
+  const town = f?.address_breakdown?.city || null;
+  const state = f?.address_breakdown?.state || null;
+  const postCode = f?.address_breakdown?.postcode || null;
+  const formattedAddress = f?.address || null;
 
   // Build the address entry — only include non-null fields
   if (aCountry || street || town || state || postCode || formattedAddress) {
     const addressEntry = {};
-    if (aCountry)          addressEntry.country          = aCountry;
-    if (street)            addressEntry.street           = street;
-    if (town)              addressEntry.town             = town;
-    if (state)             addressEntry.state            = state;
-    if (postCode)          addressEntry.postCode         = postCode;
-    if (formattedAddress)  addressEntry.formattedAddress = formattedAddress;
+    if (aCountry) addressEntry.country = aCountry;
+    if (street) addressEntry.street = street;
+    if (town) addressEntry.town = town;
+    if (state) addressEntry.state = state;
+    if (postCode) addressEntry.postCode = postCode;
+    if (formattedAddress) addressEntry.formattedAddress = formattedAddress;
     addresses.push(addressEntry);
   }
 
   // ── Build payload — omit null / undefined ─────────────────────────────────
   const payload = {};
-  if (firstName)        payload.firstName       = firstName;
-  if (lastName)         payload.lastName        = lastName;
-  if (dob)              payload.dob             = dob;
-  if (country)          payload.country         = country;
-  if (nationality)      payload.nationality     = nationality;
-  if (gender)           payload.gender          = gender;
-  if (placeOfBirth)     payload.placeOfBirth    = placeOfBirth;
-  if (countryOfBirth)   payload.countryOfBirth  = countryOfBirth;
-  if (addresses.length) payload.addresses       = addresses;
+  if (firstName) payload.firstName = firstName;
+  if (lastName) payload.lastName = lastName;
+  if (dob) payload.dob = dob;
+  if (country) payload.country = country;
+  if (nationality) payload.nationality = nationality;
+  if (gender) payload.gender = gender;
+  if (placeOfBirth) payload.placeOfBirth = placeOfBirth;
+  if (countryOfBirth) payload.countryOfBirth = countryOfBirth;
+  if (addresses.length) payload.addresses = addresses;
 
   return payload;
 };
@@ -664,13 +681,19 @@ const DOC_TYPE_TO_SUMSUB_SUBTYPE = {
  * @param {string} fallbackCountry — alpha-2/3 country code used when OCR has no issuing_country
  * @returns {Object} — Sumsub idDoc metadata (idDocType + optional fields)
  */
-const buildIdDocMetadata = (ocrFields = {}, ocrCardType, docType, fallbackCountry) => {
+const buildIdDocMetadata = (
+  ocrFields = {},
+  ocrCardType,
+  docType,
+  fallbackCountry,
+) => {
   const cardTypeLower = (ocrCardType || "").toLowerCase();
   const idDocType = OCR_CARD_TYPE_TO_SUMSUB_DOC_TYPE[cardTypeLower] || "OTHER";
-  const idDocSubType = DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null;
+  const idDocSubType =
+    DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null;
 
   const rawCountry = ocrFields.issuing_country || fallbackCountry || null;
-  const docCountry = rawCountry ? (toAlpha3(rawCountry) || null) : null;
+  const docCountry = rawCountry ? toAlpha3(rawCountry) || null : null;
 
   // Name — prefer explicit first/last, fall back to splitting full_name
   let firstName = ocrFields.first_name || null;
@@ -696,19 +719,22 @@ const buildIdDocMetadata = (ocrFields = {}, ocrCardType, docType, fallbackCountr
     ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until,
   );
   const number =
-    ocrFields.document_number || ocrFields.passport_number || ocrFields.id_number || null;
+    ocrFields.document_number ||
+    ocrFields.passport_number ||
+    ocrFields.id_number ||
+    null;
   const placeOfBirth = ocrFields.place_of_birth || null;
 
   const metadata = { idDocType };
-  if (idDocSubType)  metadata.idDocSubType = idDocSubType;
-  if (docCountry)    metadata.country      = docCountry;
-  if (firstName)     metadata.firstName    = firstName;
-  if (lastName)      metadata.lastName     = lastName;
-  if (dob)           metadata.dob          = dob;
-  if (issuedDate)    metadata.issuedDate   = issuedDate;
-  if (validUntil)    metadata.validUntil   = validUntil;
-  if (number)        metadata.number       = number;
-  if (placeOfBirth)  metadata.placeOfBirth = placeOfBirth;
+  if (idDocSubType) metadata.idDocSubType = idDocSubType;
+  if (docCountry) metadata.country = docCountry;
+  if (firstName) metadata.firstName = firstName;
+  if (lastName) metadata.lastName = lastName;
+  if (dob) metadata.dob = dob;
+  if (issuedDate) metadata.issuedDate = issuedDate;
+  if (validUntil) metadata.validUntil = validUntil;
+  if (number) metadata.number = number;
+  if (placeOfBirth) metadata.placeOfBirth = placeOfBirth;
 
   return metadata;
 };
@@ -724,9 +750,18 @@ const buildIdDocMetadata = (ocrFields = {}, ocrCardType, docType, fallbackCountr
  * @param {Object} metadata     — Sumsub idDoc metadata (idDocType + optional fields)
  * @returns {Promise<{ status: number, data: object, headers: object }>}
  */
-const uploadDocToSumsub = (applicantId, imageBuffer, mimeType, filename, metadata) => {
+const uploadDocToSumsub = (
+  applicantId,
+  imageBuffer,
+  mimeType,
+  filename,
+  metadata,
+) => {
   const form = buildDocFormData(metadata, imageBuffer, mimeType, filename);
-  return sumsubPostForm(`/resources/applicants/${applicantId}/info/idDoc`, form);
+  return sumsubPostForm(
+    `/resources/applicants/${applicantId}/info/idDoc`,
+    form,
+  );
 };
 
 /**
@@ -752,6 +787,9 @@ const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry) => {
           doc.docType,
           fallbackCountry,
         );
+
+        console.log({ metadata });
+
         const safeFilename = (doc.name || `document.${ext || "jpg"}`).replace(
           /[^\w.\-]/g,
           "_",
