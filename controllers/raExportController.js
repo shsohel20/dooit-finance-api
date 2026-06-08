@@ -6,8 +6,10 @@ const EwraAssessment       = require("../models/EwraAssessment");
 const EwraRiskFactor       = require("../models/EwraRiskFactor");
 const EwraControlAssessment = require("../models/EwraControlAssessment");
 
-const REGISTER  = require("../../seed/sample_risk_register.json");
-const MATRIX_FW = require("../../seed/risk_matrix_framework.json");
+const REGISTER  = require("../_data/seed/sample_risk_register.json");
+// const REGISTER  = require("../../seed/sample_risk_register.json");
+const MATRIX_FW = require("../_data/seed/risk_matrix_framework.json");
+//
 
 // ── ARGB Color Palette ────────────────────────────────────────────────────────
 const PAL = {
