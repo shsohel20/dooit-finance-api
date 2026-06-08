@@ -10,6 +10,7 @@ const PolicyHubVersion = require("../models/PolicyHubVersion");
 const sanitizeHtml = require("sanitize-html");
 const mammoth = require("mammoth");
 const HTMLtoDOCX = require("html-to-docx");
+const { docxToHtml } = require("../utils/docxToHtml");
 
 /**
  * Filter helper for POST search
@@ -505,18 +506,11 @@ exports.importPolicyHubDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No .docx file uploaded", 400));
   }
 
-  // Convert .docx buffer → sanitized HTML
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const unsafeHtml = result.value;
-  const htmlContent = sanitizeHtml(unsafeHtml, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      "h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td",
-    ]),
-    allowedAttributes: {
-      a: ["href", "name", "target"],
-      img: ["src", "alt", "width", "height"],
-    },
-  });
+  // Convert .docx buffer → pixel-faithful HTML (inline styles, images, tables)
+  const { html: htmlContent, warnings } = await docxToHtml(req.file.buffer);
+  if (!htmlContent) {
+    return next(new ErrorResponse("Failed to parse .docx file", 422));
+  }
 
   const metadata = req.body.metadata
     ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)

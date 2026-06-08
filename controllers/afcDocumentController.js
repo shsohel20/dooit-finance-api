@@ -8,6 +8,7 @@ const { marked } = require("marked");
 const HTMLtoDOCX = require("html-to-docx");
 const mammoth = require("mammoth");
 const sanitizeHtml = require("sanitize-html");
+const { docxToHtml } = require("../utils/docxToHtml");
 
 const SANITIZE_OPTIONS = {
   allowedTags: sanitizeHtml.defaults.allowedTags.concat(["h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td"]),
@@ -220,8 +221,10 @@ exports.importAfcDocumentDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No .docx file uploaded", 400));
   }
 
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const htmlContent = sanitizeHtml(result.value, SANITIZE_OPTIONS);
+  const { html: htmlContent, warnings } = await docxToHtml(req.file.buffer);
+  if (!htmlContent) {
+    return next(new ErrorResponse("Failed to parse .docx file", 422));
+  }
 
   const metadata = req.body.metadata
     ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)

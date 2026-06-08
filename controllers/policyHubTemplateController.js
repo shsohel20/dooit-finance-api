@@ -5,6 +5,7 @@ const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
 const mammoth = require("mammoth");
 const HTMLtoDOCX = require("html-to-docx");
+const { docxToHtml } = require("../utils/docxToHtml");
 const puppeteer = require("puppeteer");
 
 /**
@@ -235,9 +236,11 @@ exports.importFromDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Template name is required", 400));
   }
 
-  // Convert .docx buffer → HTML
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const htmlContent = result.value; // converted HTML
+  // Convert .docx buffer → pixel-faithful HTML (inline styles, images, tables)
+  const { html: htmlContent, warnings } = await docxToHtml(req.file.buffer);
+  if (!htmlContent) {
+    return next(new ErrorResponse("Failed to parse .docx file", 422));
+  }
 
   const template = await PolicyHubTemplate.create({
     client,
