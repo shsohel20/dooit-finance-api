@@ -1,13 +1,18 @@
 const mongoose = require("mongoose");
 const mongoosePaginate = require("mongoose-paginate-v2");
 
+const RATING_ENUM = ["Very Low","Low","Medium","High","Extreme",""];
+
 const CategoryScoreSchema = new mongoose.Schema({
   category: { type: String, enum: ["Customer", "Product", "Channel", "Geographic", "Environmental"] },
-  weight:          { type: Number, default: 20 },   // % weight of this category
-  inherentScore:   { type: Number, default: null },  // 0-5
-  controlScore:    { type: Number, default: null },  // 0-5 (effectiveness)
-  residualScore:   { type: Number, default: null },  // 0-5
-  rating:          { type: String, enum: ["Low","Medium","High","Extreme",""], default: "" },
+  weight:          { type: Number, default: 20 },
+  inherentScore:   { type: Number, default: null },
+  controlScore:    { type: Number, default: null },
+  residualScore:   { type: Number, default: null },
+  rating:          { type: String, enum: RATING_ENUM, default: "" },
+  // delta from prior assessment (amendment diff)
+  priorResidualScore: { type: Number, default: null },
+  delta:              { type: String, enum: ["up","down","same","new",""], default: "" },
 }, { _id: false });
 
 const EwraAssessmentSchema = new mongoose.Schema(
@@ -37,15 +42,61 @@ const EwraAssessmentSchema = new mongoose.Schema(
     },
 
     // ── Computed scores ────────────────────────────────────────────────────
-    inherentRiskScore:    { type: Number, default: null },
-    inherentRiskRating:   { type: String, enum: ["Low","Medium","High","Extreme",""], default: "" },
+    inherentRiskScore:         { type: Number, default: null },
+    inherentRiskRating:        { type: String, enum: RATING_ENUM, default: "" },
     controlEffectivenessScore: { type: Number, default: null },
-    residualRiskScore:    { type: Number, default: null },
-    residualRiskRating:   { type: String, enum: ["Low","Medium","High","Extreme",""], default: "" },
-    nraFloor:             { type: String, default: "" }, // e.g. "Medium"
+    residualRiskScore:         { type: Number, default: null },
+    residualRiskRating:        { type: String, enum: RATING_ENUM, default: "" },
+    nraFloor:                  { type: String, default: "" },
 
-    // per-category breakdown
     categoryScores: [CategoryScoreSchema],
+
+    // ── Amendment tracking ─────────────────────────────────────────────────
+    amendmentType: {
+      type: String,
+      enum: ["initial","annual_review","trigger_update"],
+      default: "initial",
+    },
+    triggerReason:      { type: String, default: "" },
+    priorAssessmentId:  { type: mongoose.Schema.ObjectId, ref: "EwraAssessment", default: null },
+    amendmentPending:   { type: Boolean, default: false },
+
+    // ── Review schedule ────────────────────────────────────────────────────
+    reviewDate:         { type: Date, default: null },
+    reviewCycleYears:   { type: Number, default: null },
+
+    // ── NRA baseline (from entity_config) ─────────────────────────────────
+    nraBaselineReference: { type: String, default: "" },
+    sectorNraInherentMl:  { type: String, default: "" },
+    sectorNraInherentTf:  { type: String, default: "" },
+    sectorNraInherentPf:  { type: String, default: "" },
+
+    // ── Wizard answers (steps 1-7) ─────────────────────────────────────────
+    ewraAnswers: {
+      // Step 1
+      turnoverRange:              String,
+      isSolePractitioner:         Boolean,
+      austracEnrolled:            String,
+      // Step 2
+      clientTypes:                [String],
+      foreignClientProportion:    String,
+      complexStructures:          String,
+      pepExposure:                String,
+      // Step 3
+      deliveryChannels:           [String],
+      nonF2fProportion:           String,
+      usesIntermediaries:         String,
+      handlesCash:                String,
+      // Step 4-6 — risk factor answers (key:value per question id)
+      dsRiskFactors:              { type: mongoose.Schema.Types.Mixed, default: {} },
+      crRiskFactors:              { type: mongoose.Schema.Types.Mixed, default: {} },
+      chRiskFactors:              { type: mongoose.Schema.Types.Mixed, default: {} },
+      // Step 7
+      countriesExposure:          [String],
+      mediumRiskCountry:          String,
+      highRiskCountry:            String,
+      sanctionsScreeningConfirmed:String,
+    },
 
     // ── Workflow ───────────────────────────────────────────────────────────
     submittedBy: { type: mongoose.Schema.ObjectId, ref: "Users", default: null },

@@ -4,12 +4,17 @@ const {
   getFactors, addFactor, updateFactor, deleteFactor,
   getControlAssessments, addControlsFromLibrary, updateControlAssessment,
   calculate, submitForReview, approve, getResults,
+  createAmendment, getAmendmentDiff,
 } = require("../controllers/ewraController");
+const { exportRiskRegisterExcel, exportAssessmentExcel } = require("../controllers/raExportController");
 const { protect } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "1mb" }));
 router.use(protect);
+
+// ── RA Report Excel exports (must be before /:id to avoid route collision) ────
+router.route("/risk-register/export").get(exportRiskRegisterExcel);
 
 // Assessment list & create
 router.route("/").get(listAssessments).post(createAssessment);
@@ -31,5 +36,12 @@ router.route("/:id/calculate").post(calculate);
 router.route("/:id/submit").post(submitForReview);
 router.route("/:id/approve").post(approve);
 router.route("/:id/results").get(getResults);
+
+// Amendment
+router.route("/:id/amend").post(createAmendment);
+router.route("/:id/amend-diff").get(getAmendmentDiff);
+
+// EWRA assessment Excel export
+router.route("/:id/risk-report/export").get(exportAssessmentExcel);
 
 module.exports = router;

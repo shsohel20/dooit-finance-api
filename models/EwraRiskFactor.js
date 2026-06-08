@@ -19,16 +19,25 @@ const EwraRiskFactorSchema = new mongoose.Schema(
     description: { type: String, trim: true },
     weight:      { type: Number, default: 20, min: 0, max: 100 }, // % within category
 
+    // factorId links to ewra_factors seed template (e.g. "EW_C_001")
+    factorId:    { type: String, trim: true, default: "" },
+
     // ── 5×5 Matrix inputs ──────────────────────────────────────────────────
-    likelihood:  { type: Number, min: 1, max: 5, default: null }, // 1=Rare … 5=Almost Certain
-    impact:      { type: Number, min: 1, max: 5, default: null }, // 1=Insignificant … 5=Catastrophic
-    inherentScore:  { type: Number, default: null },              // matrix cell value 1-25 → normalised 1-5
-    inherentRating: { type: String, enum: ["Low","Medium","High","Extreme",""], default: "" },
+    // NOTE: "impact" = "consequence" in AUSTRAC/workbook language — same field
+    likelihood:  { type: Number, min: 1, max: 5, default: null },
+    impact:      { type: Number, min: 1, max: 5, default: null },
+    inherentScore:  { type: Number, default: null },
+    inherentRating: { type: String, enum: ["Very Low","Low","Medium","High","Extreme",""], default: "" },
 
     // ── Control effectiveness ───────────────────────────────────────────────
-    controlEffectiveness: { type: Number, min: 0, max: 5, default: null }, // 0-5
+    controlEffectiveness: { type: Number, min: 0, max: 5, default: null },
     residualScore:        { type: Number, default: null },
-    residualRating:       { type: String, enum: ["Low","Medium","High","Extreme",""], default: "" },
+    residualRating:       { type: String, enum: ["Very Low","Low","Medium","High","Extreme",""], default: "" },
+
+    // ── Amendment diff (populated when copied from prior assessment) ────────
+    priorInherentScore: { type: Number, default: null },
+    priorResidualScore: { type: Number, default: null },
+    delta: { type: String, enum: ["up","down","same","new",""], default: "" },
 
     // ── Qualitative ────────────────────────────────────────────────────────
     rationale:     { type: String, default: "" },

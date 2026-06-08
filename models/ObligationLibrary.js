@@ -46,6 +46,16 @@ const ObligationLibrarySchema = new mongoose.Schema(
     riskCategory: { type: String, trim: true },
     // "Customer Risk" | "Governance" | "Financial" | "AML/CTF" | ...
 
+    testMethod: {
+      type: String,
+      enum: ["Document Review","Interview","Observation","Inspection","Re-performance","Analytics",""],
+      default: "",
+    },
+    testFrequency: {
+      type: String,
+      enum: ["Continuous","Daily","Weekly","Monthly","Quarterly","Annually","Ad-hoc",""],
+      default: "",
+    },
     defaultWeight: { type: Number, default: 0 },
 
     controlRefs: [{ type: String, trim: true }],

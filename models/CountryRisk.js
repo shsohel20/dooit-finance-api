@@ -50,6 +50,7 @@ const CountryRiskSchema = new mongoose.Schema({
   // Component scores (1–5)
   mlRiskScore:     { type: Number, min: 1, max: 5, default: null },
   tfRiskScore:     { type: Number, min: 1, max: 5, default: null },
+  pfRiskScore:     { type: Number, min: 1, max: 5, default: null }, // Proliferation Financing
   sanctionsRisk:   { type: Number, min: 1, max: 5, default: null },
   corruptionScore: { type: Number, min: 1, max: 5, default: null },
 

@@ -65,6 +65,32 @@ const IndividualRiskAssessmentSchema = new Schema(
     },
 
     notes: String,
+
+    // ── CRA Model (determines scoring engine) ─────────────────────────────────
+    craModel: {
+      type: String,
+      enum: ["A", "B", ""],
+      default: "",
+    },
+
+    // ── ECDD Gate (blocks service delivery until CO resolves) ─────────────────
+    // Set to true when CRA result is High or Unacceptable
+    ecddRequired: { type: Boolean, default: false },
+    // Compliance Officer must approve or decline before service delivery resumes
+    cddGate:      { type: Boolean, default: false },
+
+    ecddStatus: {
+      type: String,
+      enum: ["Pending", "Approved", "Declined", ""],
+      default: "",
+    },
+    ecddDecision:    { type: String, default: "" }, // CO's written rationale
+    ecddDecidedBy:   { type: Schema.Types.ObjectId, ref: "Users", default: null },
+    ecddDecidedAt:   { type: Date, default: null },
+    ecddReviewDate:  { type: Date, default: null }, // next scheduled ECDD review
+
+    // ── Stage 2 submission ref (CRA Model B two-stage) ────────────────────────
+    stage2SubmissionId: { type: Schema.Types.ObjectId, ref: "CraStage2Submission", default: null },
   },
   { timestamps: true },
 );

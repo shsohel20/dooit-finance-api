@@ -71,6 +71,9 @@ const rgMapper = require("./rg-mapper");
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 const afcDocument = require("./afc-document");
 
+// ── GRC Notification Engine ───────────────────────────────────────────────────
+const appNotification = require("./app-notification");
+
 // Mount routes
 router.use("/fileupload", fileUpload);
 router.use("/file-vault", fileVault);
@@ -146,5 +149,8 @@ router.use("/rg-mapper",          rgMapper);
 
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 router.use("/afc-documents",      afcDocument);
+
+// ── GRC Notification Engine ───────────────────────────────────────────────────
+router.use("/app-notifications",  appNotification);
 
 module.exports = router;

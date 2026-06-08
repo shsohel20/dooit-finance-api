@@ -728,3 +728,38 @@ exports.importRiskFactorsCsv = asyncHandler(async (req, res) => {
     inserted: rows.length,
   });
 });
+
+// ── ECDD Gate ──────────────────────────────────────────────────────────────────
+
+// @route POST /api/v1/risk-assessment/:id/ecdd-approve
+exports.ecddApprove = asyncHandler(async (req, res, next) => {
+  const { ecddDecision = "", ecddReviewDate } = req.body;
+  const ErrorResponse = require("../utils/errorResponse");
+  const update = {
+    ecddStatus: "Approved",
+    cddGate: false,
+    ecddDecision,
+    ecddDecidedBy: req.user?.id || null,
+    ecddDecidedAt: new Date(),
+    ecddReviewDate: ecddReviewDate ? new Date(ecddReviewDate) : null,
+  };
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, update, { new: true });
+  if (!doc) return next(new ErrorResponse("CRA record not found", 404));
+  res.status(200).json({ success: true, data: doc });
+});
+
+// @route POST /api/v1/risk-assessment/:id/ecdd-decline
+exports.ecddDecline = asyncHandler(async (req, res, next) => {
+  const { ecddDecision = "" } = req.body;
+  const ErrorResponse = require("../utils/errorResponse");
+  const update = {
+    ecddStatus: "Declined",
+    cddGate: true,
+    ecddDecision,
+    ecddDecidedBy: req.user?.id || null,
+    ecddDecidedAt: new Date(),
+  };
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, update, { new: true });
+  if (!doc) return next(new ErrorResponse("CRA record not found", 404));
+  res.status(200).json({ success: true, data: doc });
+});

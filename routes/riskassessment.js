@@ -27,6 +27,8 @@ const {
   importCountryRiskCsv,
   exportRiskFactorsCsv,
   importRiskFactorsCsv,
+  ecddApprove,
+  ecddDecline,
 } = require("../controllers/riskassessmentController");
 const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 const advancedResults = require("../middleware/advancedResults");
@@ -91,6 +93,10 @@ router.post("/risk/factors/import", upload.single("file"), importRiskFactorsCsv)
 // router.post("/risk/factors/import-excel", upload.single("file"), importRiskFactorsExcel);
 
 
+
+// ECDD gate decisions
+router.post("/:id/ecdd-approve", ecddApprove);
+router.post("/:id/ecdd-decline", ecddDecline);
 
 // /:id must come after all named routes
 router.route("/:id")

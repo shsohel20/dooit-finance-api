@@ -50,6 +50,7 @@ const ControlSchema = new mongoose.Schema(
       default: null,
     },
     obligationRefs: [{ type: String }], // obligation IDs this control addresses
+    notes:  { type: String, default: "" },
     active: { type: Boolean, default: true },
     client: { type: mongoose.Schema.ObjectId, ref: "Client", default: null },
   },

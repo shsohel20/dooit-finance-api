@@ -10,6 +10,11 @@ const ObligationControlMapSchema = new mongoose.Schema(
     // ref Control.controlId (Phase 2 model)
 
     mappingNotes: { type: String, trim: true },
+    linkType: {
+      type: String,
+      enum: ["Primary","Supporting","Compensating",""],
+      default: "",
+    },
   },
   { timestamps: true }
 );
