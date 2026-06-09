@@ -512,7 +512,8 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
   // const httpStatus = stepStatus === "rejected" ? 400 : 200; 
   const httpStatus = 200; // skip for the rejected bypass the selfie  
   return res.status(httpStatus).json({
-    success: stepStatus !== "rejected",
+    // success: stepStatus !== "rejected",
+    success: true,
     status: httpStatus,
     message:
       stepStatus === "rejected"
@@ -722,7 +723,8 @@ exports.verifyDocAndFace = asyncHandler(async (req, res, next) => {
   // const httpStatus = stepStatus === "rejected" ? 400 : 200;
   const httpStatus = 200;
   return res.status(httpStatus).json({
-    success: stepStatus !== "rejected",
+    // success: stepStatus !== "rejected",
+    success: true,
     status: httpStatus,
     message:
       stepStatus === "rejected"
