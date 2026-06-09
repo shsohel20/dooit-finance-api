@@ -714,9 +714,9 @@ const buildIdDocMetadata = (
   };
 
   const dob = parseIso(ocrFields.date_of_birth);
-  const issuedDate = parseIso(ocrFields.issue_date || ocrFields.issued_date);
+  const issuedDate = parseIso(ocrFields.issue_date || ocrFields.issued_date || ocrFields.date_of_issue);
   const validUntil = parseIso(
-    ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until,
+    ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until || ocrFields.date_of_expiry
   );
   const number =
     ocrFields.document_number ||
