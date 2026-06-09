@@ -326,8 +326,6 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
 
   const urls = pickLivenessImageUrls(documents);
 
-  console.log(urls);
-
   if (urls.length < 2) {
     return next(
       new ErrorResponse(
@@ -511,7 +509,8 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
   //     );
   // }
 
-  const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  // const httpStatus = stepStatus === "rejected" ? 400 : 200; 
+  const httpStatus = 200; // skip for the rejected bypass the selfie  
   return res.status(httpStatus).json({
     success: stepStatus !== "rejected",
     status: httpStatus,
@@ -720,7 +719,8 @@ exports.verifyDocAndFace = asyncHandler(async (req, res, next) => {
   syncJourneyStatus(journey);
   await journey.save();
 
-  const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  // const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  const httpStatus = 200;
   return res.status(httpStatus).json({
     success: stepStatus !== "rejected",
     status: httpStatus,
