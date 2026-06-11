@@ -69,7 +69,7 @@ const callOcrApi = async (baseUrl, buffer, contentType, ext, cardType) => {
   // if (cardType) formData.append("url", url);
 
   const response = await axios.post(endpoint, formData, {
-    timeout: 160_000,
+    timeout: 1_800_000, //30 mins
     maxContentLength: Infinity,
     maxBodyLength: Infinity,
     validateStatus: () => true,
