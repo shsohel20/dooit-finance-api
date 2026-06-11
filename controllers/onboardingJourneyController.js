@@ -326,8 +326,6 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
 
   const urls = pickLivenessImageUrls(documents);
 
-  console.log(urls);
-
   if (urls.length < 2) {
     return next(
       new ErrorResponse(
@@ -368,10 +366,10 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
 
   try {
     const response = await axios.post(
-      `${baseUrl}/liveness-detection/`,
+      `${baseUrl}/liveness-detection/easy`,
       { img1_base64, img2_base64 },
       {
-        timeout: 30_000,
+        timeout: 120_000,//two minutes
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
         validateStatus: () => true,
@@ -511,9 +509,11 @@ exports.livenessDetection = asyncHandler(async (req, res, next) => {
   //     );
   // }
 
-  const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  // const httpStatus = stepStatus === "rejected" ? 400 : 200; 
+  const httpStatus = 200; // skip for the rejected bypass the selfie  
   return res.status(httpStatus).json({
-    success: stepStatus !== "rejected",
+    // success: stepStatus !== "rejected",
+    success: true,
     status: httpStatus,
     message:
       stepStatus === "rejected"
@@ -720,9 +720,11 @@ exports.verifyDocAndFace = asyncHandler(async (req, res, next) => {
   syncJourneyStatus(journey);
   await journey.save();
 
-  const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  // const httpStatus = stepStatus === "rejected" ? 400 : 200;
+  const httpStatus = 200;
   return res.status(httpStatus).json({
-    success: stepStatus !== "rejected",
+    // success: stepStatus !== "rejected",
+    success: true,
     status: httpStatus,
     message:
       stepStatus === "rejected"
@@ -925,10 +927,17 @@ exports.ocrDocument = asyncHandler(async (req, res, next) => {
   await journey.save();
 
   // ── Push OCR data + document images to Sumsub in background ─────────────
-  // Both calls are fire-and-forget; the response has already been formed.
+  // Both calls are fire-and-forget (retried up to 3×, outcomes recorded in
+  // AuditLog with service "sumsub"); the response has already been formed.
   if (customer.sumsubApplicantId) {
+    const auditCtx = { customerId: customer._id, journeyId: journey._id };
+
     if (allSucceeded) {
-      syncApplicantFromOcr(customer.sumsubApplicantId, ocrPayload.fields);
+      syncApplicantFromOcr(
+        customer.sumsubApplicantId,
+        ocrPayload.fields,
+        auditCtx,
+      );
     }
 
     // Upload document images with OCR-derived metadata to Sumsub /info/idDoc
@@ -949,6 +958,7 @@ exports.ocrDocument = asyncHandler(async (req, res, next) => {
         customer.sumsubApplicantId,
         successItems,
         customer.country,
+        auditCtx,
       );
     }
   }

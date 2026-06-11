@@ -17,6 +17,7 @@
 
 const Customer = require("../models/Customer");
 const OnboardingJourney = require("../models/OnboardingJourney");
+const AuditLog = require("../models/AuditLog");
 const { hashToken } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const {
@@ -490,7 +491,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Retry `fn` up to `maxAttempts` times with exponential back-off.
  * Retries on network errors and on upstream 5xx / 429 responses.
- * Returns the last { status, data } result even when the final attempt fails.
+ * Returns the last { status, data, attempts } result even when the final
+ * attempt fails — `attempts` is how many calls were actually made.
  *
  * @param {() => Promise<{status:number,data:object}>} fn
  * @param {number} maxAttempts
@@ -502,7 +504,9 @@ const withRetry = async (fn, maxAttempts = 3, baseDelayMs = 2_000) => {
     try {
       last = await fn();
       // Don't retry on clean 4xx (client error) — only on 5xx / 429 / network
-      if (last.status < 500 && last.status !== 429) return last;
+      if (last.status < 500 && last.status !== 429) {
+        return { ...last, attempts: attempt };
+      }
     } catch (err) {
       last = { status: 0, data: { description: err.message } };
     }
@@ -510,7 +514,21 @@ const withRetry = async (fn, maxAttempts = 3, baseDelayMs = 2_000) => {
       await sleep(baseDelayMs * 2 ** (attempt - 1)); // 2 s, 4 s, 8 s …
     }
   }
-  return last;
+  return { ...last, attempts: maxAttempts };
+};
+
+/**
+ * Persist one AuditLog record for a background Sumsub job
+ * (service is always "sumsub" here).
+ * Never throws — audit failures are logged and swallowed so they can't
+ * break the fire-and-forget chains that call this.
+ */
+const recordSyncAudit = async (entry) => {
+  try {
+    await AuditLog.create({ service: "sumsub", ...entry });
+  } catch (err) {
+    console.error("[SumsubAudit] Failed to write audit record:", err.message);
+  }
 };
 
 /**
@@ -610,14 +628,18 @@ const buildInfoPayloadFromOcr = (f = {}) => {
  *   PATCH /resources/applicants/{id}/info      — extracted document data
  *   PATCH /resources/applicants/{id}/fixedInfo — asserted applicant data
  *
- * Each call is retried up to 3 times (2 s / 4 s / 8 s back-off).
+ * Each call is retried up to 3 times (2 s / 4 s / 8 s back-off) and its
+ * final outcome is written to AuditLog (service "sumsub", action "ocr_info_sync").
  * Errors are logged but never propagated — the OCR response has already
  * been returned to the client before this runs.
  *
  * @param {string} applicantId  — Sumsub applicant ID
  * @param {Object} ocrFields    — merged OCR fields from ocrPayload.fields
+ * @param {Object} [audit]      — { customerId, journeyId } for the audit trail
  */
-const syncApplicantFromOcr = (applicantId, ocrFields) => {
+const MAX_SYNC_ATTEMPTS = 3;
+
+const syncApplicantFromOcr = (applicantId, ocrFields, audit = {}) => {
   if (!applicantId || !ocrFields) return;
 
   const payload = buildInfoPayloadFromOcr(ocrFields);
@@ -631,17 +653,38 @@ const syncApplicantFromOcr = (applicantId, ocrFields) => {
   const base = `/resources/applicants/${applicantId}`;
 
   const patch = async (endpoint, label) => {
-    const { status, data } = await withRetry(() =>
-      sumsubPatch(`${base}/${endpoint}`, payload),
+    const startedAt = Date.now();
+    const { status, data, attempts } = await withRetry(
+      () => sumsubPatch(`${base}/${endpoint}`, payload),
+      MAX_SYNC_ATTEMPTS,
     );
-    if (status >= 400) {
+    const failed = status >= 400 || status === 0;
+    if (failed) {
       console.error(
-        `${TAG} ${label} failed (${status}):`,
+        `${TAG} ${label} failed (${status}) after ${attempts} attempt(s):`,
         data?.description || data?.message || JSON.stringify(data),
       );
     } else {
       console.log(`${TAG} ${label} synced (${status})`);
     }
+
+    await recordSyncAudit({
+      externalId: applicantId,
+      customer: audit.customerId || undefined,
+      journey: audit.journeyId || undefined,
+      action: "ocr_info_sync",
+      target: label,
+      status: failed ? "failed" : "success",
+      attempts,
+      maxAttempts: MAX_SYNC_ATTEMPTS,
+      httpStatus: status,
+      error: failed
+        ? data?.description || data?.message || JSON.stringify(data)
+        : undefined,
+      requestPayload: payload,
+      responseData: data,
+      durationMs: Date.now() - startedAt,
+    });
   };
 
   // Both PATCHes in parallel — fire-and-forget
@@ -714,9 +757,9 @@ const buildIdDocMetadata = (
   };
 
   const dob = parseIso(ocrFields.date_of_birth);
-  const issuedDate = parseIso(ocrFields.issue_date || ocrFields.issued_date);
+  const issuedDate = parseIso(ocrFields.issue_date || ocrFields.issued_date || ocrFields.date_of_issue);
   const validUntil = parseIso(
-    ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until,
+    ocrFields.expiry_date || ocrFields.expiration_date || ocrFields.valid_until || ocrFields.date_of_expiry
   );
   const number =
     ocrFields.document_number ||
@@ -766,20 +809,25 @@ const uploadDocToSumsub = (
 
 /**
  * Fire-and-forget: upload each successfully OCR'd document image to Sumsub.
+ * Each upload is retried up to 3 times (2 s / 4 s / 8 s back-off) and its
+ * final outcome is written to AuditLog (service "sumsub", action "ocr_doc_upload").
  * Errors are logged but never propagated — response has already been sent.
  *
  * @param {string} applicantId
  * @param {Array}  ocrItems — [{ doc, buffer, contentType, ext, ocrData }]
  *   ocrData: the raw OCR API response object ({ card_type, data (fields), side })
  * @param {string} [fallbackCountry] — used when OCR fields have no issuing_country
+ * @param {Object} [audit] — { customerId, journeyId } for the audit trail
  */
-const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry) => {
+const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry, audit = {}) => {
   if (!applicantId || !ocrItems?.length) return;
 
   const TAG = "[SumsubDocUpload]";
 
   Promise.all(
     ocrItems.map(async ({ doc, buffer, contentType, ext, ocrData }) => {
+      const target = doc.docType || "document";
+      const startedAt = Date.now();
       try {
         const metadata = buildIdDocMetadata(
           ocrData.data || {},
@@ -795,22 +843,29 @@ const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry) => {
           "_",
         );
 
-        const { status, data } = await uploadDocToSumsub(
-          applicantId,
-          buffer,
-          contentType,
-          safeFilename,
-          metadata,
+        // uploadDocToSumsub rebuilds the multipart form from the buffer on
+        // every call, so re-invoking it per attempt is safe.
+        const { status, data, attempts } = await withRetry(
+          () =>
+            uploadDocToSumsub(
+              applicantId,
+              buffer,
+              contentType,
+              safeFilename,
+              metadata,
+            ),
+          MAX_SYNC_ATTEMPTS,
         );
 
-        if (status >= 400) {
+        const failed = status >= 400 || status === 0;
+        if (failed) {
           console.error(
-            `${TAG} Upload failed for ${doc.docType || "doc"} (${status}):`,
+            `${TAG} Upload failed for ${target} (${status}) after ${attempts} attempt(s):`,
             data?.description || data?.message || JSON.stringify(data),
           );
         } else {
           console.log(
-            `${TAG} Uploaded ${doc.docType || "doc"} → idDocType=${metadata.idDocType} (${status})`,
+            `${TAG} Uploaded ${target} → idDocType=${metadata.idDocType} (${status})`,
           );
         }
         if (data?.errors?.length) {
@@ -819,11 +874,42 @@ const pushOcrDocsToSumsub = (applicantId, ocrItems, fallbackCountry) => {
         if (data?.warnings?.length) {
           console.warn(`${TAG} Doc warnings:`, JSON.stringify(data.warnings));
         }
+
+        await recordSyncAudit({
+          externalId: applicantId,
+          customer: audit.customerId || undefined,
+          journey: audit.journeyId || undefined,
+          action: "ocr_doc_upload",
+          target,
+          status: failed ? "failed" : "success",
+          attempts,
+          maxAttempts: MAX_SYNC_ATTEMPTS,
+          httpStatus: status,
+          error: failed
+            ? data?.description || data?.message || JSON.stringify(data)
+            : undefined,
+          requestPayload: { metadata, filename: safeFilename },
+          responseData: data,
+          durationMs: Date.now() - startedAt,
+        });
       } catch (err) {
         console.error(
-          `${TAG} Exception uploading ${doc.docType || "doc"}:`,
+          `${TAG} Exception uploading ${target}:`,
           err.message,
         );
+        await recordSyncAudit({
+          externalId: applicantId,
+          customer: audit.customerId || undefined,
+          journey: audit.journeyId || undefined,
+          action: "ocr_doc_upload",
+          target,
+          status: "failed",
+          attempts: 1,
+          maxAttempts: MAX_SYNC_ATTEMPTS,
+          httpStatus: 0,
+          error: err.message,
+          durationMs: Date.now() - startedAt,
+        });
       }
     }),
   ).catch((err) => console.error(`${TAG} unexpected error:`, err.message));
