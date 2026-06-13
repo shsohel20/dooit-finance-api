@@ -208,8 +208,8 @@ async function setEncryption(Model, id, shouldEncrypt, opts = {}) {
     typeof Model.restrictedProperty === "object"
       ? Model.restrictedProperty
       : typeof Model.getEncryptedPaths === "function"
-      ? Model.getEncryptedPaths()
-      : [];
+        ? Model.getEncryptedPaths()
+        : [];
 
   // Detect real encryption state from actual stored values — don't trust the flag
   const actuallyEncrypted = detectActualEncryption(raw, paths);
@@ -257,7 +257,10 @@ async function setEncryption(Model, id, shouldEncrypt, opts = {}) {
     snapshotId = await takeSnapshot(modelType, oid, raw, paths, "pre_decrypt", performedBy);
   }
 
-  const $set = { isDataEncrypted: false };
+  console.log(snapshotId)
+
+  const $set = {};
+  let decryptErrors = 0;
   paths.forEach((path) => {
     const val = getDeep(raw, path);
     if (val && looksEncrypted(val)) {
@@ -265,9 +268,16 @@ async function setEncryption(Model, id, shouldEncrypt, opts = {}) {
         $set[path] = decrypt(val);
       } catch (err) {
         console.error(`[privacy] decrypt failed for ${path}:`, err.message);
+        decryptErrors++;
       }
     }
   });
+
+  // Only clear the encrypted flag when every field decrypted successfully.
+  // If any field failed (e.g. given_name / surname ciphertext is corrupt),
+  // keep isDataEncrypted: true so the next decrypt attempt can retry them
+  // rather than leaving the flag permanently desynced.
+  $set.isDataEncrypted = decryptErrors > 0;
 
   await Model.collection.updateOne({ _id: oid }, { $set });
   return { doc: await Model.findById(id), snapshotId };
@@ -543,7 +553,7 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain { encrypted: Boolean }", 400));
   }
 
-  
+
 
   const permErr = checkPrivacyPermission(encrypted, req.user.permissions);
   if (permErr) return next(permErr);
@@ -553,15 +563,15 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
 
   // Pre-check: skip if all users AND all customers in scope are already encrypted
   if (encrypted) {
-    const userScope     = await buildUserFilter(false);
+    const userScope = await buildUserFilter(false);
     const customerScope = await buildCustomerFilter(false, clientId, branchId);
     const [totalUsers, encUsers, totalCustomers, encCustomers] = await Promise.all([
       User.countDocuments(userScope),
-      User.countDocuments({ ...userScope,     isDataEncrypted: true }),
+      User.countDocuments({ ...userScope, isDataEncrypted: true }),
       Customer.countDocuments(customerScope),
       Customer.countDocuments({ ...customerScope, isDataEncrypted: true }),
     ]);
-    const usersAllDone     = totalUsers     > 0 && encUsers     === totalUsers;
+    const usersAllDone = totalUsers > 0 && encUsers === totalUsers;
     const customersAllDone = totalCustomers > 0 && encCustomers === totalCustomers;
     if (usersAllDone && customersAllDone) {
       return res.status(200).json({
@@ -569,7 +579,7 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
         alreadyEncrypted: true,
         message: "All data is already encrypted — no action taken",
         results: {
-          users:     { processed: 0, failed: 0, alreadyEncrypted: true },
+          users: { processed: 0, failed: 0, alreadyEncrypted: true },
           customers: { processed: 0, failed: 0, alreadyEncrypted: true },
         },
       });
@@ -625,8 +635,8 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
 exports.getSnapshots = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.query.modelType) filter.modelType = req.query.modelType;
-  if (req.query.operation)  filter.operation  = req.query.operation;
-  if (req.query.version)    filter.version    = Number(req.query.version);
+  if (req.query.operation) filter.operation = req.query.operation;
+  if (req.query.version) filter.version = Number(req.query.version);
   if (req.query.documentId && Types.ObjectId.isValid(req.query.documentId)) {
     filter.documentId = new Types.ObjectId(String(req.query.documentId));
   }
@@ -636,7 +646,7 @@ exports.getSnapshots = asyncHandler(async (req, res) => {
 
   const snapshots = await PrivacySnapshot.find(filter)
     .populate("performedBy", "name email uid")
-    .populate("restoredBy",  "name email uid")
+    .populate("restoredBy", "name email uid")
     .sort({ createdAt: -1 })
     .limit(200);
 
@@ -649,7 +659,7 @@ exports.getSnapshots = asyncHandler(async (req, res) => {
 exports.getSnapshot = asyncHandler(async (req, res, next) => {
   const snapshot = await PrivacySnapshot.findById(req.params.id)
     .populate("performedBy", "name email uid")
-    .populate("restoredBy",  "name email uid");
+    .populate("restoredBy", "name email uid");
 
   if (!snapshot) return next(new ErrorResponse("Snapshot not found", 404));
   res.status(200).json({ success: true, data: snapshot });
@@ -670,7 +680,7 @@ exports.restoreSnapshot = asyncHandler(async (req, res, next) => {
   }
 
   const Model = snapshot.modelType === "user" ? User : Customer;
-  const oid   = new Types.ObjectId(String(snapshot.documentId));
+  const oid = new Types.ObjectId(String(snapshot.documentId));
 
   const exists = await Model.collection.findOne({ _id: oid });
   if (!exists) return next(new ErrorResponse("Original document no longer exists", 404));
@@ -692,11 +702,11 @@ exports.restoreSnapshot = asyncHandler(async (req, res, next) => {
     success: true,
     message: `Restored to state before ${snapshot.operation === "pre_encrypt" ? "encryption" : "decryption"}`,
     data: {
-      documentId:  snapshot.documentId,
-      modelType:   snapshot.modelType,
-      operation:   snapshot.operation,
-      version:     snapshot.version,
-      restoredAt:  new Date(),
+      documentId: snapshot.documentId,
+      modelType: snapshot.modelType,
+      operation: snapshot.operation,
+      version: snapshot.version,
+      restoredAt: new Date(),
     },
   });
 });
@@ -720,7 +730,7 @@ exports.getSnapshotVersions = asyncHandler(async (req, res, next) => {
   })
     .select("version operation restoredAt restoredBy performedBy createdAt")
     .populate("performedBy", "name email uid")
-    .populate("restoredBy",  "name email uid")
+    .populate("restoredBy", "name email uid")
     .sort({ version: 1 });
 
   res.status(200).json({ success: true, count: snapshots.length, data: snapshots });

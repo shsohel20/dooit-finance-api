@@ -129,10 +129,24 @@ function roleEncryptionPlugin(schema, options = {}) {
   // Reads canReadDecrypted from AsyncLocalStorage set by protect middleware.
   // If the user has no active RolePermission grant, fields are masked "***".
 
+  // Stores original ciphertext per document instance before autoDecryptDoc
+  // transforms them. decryptForRole() reads from here so it always sees real
+  // ciphertext even when canReadDecrypted:false has already masked to "***".
+  const _rawEncrypted = new WeakMap();
+
   function autoDecryptDoc(doc) {
     if (!doc) return;
 
     const { canReadDecrypted } = _getStore();
+
+    // Snapshot every encrypted field value BEFORE masking or decrypting,
+    // so decryptForRole() can bypass "***" and work from real ciphertext.
+    const snapshot = {};
+    secretPaths.forEach(({ path }) => {
+      const val = doc.get ? doc.get(path) : getNestedValue(doc, path);
+      if (looksEncrypted(val)) snapshot[path] = val;
+    });
+    if (Object.keys(snapshot).length > 0) _rawEncrypted.set(doc, snapshot);
 
     secretPaths.forEach(({ path }) => {
       const val = doc.get ? doc.get(path) : getNestedValue(doc, path);
@@ -175,13 +189,17 @@ function roleEncryptionPlugin(schema, options = {}) {
   // ── Instance method: explicit decrypt for a given role ────────────────────
   // Used in admin-only controller operations (e.g. privacyController) where
   // you need to force-decrypt regardless of the request context.
-  // Uses looksEncrypted() per field — NOT the isDataEncrypted flag, which can
-  // be corrupted (flag=false on actually-encrypted data).
+  //
+  // Reads ciphertext from _rawEncrypted snapshot (captured by autoDecryptDoc
+  // before it masked to "***"), so this works correctly even when the request
+  // context has canReadDecrypted:false.
   schema.methods.decryptForRole = function () {
     const obj = this.toObject({ virtuals: true, getters: false });
+    const rawSnap = _rawEncrypted.get(this) ?? {};
 
     secretPaths.forEach(({ path }) => {
-      const val = getNestedValue(obj, path);
+      // Prefer snapshot ciphertext over the (possibly masked) in-memory value
+      const val = rawSnap[path] ?? getNestedValue(obj, path);
       if (!looksEncrypted(val)) return;
       try {
         setNestedValue(obj, path, decrypt(val));
