@@ -3,18 +3,31 @@ const asyncHandler = require("../middleware/async");
 const EwraAssessment = require("../models/EwraAssessment");
 const EwraRiskFactor = require("../models/EwraRiskFactor");
 const EwraControlAssessment = require("../models/EwraControlAssessment");
+const EwraRiskScenario = require("../models/EwraRiskScenario");
 const Control = require("../models/Control");
 const IssueRegister = require("../models/IssueRegister");
 const RemediationTask = require("../models/RemediationTask");
 const ErrorResponse = require("../utils/errorResponse");
+const {
+  inherentBand,
+  residualBand,
+  loadTemplateScenarios,
+  BAND_LABELS,
+  LABEL_TO_CODE,
+  BAND_MIDPOINT,
+  DEFAULT_REGISTER_SECTIONS,
+  EXTRA_TEMPLATE_SCENARIOS,
+} = require("../utils/ewraRiskRegister");
 
 const getClient = (req) => req.user?.client?._id || req.user?.clientBelongs || null;
 
 // ── Risk matrix (5×5 lookup) ───────────────────────────────────────────────────
 // Rows = likelihood 1-5, Cols = consequence/impact 1-5
+// Corrected 12 Jun 2026 against Risk_Matrix.md (L1C2=Very Low, L2C1=Very Low);
+// canonical code-form grid lives in utils/ewraRiskRegister.js
 const RISK_MATRIX = [
-  ["Very Low","Low","Low","Medium","Medium"],
-  ["Low","Low","Medium","Medium","High"],
+  ["Very Low","Very Low","Low","Medium","Medium"],
+  ["Very Low","Low","Medium","Medium","High"],
   ["Low","Medium","Medium","High","Extreme"],
   ["Medium","Medium","High","Extreme","Extreme"],
   ["Medium","High","Extreme","Extreme","Extreme"],
@@ -115,11 +128,19 @@ const DEFAULT_FACTORS = [
 // Enrich default factors with entity-type inherent score defaults from seed
 async function enrichWithEntityDefaults(factors, entityTypeName) {
   try {
+    // ewra_factors columns are keyed by BARE entity type names
+    // ("Lawyers/Conveyancers", "Real Estate Agents"), while EntityType.name is
+    // tranche-prefixed ("Tranche 2 - Real Estate") — normalise via the shared
+    // mapper (also handles Real Estate → Real Estate Agents).
+    const { mapEntityTypeName } = require("../utils/craEntityType");
+    const columnName = mapEntityTypeName(entityTypeName);
+
     const seedFactors = await mongoose.connection
       .collection("ewra_factors").find({}).toArray();
     return factors.map((f) => {
       const seed = seedFactors.find((s) => s.factor_id === f.factorId);
-      const defaultScore = seed?.[entityTypeName] ?? null;
+      const defaultScore =
+        (columnName ? seed?.[columnName] : null) ?? seed?.[entityTypeName] ?? null;
       return { ...f, likelihood: defaultScore };
     });
   } catch {
@@ -153,6 +174,28 @@ exports.listAssessments = asyncHandler(async (req, res) => {
 });
 
 // @route POST /api/v1/ewra
+/**
+ * Seed the 28 template risk scenarios (VDG register format) for a new
+ * assessment, linking each to its parent EWRA factor by factorRef.
+ */
+async function seedTemplateScenarios(assessmentId, clientId, factorDocs = []) {
+  const byRef = new Map(factorDocs.map((f) => [f.factorId, f._id]));
+  const templates = [...loadTemplateScenarios(), ...EXTRA_TEMPLATE_SCENARIOS];
+  if (!templates.length) return;
+
+  await EwraRiskScenario.insertMany(
+    templates.map((t) => ({
+      ...t,
+      assessmentId,
+      factorId: byRef.get(t.factorRef) || null,
+      source: "template",
+      templateRef: t.ref,
+      status: "Draft",
+      client: clientId,
+    })),
+  );
+}
+
 exports.createAssessment = asyncHandler(async (req, res) => {
   const clientId = getClient(req);
   const {
@@ -170,6 +213,7 @@ exports.createAssessment = asyncHandler(async (req, res) => {
     periodStart, periodEnd, version,
     amendmentType: "initial",
     categoryScores,
+    registerSections: DEFAULT_REGISTER_SECTIONS,
     ewraAnswers: ewraAnswers || {},
     client: clientId,
     createdBy: req.user?.id || null,
@@ -189,8 +233,12 @@ exports.createAssessment = asyncHandler(async (req, res) => {
 
   const enriched = await enrichWithEntityDefaults(DEFAULT_FACTORS, entityTypeName);
   const factors = enriched.map((f) => ({ ...f, assessmentId: assessment._id, client: clientId }));
-  await EwraRiskFactor.insertMany(factors);
+  const insertedFactors = await EwraRiskFactor.insertMany(factors);
   await EwraAssessment.findByIdAndUpdate(assessment._id, { factorsTotal: factors.length });
+
+  // Seed the scenario-level risk register from the template
+  // (sample_risk_register.json) — CO adjusts scores to the entity's reality
+  await seedTemplateScenarios(assessment._id, clientId, insertedFactors);
 
   // N_002 — EWRA Draft Ready
   await dispatchNotification("N_002", { client: clientId, entityProfile, linkedRecord: assessment._id, linkedRecordType: "EwraAssessment" });
@@ -201,7 +249,13 @@ exports.createAssessment = asyncHandler(async (req, res) => {
 // @route GET /api/v1/ewra/:id
 exports.getAssessment = asyncHandler(async (req, res, next) => {
   const assessment = await EwraAssessment.findById(req.params.id)
-    .populate("entityProfile", "entityName entityType abn licenses status")
+    .populate({
+      path: "entityProfile",
+      select: "entityName entityType abn licenses status",
+      // entityType.name drives the NRA floor banner and the entity-scoped
+      // product factor picker in the UI
+      populate: { path: "entityType", select: "name category" },
+    })
     .populate("priorAssessmentId", "assessmentName residualRiskRating approvedAt")
     .lean();
   if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
@@ -279,6 +333,27 @@ exports.createAmendment = asyncHandler(async (req, res, next) => {
         priorResidualScore: f.residualScore,
         status: "Not Started",
         delta: "",
+        client: clientId,
+      }))
+    );
+  }
+
+  // Carry the scenario register forward (CO-adjusted values preserved),
+  // re-linking each scenario to the amendment's copied factor by factorRef
+  const priorScenarios = await EwraRiskScenario.find({ assessmentId: prior._id }).lean();
+  if (priorScenarios.length) {
+    const newFactors = await EwraRiskFactor.find({ assessmentId: amendment._id })
+      .select("factorId").lean();
+    const byRef = new Map(newFactors.map((f) => [f.factorId, f._id]));
+    await EwraRiskScenario.insertMany(
+      priorScenarios.map(({ _id: sid, createdAt: sc, updatedAt: su, __v: sv, ...s }) => ({
+        ...s,
+        assessmentId: amendment._id,
+        factorId: byRef.get(s.factorRef) || null,
+        priorInherentRisk: s.inherentRisk,
+        priorResidualRisk: s.residualRisk,
+        delta: "",
+        status: "Draft",
         client: clientId,
       }))
     );
@@ -383,10 +458,19 @@ exports.updateFactor = asyncHandler(async (req, res, next) => {
     update.inherentRating = matrixRating(likelihood, impact);
   }
 
-  const inherentScore = update.inherentScore ?? factor.inherentScore ?? 3;
-  if (effectiveness !== null && inherentScore !== null) {
-    update.residualScore  = +(inherentScore * (1 - effectiveness / 5)).toFixed(2);
-    update.residualRating = ratingFromScore(update.residualScore);
+  // Residual via the Risk_Matrix.md band matrix (eff 3 keeps the band,
+  // eff 4 drops one, eff 1 raises one) — NOT inherent × (1 − eff/5), which
+  // understates risk (it zeroed out even Extreme at eff 5; matrix says Medium).
+  const inherentRatingNow =
+    update.inherentRating ?? factor.inherentRating ??
+    (likelihood && impact ? matrixRating(likelihood, impact) : "");
+  if (effectiveness !== null && inherentRatingNow) {
+    const inhCode = LABEL_TO_CODE[inherentRatingNow];
+    if (inhCode) {
+      const resCode = residualBand(inhCode, effectiveness);
+      update.residualRating = BAND_LABELS[resCode] || "";
+      update.residualScore  = BAND_MIDPOINT[resCode] ?? null;
+    }
   }
 
   // Track delta vs prior
@@ -406,6 +490,266 @@ exports.updateFactor = asyncHandler(async (req, res, next) => {
 exports.deleteFactor = asyncHandler(async (req, res, next) => {
   const factor = await EwraRiskFactor.findByIdAndDelete(req.params.factorId);
   if (!factor) return next(new ErrorResponse("Factor not found", 404));
+  res.status(200).json({ success: true, data: {} });
+});
+
+// ── Risk Register Scenarios (micro layer — VDG register format) ───────────────
+
+/**
+ * Derive scenario control-effectiveness from the assessment's ASSESSED
+ * controls (the register is a report over factors + controls — scenario
+ * eff must follow the Controls tab, not free-typed numbers).
+ *
+ * For every scenario whose controlIds match ≥1 assessed control:
+ *   controlEffectiveness = round(avg(linked effectivenessScores)) clamped 1–5
+ *   residualRisk         = residual matrix(inherent band, derived eff)
+ *   ctrlEffSource        = "derived"
+ * Scenarios with no assessed linked controls keep their manual values.
+ *
+ * @param {ObjectId|string} assessmentId
+ * @param {{controlId?: string, scenarioId?: string}} scope — optional narrowing
+ * @returns {Promise<number>} scenarios updated
+ */
+async function syncScenarioCtrlEff(assessmentId, scope = {}) {
+  const scenarioFilter = {
+    assessmentId,
+    "controlIds.0": { $exists: true },
+    ...(scope.controlId ? { controlIds: scope.controlId } : {}),
+    ...(scope.scenarioId ? { _id: scope.scenarioId } : {}),
+  };
+  const [scenarios, controls] = await Promise.all([
+    EwraRiskScenario.find(scenarioFilter).lean(),
+    EwraControlAssessment.find({ assessmentId, effectivenessScore: { $ne: null } })
+      .select("controlId effectivenessScore").lean(),
+  ]);
+  if (!scenarios.length) return 0;
+
+  const effBy = new Map(controls.map((c) => [c.controlId, c.effectivenessScore]));
+  const ops = [];
+  for (const s of scenarios) {
+    const scores = (s.controlIds || []).map((cid) => effBy.get(cid)).filter((v) => v != null);
+    if (!scores.length) continue;
+    const derived = Math.min(5, Math.max(1, Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)));
+    const residual = s.inherentRisk ? residualBand(s.inherentRisk, derived) : s.residualRisk;
+    if (
+      derived !== s.controlEffectiveness ||
+      residual !== s.residualRisk ||
+      s.ctrlEffSource !== "derived" ||
+      s.linkedControlsAssessed !== scores.length
+    ) {
+      ops.push({
+        updateOne: {
+          filter: { _id: s._id },
+          update: {
+            $set: {
+              controlEffectiveness: derived,
+              residualRisk: residual,
+              ctrlEffSource: "derived",
+              linkedControlsAssessed: scores.length,
+            },
+          },
+        },
+      });
+    }
+  }
+  if (ops.length) await EwraRiskScenario.bulkWrite(ops, { ordered: false });
+  return ops.length;
+}
+
+/**
+ * Ensure every control referenced by the register exists in the assessment's
+ * Controls tab — the register defines the control SCOPE; the Controls tab is
+ * where they get rated. Returns the number auto-added from the library.
+ */
+async function scopeReferencedControls(assessmentId, clientId, scenarios) {
+  const referenced = [...new Set(scenarios.flatMap((s) => s.controlIds || []))];
+  if (!referenced.length) return 0;
+
+  const existing = await EwraControlAssessment.find({ assessmentId })
+    .select("controlId").lean();
+  const have = new Set(existing.map((c) => c.controlId));
+  const missing = referenced.filter((cid) => !have.has(cid));
+  if (!missing.length) return 0;
+
+  const libraryControls = await Control.find({ controlId: { $in: missing } }).lean();
+  if (!libraryControls.length) return 0;
+
+  await EwraControlAssessment.bulkWrite(
+    libraryControls.map((c) => ({
+      updateOne: {
+        filter: { assessmentId, controlId: c.controlId },
+        update: {
+          $setOnInsert: {
+            assessmentId,
+            controlId: c.controlId,
+            controlTitle: c.title,
+            domain: c.domain,
+            controlOwner: c.owner || "",
+            client: clientId,
+            status: "Not Started",
+          },
+        },
+        upsert: true,
+      },
+    })),
+    { ordered: false },
+  );
+  return libraryControls.length;
+}
+
+/** Recompute inherent/residual band codes from the matrix engine. */
+function applyScenarioBands(doc) {
+  if (doc.likelihood && doc.consequence) {
+    doc.inherentRisk = inherentBand(doc.likelihood, doc.consequence);
+  }
+  if (doc.inherentRisk && doc.controlEffectiveness) {
+    doc.residualRisk = residualBand(doc.inherentRisk, doc.controlEffectiveness);
+  }
+  return doc;
+}
+
+// @route GET /api/v1/ewra/:id/scenarios
+exports.getScenarios = asyncHandler(async (req, res) => {
+  const scenarios = await EwraRiskScenario.find({ assessmentId: req.params.id })
+    .sort({ riskSection: 1, ref: 1 })
+    .lean();
+  res.status(200).json({ success: true, count: scenarios.length, data: scenarios });
+});
+
+// @route POST /api/v1/ewra/:id/scenarios
+exports.addScenario = asyncHandler(async (req, res) => {
+  const clientId = getClient(req);
+  const last = await EwraRiskScenario.findOne({ assessmentId: req.params.id })
+    .sort({ ref: -1 }).select("ref").lean();
+
+  // derive category/riskType from the section definition when not supplied
+  let { category, riskType } = req.body;
+  if (req.body.riskSection && !category) {
+    const assessment = await EwraAssessment.findById(req.params.id).select("registerSections").lean();
+    const section = (assessment?.registerSections || []).find((s) => s.code === req.body.riskSection);
+    category = section?.category || "";
+    riskType = riskType || section?.label?.replace(/^SECTION \d+ — /i, "") || "";
+  }
+
+  const payload = applyScenarioBands({
+    ...req.body,
+    category,
+    riskType,
+    assessmentId: req.params.id,
+    ref: req.body.ref || (last?.ref || 0) + 1,
+    source: "manual",
+    client: clientId,
+  });
+  const scenario = await EwraRiskScenario.create(payload);
+  res.status(201).json({ success: true, data: scenario });
+});
+
+// ── Register sections (dynamic taxonomy) ──────────────────────────────────────
+
+// @route POST /api/v1/ewra/:id/sections
+exports.addSection = asyncHandler(async (req, res, next) => {
+  const { label, category = "Customer", basis = "" } = req.body;
+  if (!label?.trim()) return next(new ErrorResponse("Section label is required", 400));
+
+  const assessment = await EwraAssessment.findById(req.params.id).select("registerSections").lean();
+  if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
+
+  const sections = assessment.registerSections || [];
+  const maxNum = sections.reduce((m, s) => Math.max(m, Number(String(s.code).replace(/^S/i, "")) || 0), 0);
+  const newSection = {
+    code: `S${maxNum + 1}`,
+    label: label.trim().toUpperCase().startsWith("SECTION")
+      ? label.trim()
+      : `SECTION ${maxNum + 1} — ${label.trim().toUpperCase()}`,
+    category,
+    sortOrder: maxNum + 1,
+    basis,
+    source: "custom",
+  };
+
+  const updated = await EwraAssessment.findByIdAndUpdate(
+    req.params.id,
+    { $push: { registerSections: newSection } },
+    { new: true },
+  );
+  res.status(201).json({ success: true, data: updated.registerSections });
+});
+
+// @route DELETE /api/v1/ewra/:id/sections/:code — custom + empty sections only
+exports.deleteSection = asyncHandler(async (req, res, next) => {
+  const assessment = await EwraAssessment.findById(req.params.id).select("registerSections").lean();
+  if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
+
+  const section = (assessment.registerSections || []).find((s) => s.code === req.params.code);
+  if (!section) return next(new ErrorResponse("Section not found", 404));
+  if (section.source !== "custom") {
+    return next(new ErrorResponse("Default sections cannot be removed", 400));
+  }
+  const inUse = await EwraRiskScenario.countDocuments({
+    assessmentId: req.params.id,
+    riskSection: req.params.code,
+  });
+  if (inUse > 0) {
+    return next(new ErrorResponse(`Section has ${inUse} scenario(s) — move or delete them first`, 400));
+  }
+
+  const updated = await EwraAssessment.findByIdAndUpdate(
+    req.params.id,
+    { $pull: { registerSections: { code: req.params.code } } },
+    { new: true },
+  );
+  res.status(200).json({ success: true, data: updated.registerSections });
+});
+
+// @route PUT /api/v1/ewra/:id/scenarios/:scenarioId
+exports.updateScenario = asyncHandler(async (req, res, next) => {
+  const existing = await EwraRiskScenario.findOne({
+    _id: req.params.scenarioId,
+    assessmentId: req.params.id,
+  }).lean();
+  if (!existing) return next(new ErrorResponse("Scenario not found", 404));
+
+  const allowed = [
+    "riskName","riskType","riskSection","category","factorRef","description",
+    "pfSanctionsNote","applicableChannels","likelihood","consequence",
+    "existingControls","controlEffectiveness","actionRequired","controlIds",
+    "controlsOwner","withinRiskAppetite","proposedTreatment","reviewerNotes","status",
+  ];
+  const update = {};
+  for (const k of allowed) if (req.body[k] !== undefined) update[k] = req.body[k];
+
+  // recompute bands from the merged values
+  const merged = applyScenarioBands({ ...existing, ...update });
+  update.inherentRisk = merged.inherentRisk;
+  update.residualRisk = merged.residualRisk;
+
+  // amendment delta vs prior assessment (band severity ordering)
+  if (existing.priorResidualRisk) {
+    const order = { VL: 1, L: 2, M: 3, H: 4, E: 5 };
+    const prev = order[existing.priorResidualRisk] || 0;
+    const now = order[update.residualRisk] || 0;
+    update.delta = now > prev ? "up" : now < prev ? "down" : "same";
+  }
+
+  let scenario = await EwraRiskScenario.findByIdAndUpdate(
+    req.params.scenarioId, update, { new: true },
+  );
+
+  // re-derive control effectiveness when linked controls are assessed —
+  // derived values always win over manual entry (the register is a report)
+  const synced = await syncScenarioCtrlEff(req.params.id, { scenarioId: scenario._id });
+  if (synced) scenario = await EwraRiskScenario.findById(scenario._id);
+
+  res.status(200).json({ success: true, data: scenario });
+});
+
+// @route DELETE /api/v1/ewra/:id/scenarios/:scenarioId
+exports.deleteScenario = asyncHandler(async (req, res, next) => {
+  const deleted = await EwraRiskScenario.findOneAndDelete({
+    _id: req.params.scenarioId,
+    assessmentId: req.params.id,
+  });
+  if (!deleted) return next(new ErrorResponse("Scenario not found", 404));
   res.status(200).json({ success: true, data: {} });
 });
 
@@ -436,6 +780,7 @@ exports.addControlsFromLibrary = asyncHandler(async (req, res) => {
           controlId: c.controlId,
           controlTitle: c.title,
           domain: c.domain,
+          controlOwner: c.owner || "",
           client: clientId,
           status: "Not Started",
         },
@@ -457,7 +802,7 @@ exports.addControlsFromLibrary = asyncHandler(async (req, res) => {
 
 // @route PUT /api/v1/ewra/:id/controls/:controlAssessId
 exports.updateControlAssessment = asyncHandler(async (req, res, next) => {
-  const allowed = ["designRating","performanceRating","evidenceNotes","gaps","actionRequired","status"];
+  const allowed = ["designRating","performanceRating","evidenceNotes","gaps","actionRequired","status","controlOwner"];
   const update = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
 
@@ -474,7 +819,15 @@ exports.updateControlAssessment = asyncHandler(async (req, res, next) => {
   }
 
   const updated = await EwraControlAssessment.findByIdAndUpdate(req.params.controlAssessId, update, { new: true });
-  res.status(200).json({ success: true, data: updated });
+
+  // live-connect: a control rating change re-derives the register scenarios
+  // that cite this control (the register is a report over controls)
+  let scenariosSynced = 0;
+  if (update.effectivenessScore !== undefined) {
+    scenariosSynced = await syncScenarioCtrlEff(req.params.id, { controlId: updated.controlId });
+  }
+
+  res.status(200).json({ success: true, data: updated, scenariosSynced });
 });
 
 // ── Calculate ──────────────────────────────────────────────────────────────────
@@ -484,9 +837,10 @@ exports.calculate = asyncHandler(async (req, res, next) => {
   const assessment = await EwraAssessment.findById(req.params.id);
   if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
 
-  const [factors, controls] = await Promise.all([
+  const [factors, controls, scenarios] = await Promise.all([
     EwraRiskFactor.find({ assessmentId: req.params.id, status: "Complete" }),
     EwraControlAssessment.find({ assessmentId: req.params.id, status: "Complete" }),
+    EwraRiskScenario.find({ assessmentId: req.params.id }).lean(),
   ]);
 
   if (factors.length === 0) {
@@ -602,6 +956,89 @@ exports.calculate = asyncHandler(async (req, res, next) => {
     });
   }
 
+  // ── Connect register ↔ controls (the register is a REPORT) ────────────────
+  // 1. every control named in the register is scoped into the Controls tab
+  // 2. scenario control-effectiveness derives from the assessed controls
+  const controlsAutoAdded = await scopeReferencedControls(req.params.id, clientId, scenarios);
+  const scenariosSynced = await syncScenarioCtrlEff(req.params.id);
+  const liveScenarios = (controlsAutoAdded || scenariosSynced)
+    ? await EwraRiskScenario.find({ assessmentId: req.params.id }).lean()
+    : scenarios;
+
+  // ── Scenario → factor roll-up (supporting evidence, never overrides) ──────
+  const SEV = { VL: 1, L: 2, M: 3, H: 4, E: 5 };
+  const rollupByFactor = new Map();
+  for (const s of liveScenarios) {
+    if (!s.factorId) continue;
+    const k = String(s.factorId);
+    const r = rollupByFactor.get(k) || { count: 0, actionCount: 0, worstInherent: "", worstResidual: "", effSum: 0, effN: 0 };
+    r.count++;
+    if (s.actionRequired) r.actionCount++;
+    if ((SEV[s.inherentRisk] || 0) > (SEV[r.worstInherent] || 0)) r.worstInherent = s.inherentRisk;
+    if ((SEV[s.residualRisk] || 0) > (SEV[r.worstResidual] || 0)) r.worstResidual = s.residualRisk;
+    if (s.controlEffectiveness) { r.effSum += s.controlEffectiveness; r.effN++; }
+    rollupByFactor.set(k, r);
+  }
+  if (rollupByFactor.size) {
+    await EwraRiskFactor.bulkWrite(
+      [...rollupByFactor].map(([fid, r]) => ({
+        updateOne: {
+          filter: { _id: fid },
+          update: {
+            $set: {
+              scenarioRollup: {
+                count: r.count,
+                actionCount: r.actionCount,
+                worstInherent: r.worstInherent,
+                worstResidual: r.worstResidual,
+                avgCtrlEff: r.effN ? +(r.effSum / r.effN).toFixed(1) : null,
+              },
+            },
+          },
+        },
+      })),
+      { ordered: false },
+    );
+  }
+
+  // ── Auto-create RAP items for action-required register scenarios ──────────
+  // Priority per Risk_Matrix.md §6: E → Critical/7d · H → High/30d · M+ → Medium/90d
+  let scenarioRapCount = 0;
+  for (const s of liveScenarios.filter((x) => x.actionRequired)) {
+    const sev = s.residualRisk === "E" ? "Critical" : s.residualRisk === "H" ? "High" : "Medium";
+    const dueDays = s.residualRisk === "E" ? 7 : s.residualRisk === "H" ? 30 : 90;
+    const issueTitle = `Risk Register Action — Ref ${s.ref}: ${s.riskName}`.substring(0, 200);
+
+    const existingIssue = await IssueRegister.findOne({
+      linkedEwra: req.params.id,
+      title: issueTitle,
+      status: { $in: ["Open", "In Progress", "Under Review"] },
+    });
+    if (existingIssue) continue;
+
+    const issue = await IssueRegister.create({
+      client: clientId,
+      title: issueTitle,
+      description: `${s.description || s.riskName}\n\nResidual risk: ${s.residualRisk || "—"} · Controls: ${(s.controlIds || []).join(", ") || "—"} · Owner: ${s.controlsOwner || "AML/CTF CO"}`,
+      domain: "RA",
+      severity: sev,
+      source: "EWRA",
+      linkedEwra: req.params.id,
+      dueDate: new Date(Date.now() + dueDays * 86400000),
+      createdBy: req.user?.id || null,
+    });
+    await RemediationTask.create({
+      client: clientId,
+      issue: issue._id,
+      title: issueTitle,
+      description: s.proposedTreatment || s.existingControls || "",
+      priority: sev,
+      dueDate: new Date(Date.now() + dueDays * 86400000),
+      createdBy: req.user?.id || null,
+    });
+    scenarioRapCount++;
+  }
+
   // ── Notify if High/Extreme residual ──────────────────────────────────────
   if (["High","Extreme"].includes(overallRating)) {
     await dispatchNotification("N_014", {
@@ -614,7 +1051,14 @@ exports.calculate = asyncHandler(async (req, res, next) => {
     });
   }
 
-  res.status(200).json({ success: true, data: updated, rapItemsCreated: highFactors.length });
+  res.status(200).json({
+    success: true,
+    data: updated,
+    rapItemsCreated: highFactors.length,
+    scenarioRapItemsCreated: scenarioRapCount,
+    controlsAutoAdded,
+    scenariosSynced,
+  });
 });
 
 // ── Workflow ───────────────────────────────────────────────────────────────────

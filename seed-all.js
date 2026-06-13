@@ -27,7 +27,6 @@ const SEEDS = [
   { name: "Monitoring Rules",         file: "seeds/seedMonitoringRules.js" },
   { name: "RAP Templates",            file: "seeds/seedRapTemplates.js" },
   { name: "Onboarding Questions",     file: "seeds/seedOnboardingQuestions.js" },
-  { name: "CRA Stage 1/2 Questions",  file: "seeds/seedCraStage2Questions.js" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────

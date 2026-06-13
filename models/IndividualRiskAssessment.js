@@ -31,10 +31,26 @@ const IndividualRiskAssessmentSchema = new Schema(
       channel: {},
       occupation: {},
       industry: {},
+      pepStatus: {},
+      sourceOfFunds: {},
+      sourceOfWealth: {},
+      adverseMedia: {},
     },
 
     riskScore: Number,
     riskLabel: String,
+
+    // reporting entity type the product catalogue was scoped to
+    entityType: { type: String, default: "" },
+
+    // engine override notes (e.g. "Foreign PEP — minimum HIGH")
+    overrides: { type: [String], default: [] },
+
+    // UHRC / mixer-style hard blocks — decline service, do not alert client
+    serviceBlocked: { type: Boolean, default: false },
+
+    // periodic review (Section 4): Low +3y · Medium +2y · High +1y
+    nextReviewDate: { type: Date, default: null, index: true },
 
     // relation summary (if used)
     relationSummary: {
@@ -66,13 +82,6 @@ const IndividualRiskAssessmentSchema = new Schema(
 
     notes: String,
 
-    // ── CRA Model (determines scoring engine) ─────────────────────────────────
-    craModel: {
-      type: String,
-      enum: ["A", "B", ""],
-      default: "",
-    },
-
     // ── ECDD Gate (blocks service delivery until CO resolves) ─────────────────
     // Set to true when CRA result is High or Unacceptable
     ecddRequired: { type: Boolean, default: false },
@@ -89,8 +98,9 @@ const IndividualRiskAssessmentSchema = new Schema(
     ecddDecidedAt:   { type: Date, default: null },
     ecddReviewDate:  { type: Date, default: null }, // next scheduled ECDD review
 
-    // ── Stage 2 submission ref (CRA Model B two-stage) ────────────────────────
-    stage2SubmissionId: { type: Schema.Types.ObjectId, ref: "CraStage2Submission", default: null },
+    // the completed ECDD form backing the gate decision (spec: "CO must
+    // complete ECDD form and click 'Approve'")
+    ecddReport: { type: Schema.Types.ObjectId, ref: "EcddReport", default: null },
   },
   { timestamps: true },
 );

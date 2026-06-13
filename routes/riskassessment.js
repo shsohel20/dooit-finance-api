@@ -29,6 +29,8 @@ const {
   importRiskFactorsCsv,
   ecddApprove,
   ecddDecline,
+  getCraAuditTrail,
+  exportCraAuditPdf,
 } = require("../controllers/riskassessmentController");
 const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 const advancedResults = require("../middleware/advancedResults");
@@ -97,6 +99,10 @@ router.post("/risk/factors/import", upload.single("file"), importRiskFactorsCsv)
 // ECDD gate decisions
 router.post("/:id/ecdd-approve", ecddApprove);
 router.post("/:id/ecdd-decline", ecddDecline);
+
+// CRA activity audit trail
+router.get("/:id/audit", getCraAuditTrail);
+router.get("/:id/audit/export", exportCraAuditPdf);
 
 // /:id must come after all named routes
 router.route("/:id")

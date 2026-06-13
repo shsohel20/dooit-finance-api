@@ -43,6 +43,17 @@ const EwraRiskFactorSchema = new mongoose.Schema(
     rationale:     { type: String, default: "" },
     keyIndicators: [{ type: String }],
 
+    // ── Scenario roll-up (supporting evidence from the risk register) ───────
+    // Aggregated from this factor's EwraRiskScenario children on calculate;
+    // informational — does not override the CO's factor scoring.
+    scenarioRollup: {
+      count:         { type: Number, default: 0 },
+      actionCount:   { type: Number, default: 0 },
+      worstInherent: { type: String, default: "" }, // VL/L/M/H/E
+      worstResidual: { type: String, default: "" },
+      avgCtrlEff:    { type: Number, default: null }, // avg derived control eff across scenarios
+    },
+
     // ── Status ─────────────────────────────────────────────────────────────
     status: {
       type: String,

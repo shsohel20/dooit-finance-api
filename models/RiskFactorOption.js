@@ -14,8 +14,19 @@ const RiskFactorOptionSchema = new mongoose.Schema({
     },
 
     score: Number,
-    risk: String,      // LR / MR / HR / UHR
-    industry: String,  // optional grouping
+    risk: String,       // LOW / MED / HIGH / UHR / UNACCEPTABLE
+    industry: String,   // optional grouping (legacy)
+
+    // CRA V2 — products are catalogued per reporting entity type
+    // (Banks & ADIs, Remittance, VASP/DCEP, Gambling/Casino, Insurance,
+    //  Lawyers/Conveyancers, Accountants, Real Estate Agents,
+    //  Precious Metal Dealers, TCSPs)
+    entityType: { type: String, index: true },
+
+    // Selecting this option forces mandatory ECDD regardless of numeric band
+    ecddOverride: { type: Boolean, default: false },
+
+    notes: String,
 
     aliases: [String],
 
@@ -27,7 +38,7 @@ const RiskFactorOptionSchema = new mongoose.Schema({
 });
 
 RiskFactorOptionSchema.index(
-    { factor: 1, value: 1 },
+    { factor: 1, entityType: 1, value: 1 },
     { unique: true }
 );
 

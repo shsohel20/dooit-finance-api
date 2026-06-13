@@ -2,11 +2,16 @@ const express = require("express");
 const {
   listAssessments, createAssessment, getAssessment, updateAssessment, deleteAssessment,
   getFactors, addFactor, updateFactor, deleteFactor,
+  getScenarios, addScenario, updateScenario, deleteScenario,
+  addSection, deleteSection,
   getControlAssessments, addControlsFromLibrary, updateControlAssessment,
   calculate, submitForReview, approve, getResults,
   createAmendment, getAmendmentDiff,
 } = require("../controllers/ewraController");
-const { exportRiskRegisterExcel, exportAssessmentExcel } = require("../controllers/raExportController");
+const {
+  exportRiskRegisterExcel, exportAssessmentExcel, exportAssessmentRiskRegisterExcel,
+  exportConsolidatedExcel,
+} = require("../controllers/raExportController");
 const { protect } = require("../middleware/auth");
 
 const router = express.Router();
@@ -26,6 +31,17 @@ router.route("/:id").get(getAssessment).put(updateAssessment).delete(deleteAsses
 router.route("/:id/factors").get(getFactors).post(addFactor);
 router.route("/:id/factors/:factorId").put(updateFactor).delete(deleteFactor);
 
+// Risk register scenarios (micro layer — VDG register format)
+router.route("/:id/scenarios").get(getScenarios).post(addScenario);
+router.route("/:id/scenarios/:scenarioId").put(updateScenario).delete(deleteScenario);
+
+// Risk register sections (dynamic taxonomy — custom sections)
+router.route("/:id/sections").post(addSection);
+router.route("/:id/sections/:code").delete(deleteSection);
+
+// Live risk-register Excel export (scenario data; template fallback)
+router.route("/:id/risk-register/export").get(exportAssessmentRiskRegisterExcel);
+
 // Control assessments
 router.route("/:id/controls").get(getControlAssessments);
 router.route("/:id/controls/add-from-library").post(addControlsFromLibrary);
@@ -43,5 +59,8 @@ router.route("/:id/amend-diff").get(getAmendmentDiff);
 
 // EWRA assessment Excel export
 router.route("/:id/risk-report/export").get(exportAssessmentExcel);
+
+// Consolidated workbook: Overview + Factors + Risk Register + Controls + Matrix
+router.route("/:id/consolidated/export").get(exportConsolidatedExcel);
 
 module.exports = router;

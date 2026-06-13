@@ -89,6 +89,10 @@ const server = app.listen(
   ),
 );
 
+// CRA periodic-review reminders (N_020 due-soon / N_021 overdue daily)
+const { startCraReviewNotificationJob } = require("./utils/craReviewNotifications");
+startCraReviewNotificationJob();
+
 //Handle unhandled promise rejection
 process.on("unhandledRejection", (err, promise) => {
   console.log(`Error: ${err.message}`.red);

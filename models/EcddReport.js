@@ -61,6 +61,14 @@ const EcddReportSchema = new Schema(
       default: null,
     }, //alertId
 
+    // CRA-origin ECDD: report backs a CRA ECDD gate decision instead of a TM alert
+    riskAssessment: {
+      type: Schema.Types.ObjectId,
+      ref: "IndividualRiskAssessment",
+      index: true,
+      default: null,
+    },
+
     // Customer profile fields
     userId: { type: String, trim: true, default: "" },
     fullName: { type: String, trim: true, default: "" },

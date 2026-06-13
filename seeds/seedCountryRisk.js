@@ -8,7 +8,9 @@
  * Sources: FATF Mutual Evaluation, Transparency International CPI,
  *          AUSTRAC guidance, OFAC sanctions list, Basel AML Index 2024
  */
-require("dotenv").config({ path: "./config/config.env" });
+require("dotenv").config({
+  path: require("path").resolve(__dirname, "../config/config.env"),
+});
 const mongoose = require("mongoose");
 const { connectDB } = require("../config/db");
 require("colors");
@@ -21,13 +23,16 @@ const tc = (s) => s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice
  * c(country, band, score, code, region, ml, tf, sanc, corr, fatf, sanctioned, grey, black)
  *  country  — lowercase, matches existing `country` unique key
  *  band     — LRC / MRC / HRC / UHRC  (also sets riskTier)
- *  score    — existing numeric score (10/30/50/100)
+ *  score    — legacy 10×-scale value, ignored; CRA V2 score derived from band
  *  code     — ISO 2-letter country code
  *  region   — geographic region string
  *  ml-corr  — component risk scores 1–5
  *  fatf     — FATF membership status
  *  sanctioned / grey / black — flags
  */
+// CRA V2 (CRA_Scoring_Method.md): LRC 1 · MRC 3 · HRC 5 · UHRC 100
+const BAND_SCORE = { LRC: 1, MRC: 3, HRC: 5, UHRC: 100 };
+
 const c = (
   country, band, score, code, region,
   ml, tf, sanc, corr, fatf,
@@ -35,7 +40,7 @@ const c = (
 ) => ({
   country,
   band,
-  score,
+  score: BAND_SCORE[band] ?? score,
   countryCode:  code,
   countryName:  tc(country),
   region,

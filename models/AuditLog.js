@@ -3,14 +3,18 @@ const mongoose = require("mongoose");
 /**
  * AuditLog
  * ─────────────────────────────────────────────────────────────────────────────
- * Generic audit trail for background jobs and external-service calls across
- * the whole application. Each record is one finished operation (after all
- * retries), success or failure.
+ * Generic audit trail for background jobs, external-service calls and
+ * compliance events across the whole application.
  *
  * Current writers:
  *   service "sumsub" — OCR background jobs fired from ocrDocument:
  *     • action "ocr_info_sync"  — PATCH /info and /fixedInfo from OCR fields
  *     • action "ocr_doc_upload" — POST /info/idDoc per document image
+ *   service "cra" — CRA compliance events (utils/craAudit.js), per
+ *   CRA_Scoring_Method.md Section 4 "Audit trail on every change":
+ *     • CRA_CREATED / CRA_RISK_UPDATED / CRA_NOTES_UPDATED
+ *     • ECDD_APPROVED / ECDD_DECLINED / ESCALATION_RAISED
+ *     CRA entries carry actor*, beforeValue/afterValue and assessment refs.
  */
 const AuditLogSchema = new mongoose.Schema(
   {
@@ -64,6 +68,23 @@ const AuditLogSchema = new mongoose.Schema(
     // Last upstream response body
     responseData: mongoose.Schema.Types.Mixed,
     durationMs: Number,
+
+    // ── CRA compliance fields (service "cra") ────────────────────────────────
+    // Spec shape: {timestamp, actor_name, actor_role, action_type,
+    //              before_value, after_value, linked_matter_id}
+    assessment: {
+      type: mongoose.Schema.ObjectId,
+      ref: "IndividualRiskAssessment",
+      index: true,
+    },
+    client: { type: mongoose.Schema.ObjectId, ref: "Client", index: true },
+    branch: { type: mongoose.Schema.ObjectId, ref: "Branch" },
+    actor: { type: mongoose.Schema.ObjectId, ref: "Users" },
+    actorName: String,
+    actorRole: String,
+    beforeValue: mongoose.Schema.Types.Mixed,
+    afterValue: mongoose.Schema.Types.Mixed,
+    linkedMatterId: String,
   },
   {
     toJSON: { virtuals: true },

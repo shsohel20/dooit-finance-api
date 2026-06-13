@@ -51,6 +51,23 @@ const EwraAssessmentSchema = new mongoose.Schema(
 
     categoryScores: [CategoryScoreSchema],
 
+    // ── Risk register section taxonomy (dynamic) ──────────────────────────────
+    // Seeded with the AUSTRAC/FATF default sections (S1–S8) on creation;
+    // COs may add custom sections. Scenarios reference sections by `code`.
+    registerSections: [
+      new mongoose.Schema(
+        {
+          code:      { type: String, required: true, trim: true },   // "S1"…"S8", "S9"+ custom
+          label:     { type: String, required: true, trim: true },
+          category:  { type: String, enum: ["Customer","Product","Channel","Geographic","Environmental"], default: "Customer" },
+          sortOrder: { type: Number, default: 0 },
+          basis:     { type: String, default: "" },                  // regulatory anchor
+          source:    { type: String, enum: ["default","custom"], default: "custom" },
+        },
+        { _id: false }
+      ),
+    ],
+
     // ── Amendment tracking ─────────────────────────────────────────────────
     amendmentType: {
       type: String,

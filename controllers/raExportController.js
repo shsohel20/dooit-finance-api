@@ -37,13 +37,15 @@ const PAL = {
 const RISK_FULL  = { E: "Extreme", H: "High", M: "Medium", L: "Low", VL: "Very Low" };
 
 // 5×5 matrix table: row = likelihood (1=bottom to 5=top), col = consequence (1–5)
-// Presented top-down as likelihood 5→1
+// Presented top-down as likelihood 5→1.
+// Corrected 12 Jun 2026 against Risk_Matrix.md (L3C3=M, L2C1=VL, L1C2=VL) —
+// canonical grid lives in utils/ewraRiskRegister.js (INHERENT_MATRIX).
 const MATRIX_GRID = [
-  ["M","H","E","E","E"],   // L=5 Almost Certain
-  ["M","M","H","E","E"],   // L=4 Likely
-  ["L","M","H","H","E"],   // L=3 Possible
-  ["L","L","M","M","H"],   // L=2 Unlikely
-  ["VL","L","L","M","M"],  // L=1 Rare
+  ["M","H","E","E","E"],    // L=5 Almost Certain
+  ["M","M","H","E","E"],    // L=4 Likely
+  ["L","M","M","H","E"],    // L=3 Possible
+  ["VL","L","M","M","H"],   // L=2 Unlikely
+  ["VL","VL","L","M","M"],  // L=1 Rare
 ];
 
 const LIKELIHOOD_LABELS = [
@@ -157,8 +159,10 @@ function fullWidthRow(ws, text, bgArgb, fgArgb, sizePt, bold, height, subText = 
 }
 
 // ── Build the Risk Register sheet ─────────────────────────────────────────────
+// params.rows — register items to render; defaults to the static template
+// (REGISTER). Live exports pass rows built from EwraRiskScenario data.
 async function buildRegisterSheet(wb, params) {
-  const { entity, period, version, status, etype, abn } = params;
+  const { entity, period, version, status, etype, abn, rows } = params;
 
   const ws = wb.addWorksheet("ML-TF-PF Risk Register", {
     pageSetup: {
@@ -280,7 +284,7 @@ async function buildRegisterSheet(wb, params) {
   // ── Data rows ─────────────────────────────────────────────────────────────
   let dataIdx = 0;
 
-  for (const item of REGISTER) {
+  for (const item of (rows || REGISTER)) {
     const isSectionHeader = typeof item.ref === "string" && /^S\d+$/.test(item.ref);
 
     if (isSectionHeader) {
@@ -744,6 +748,115 @@ exports.exportRiskRegisterExcel = asyncHandler(async (req, res) => {
   res.end();
 });
 
+// ── Live Risk Register export for a specific assessment ──────────────────────
+
+/**
+ * Convert an assessment's EwraRiskScenario docs into register rows for
+ * buildRegisterSheet (section header + scenario rows per section).
+ * Returns null when the assessment has no scenarios (template fallback).
+ */
+function buildScenarioRegisterRows(assessment, scenarios) {
+  if (!scenarios?.length) return null;
+  const { SECTION_LABELS } = require("../utils/ewraRiskRegister");
+
+  // dynamic taxonomy: labels + ordering come from the assessment's section
+  // definitions (custom sections like "S10" would sort wrong lexicographically)
+  const sectionDefs = assessment.registerSections || [];
+  const labelFor = (code) =>
+    sectionDefs.find((d) => d.code === code)?.label || SECTION_LABELS[code] || code;
+  const orderFor = (code) => {
+    const d = sectionDefs.find((x) => x.code === code);
+    return d ? d.sortOrder : Number(String(code).replace(/^S/i, "")) || 99;
+  };
+  const ordered = [...scenarios].sort(
+    (a, b) => orderFor(a.riskSection || "S1") - orderFor(b.riskSection || "S1") || (a.ref || 0) - (b.ref || 0),
+  );
+
+  const preparedBy = assessment.submittedBy?.name || "CO";
+  const reviewedBy = assessment.approvedBy?.name || "CO";
+  const rows = [];
+  let currentSection = null;
+  for (const s of ordered) {
+    const section = s.riskSection || "S1";
+    if (section !== currentSection) {
+      currentSection = section;
+      rows.push({ ref: section, risk_type: labelFor(section) });
+    }
+    rows.push({
+      ref: s.ref,
+      risk_type: s.riskType || "",
+      channel: (s.applicableChannels || []).join(","),
+      risk_name: s.riskName || "",
+      description_cause_red_flags: s.description || "",
+      pf_sanctions_note: s.pfSanctionsNote || "",
+      likelihood: s.likelihood ?? "",
+      consequence: s.consequence ?? "",
+      inherent_risk: s.inherentRisk || "",
+      existing_controls: s.existingControls || "",
+      ctrl_eff: s.controlEffectiveness ?? "",
+      residual_risk: s.residualRisk || "",
+      action_required: s.actionRequired ? "Yes" : "No",
+      control_ids: (s.controlIds || []).join(", "),
+      controls_owner: s.controlsOwner || "",
+      risk_appetite: s.withinRiskAppetite ? "Y" : "N",
+      prepared_by: preparedBy,
+      reviewed_by: reviewedBy,
+    });
+  }
+  return rows;
+}
+
+// GET /api/v1/ewra/:id/risk-register/export — renders the assessment's own
+// EwraRiskScenario rows (CO-adjusted); falls back to the static template when
+// the assessment has no scenarios (created before the scenario layer existed).
+exports.exportAssessmentRiskRegisterExcel = asyncHandler(async (req, res, next) => {
+  const EwraAssessment = require("../models/EwraAssessment");
+  const EwraRiskScenario = require("../models/EwraRiskScenario");
+
+  const assessment = await EwraAssessment.findById(req.params.id)
+    .populate("entityProfile", "entityName entityType abn")
+    .populate("submittedBy", "name")
+    .populate("approvedBy", "name")
+    .lean();
+  if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
+
+  const scenarios = await EwraRiskScenario.find({ assessmentId: assessment._id })
+    .sort({ riskSection: 1, ref: 1 })
+    .lean();
+
+  const rows = buildScenarioRegisterRows(assessment, scenarios);
+
+  const entity  = assessment.entityProfile?.entityName || "Your Organisation";
+  const period  = assessment.periodStart
+    ? `${new Date(assessment.periodStart).toLocaleDateString("en-AU", { month: "long", year: "numeric" })}`
+    : new Date().toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "dooit.ai";
+  wb.lastModifiedBy = "dooit.ai EWRA Module";
+  wb.created = new Date();
+  wb.modified = new Date();
+
+  await buildRegisterSheet(wb, {
+    entity,
+    period,
+    version: assessment.version || "1.0",
+    status: assessment.status || "Draft",
+    etype: "Reporting Entity",
+    abn: assessment.entityProfile?.abn || "",
+    rows, // null → template fallback
+  });
+  await buildMatrixSheet(wb);
+
+  const safeName = entity.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").substring(0, 40);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="Risk-Register-${safeName}-${assessment.version || "1.0"}.xlsx"`);
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+
+  await wb.xlsx.write(res);
+  res.end();
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ACTUAL ASSESSMENT EXPORT — uses real MongoDB data from EwraRiskFactor /
 // EwraControlAssessment / EwraAssessment for a specific assessment ID
@@ -1099,7 +1212,7 @@ async function buildRiskFactorSheet(wb, assessment, factors) {
 
 // ── Sheet 2: Controls Assessment ─────────────────────────────────────────────
 async function buildControlsSheet(wb, assessment, controls) {
-  const N = 11;
+  const N = 12;
   const LAST = colLetter(N);
 
   const ws = wb.addWorksheet("Controls Assessment", {
@@ -1111,14 +1224,15 @@ async function buildControlsSheet(wb, assessment, controls) {
     { width: 16 }, // A: Control ID
     { width: 10 }, // B: Domain
     { width: 36 }, // C: Control Title
-    { width: 15 }, // D: Design Rating
-    { width: 15 }, // E: Perf. Rating
-    { width: 17 }, // F: Eff. Score
-    { width: 20 }, // G: Eff. Label
-    { width: 38 }, // H: Evidence Notes
-    { width: 28 }, // I: Gaps
-    { width: 28 }, // J: Action Required
-    { width: 14 }, // K: Status
+    { width: 14 }, // D: Owner
+    { width: 15 }, // E: Design Rating
+    { width: 15 }, // F: Perf. Rating
+    { width: 17 }, // G: Eff. Score
+    { width: 20 }, // H: Eff. Label
+    { width: 38 }, // I: Evidence Notes
+    { width: 28 }, // J: Gaps
+    { width: 28 }, // K: Action Required
+    { width: 14 }, // L: Status
   ];
 
   const entity = assessment.entityProfile?.entityName || "Organisation";
@@ -1159,7 +1273,7 @@ async function buildControlsSheet(wb, assessment, controls) {
       { s:3, e:4,  bg: "FFFFE0E0",     fg: "FFC00000",  label: "Ineffective (1–2)",      bold: false },
       { s:5, e:6,  bg: "FFFFF4CC",     fg: "FF806000",  label: "Partially Effective (3)", bold: false },
       { s:7, e:8,  bg: "FFD6E8FF",     fg: "FF1F3864",  label: "Effective (4)",           bold: false },
-      { s:9, e:11, bg: "FFE2EFDA",     fg: "FF375623",  label: "Highly Effective (5)",    bold: false },
+      { s:9, e:12, bg: "FFE2EFDA",     fg: "FF375623",  label: "Highly Effective (5)",    bold: false },
     ];
     parts.forEach(({ s, e, bg, fg, label, bold }) => {
       if (s !== e) ws.mergeCells(`${colLetter(s)}${r.number}:${colLetter(e)}${r.number}`);
@@ -1173,7 +1287,7 @@ async function buildControlsSheet(wb, assessment, controls) {
   }
 
   // Column headers
-  const HDR = ["CONTROL ID","DOMAIN","CONTROL TITLE","DESIGN\nRATING (1–5)","PERF.\nRATING (1–5)","EFFECTIVENESS\nSCORE","EFFECTIVENESS\nLABEL","EVIDENCE NOTES","GAPS","ACTION REQUIRED","STATUS"];
+  const HDR = ["CONTROL ID","DOMAIN","CONTROL TITLE","OWNER","DESIGN\nRATING (1–5)","PERF.\nRATING (1–5)","EFFECTIVENESS\nSCORE","EFFECTIVENESS\nLABEL","EVIDENCE NOTES","GAPS","ACTION REQUIRED","STATUS"];
   {
     const r = ws.addRow(HDR);
     r.height = 36;
@@ -1227,6 +1341,7 @@ async function buildControlsSheet(wb, assessment, controls) {
         c.controlId     || "",
         c.domain        || "",
         c.controlTitle  || "",
+        c.controlOwner  || "",
         c.designRating      ?? "",
         c.performanceRating ?? "",
         c.effectivenessScore != null ? c.effectivenessScore.toFixed(1) : "",
@@ -1244,16 +1359,16 @@ async function buildControlsSheet(wb, assessment, controls) {
         const cell = r.getCell(col);
         solidFill(cell, bg);
         setFont(cell, { size: 9, color: { argb: "FF1A1A1A" } });
-        setAlign(cell, col <= 3 || col >= 8 ? "left" : "center", "top", true);
+        setAlign(cell, col <= 4 || col >= 9 ? "left" : "center", "top", true);
         applyBorder(cell);
       }
 
       // Control ID – monospace bold
       setFont(r.getCell(1), { name: "Courier New", size: 8, bold: true, color: { argb: "FF1F3864" } });
 
-      // Effectiveness label – color chip (col 7)
+      // Effectiveness label – color chip (col 8)
       {
-        const cell = r.getCell(7);
+        const cell = r.getCell(8);
         const ec   = effLabelColors[c.effectivenessLabel] || { bg, fg: "FF1A1A1A" };
         solidFill(cell, ec.bg);
         setFont(cell, { size: 9, bold: true, color: { argb: ec.fg } });
@@ -1261,9 +1376,9 @@ async function buildControlsSheet(wb, assessment, controls) {
         applyBorder(cell, true);
       }
 
-      // Status chip (col 11)
+      // Status chip (col 12)
       {
-        const cell  = r.getCell(11);
+        const cell  = r.getCell(12);
         const stMap = {
           "Complete":    { bg: "FF00B050", fg: "FFFFFFFF" },
           "In Progress": { bg: "FFFFCC00", fg: "FF1A1A1A" },
@@ -1286,16 +1401,16 @@ async function buildControlsSheet(wb, assessment, controls) {
            (domControls.filter(c => c.effectivenessScore != null).length || 1)
           ).toFixed(1)
         : "—";
-      const r = ws.addRow([`${domain} subtotal`, null, `${done}/${total} controls rated`, null, null, avgEff, "avg effectiveness"]);
+      const r = ws.addRow([`${domain} subtotal`, null, `${done}/${total} controls rated`, null, null, null, avgEff, "avg effectiveness"]);
       ws.mergeCells(`A${r.number}:B${r.number}`);
-      ws.mergeCells(`C${r.number}:E${r.number}`);
-      ws.mergeCells(`G${r.number}:${LAST}${r.number}`);
+      ws.mergeCells(`C${r.number}:F${r.number}`);
+      ws.mergeCells(`H${r.number}:${LAST}${r.number}`);
       r.height = 18;
-      [1,3,6,7].forEach(c => {
+      [1,3,7,8].forEach(c => {
         const cell = r.getCell(c);
         solidFill(cell, PAL.META.bg);
         setFont(cell, { size: 9, bold: c === 1, color: { argb: PAL.META.fg } });
-        setAlign(cell, c === 6 ? "center" : "left", "middle");
+        setAlign(cell, c === 7 ? "center" : "left", "middle");
         applyBorder(cell);
       });
     }
@@ -1561,6 +1676,64 @@ exports.exportAssessmentExcel = asyncHandler(async (req, res, next) => {
 
   res.setHeader("Content-Type",        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Cache-Control",       "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma",              "no-cache");
+
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// ── Consolidated EWRA workbook (alignment-doc Phase 5) ────────────────────────
+// GET /api/v1/ewra/:id/consolidated/export — one audit-ready file:
+//   Overview → Risk Factors → ML/TF/PF Risk Register (live scenarios) →
+//   Controls → 5×5 Risk Matrix
+exports.exportConsolidatedExcel = asyncHandler(async (req, res, next) => {
+  const { id } = req.params;
+  const EwraRiskScenario = require("../models/EwraRiskScenario");
+
+  const [assessment, factors, controls, scenarios] = await Promise.all([
+    EwraAssessment.findById(id)
+      .populate({ path: "entityProfile", populate: { path: "entityType" } })
+      .populate("submittedBy", "name")
+      .populate("approvedBy", "name")
+      .lean(),
+    EwraRiskFactor.find({ assessmentId: id }).sort({ category: 1, sortOrder: 1, createdAt: 1 }).lean(),
+    EwraControlAssessment.find({ assessmentId: id }).sort({ domain: 1, controlId: 1 }).lean(),
+    EwraRiskScenario.find({ assessmentId: id }).sort({ riskSection: 1, ref: 1 }).lean(),
+  ]);
+
+  if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator        = "dooit.ai";
+  wb.lastModifiedBy = "dooit.ai EWRA Module";
+  wb.created        = new Date();
+  wb.modified       = new Date();
+
+  const entity = assessment.entityProfile?.entityName || "Assessment";
+  const period = assessment.periodStart
+    ? new Date(assessment.periodStart).toLocaleDateString("en-AU", { month: "long", year: "numeric" })
+    : new Date().toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+
+  await buildOverviewSheet(wb, assessment, factors, controls);
+  await buildRiskFactorSheet(wb, assessment, factors);
+  await buildRegisterSheet(wb, {
+    entity,
+    period,
+    version: assessment.version || "1.0",
+    status: assessment.status || "Draft",
+    etype: assessment.entityProfile?.entityType?.name || "Reporting Entity",
+    abn: assessment.entityProfile?.abn || "",
+    rows: buildScenarioRegisterRows(assessment, scenarios), // null → template fallback
+  });
+  await buildControlsSheet(wb, assessment, controls);
+  await buildMatrixSheet(wb);
+
+  const safeName   = entity.replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").substring(0, 40);
+  const safeAssess = (assessment.assessmentName || "EWRA").replace(/[^a-zA-Z0-9 ]/g, "").trim().replace(/\s+/g, "-").substring(0, 30);
+
+  res.setHeader("Content-Type",        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="EWRA-Consolidated-${safeName}-${safeAssess}.xlsx"`);
   res.setHeader("Cache-Control",       "no-cache, no-store, must-revalidate");
   res.setHeader("Pragma",              "no-cache");
 

@@ -126,39 +126,80 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
 
   // whitelist allowed fields server-side if you prefer
   const payload = req.body || {};
-  const { caseNumber } = payload;
+  const { caseNumber, riskAssessment: riskAssessmentId } = payload;
 
-  const existing = await EcddReport.findOne({
-    caseNumber: caseNumber,
-  });
+  if (caseNumber) {
+    const existing = await EcddReport.findOne({
+      caseNumber: caseNumber,
+    });
 
-  if (existing) {
-    return next(
-      new ErrorResponse(
-        `The caseNumber (${caseNumber}) is already used by another report.`,
-        409
-      )
-    );
+    if (existing) {
+      return next(
+        new ErrorResponse(
+          `The caseNumber (${caseNumber}) is already used by another report.`,
+          409
+        )
+      );
+    }
   }
 
-  const alert = await Alert.findOne({ uid: caseNumber });
+  // Two origins:
+  //  • TM-origin (default): caseNumber must resolve to a TM Alert
+  //  • CRA-origin: riskAssessment supplied — backs a CRA ECDD gate; no Alert needed
+  let alert = null;
+  let assessment = null;
 
-  if (!alert) {
-    return next(
-      new ErrorResponse(
-        `Alert not found by CASE Number or Alert UID ${caseNumber}`,
-        404
-      )
-    );
+  if (riskAssessmentId) {
+    const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
+    assessment = await IndividualRiskAssessment.findById(riskAssessmentId)
+      .select("uid customer customerName client branch")
+      .lean();
+    if (!assessment) {
+      return next(
+        new ErrorResponse(`Risk assessment not found: ${riskAssessmentId}`, 404)
+      );
+    }
+    if (caseNumber) alert = await Alert.findOne({ uid: caseNumber }); // optional here
+  } else {
+    alert = await Alert.findOne({ uid: caseNumber });
+
+    if (!alert) {
+      return next(
+        new ErrorResponse(
+          `Alert not found by CASE Number or Alert UID ${caseNumber}`,
+          404
+        )
+      );
+    }
   }
+
   const submitObj = {
     ...payload,
     client,
     branch,
     caseId: alert?._id || null,
+    riskAssessment: assessment?._id || null,
+    customer: payload.customer || assessment?.customer || null,
     generatedBy: user || null,
   };
   const report = await EcddReport.create(submitObj);
+
+  // CRA-origin: back-link the assessment to its ECDD form + audit trail entry
+  if (assessment) {
+    const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
+    const { logCraEvent } = require("../utils/craAudit");
+    await IndividualRiskAssessment.updateOne(
+      { _id: assessment._id },
+      { $set: { ecddReport: report._id } }
+    );
+    await logCraEvent({
+      req,
+      assessment,
+      action: "ECDD_REPORT_LINKED",
+      after: { ecddReport: report.uid, analystName: report.analystName || "" },
+      target: assessment.customerName,
+    });
+  }
 
   res.status(201).json({
     success: true,

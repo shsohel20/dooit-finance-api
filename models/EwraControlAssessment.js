@@ -12,6 +12,8 @@ const EwraControlAssessmentSchema = new mongoose.Schema(
     controlId:    { type: String, required: true, trim: true }, // e.g. "CTRL_GOV_001"
     controlTitle: { type: String, trim: true },
     domain:       { type: String, trim: true },                  // e.g. "GOV"
+    // responsible owner — inherited from the Controls Library on add, CO-editable
+    controlOwner: { type: String, trim: true, default: "" },     // e.g. "AML/CTF CO"
 
     // ── Dual rating: Design + Performance (each 1-5) ──────────────────────
     designRating:      { type: Number, min: 1, max: 5, default: null },

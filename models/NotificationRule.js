@@ -6,6 +6,9 @@ const NotificationRuleSchema = new mongoose.Schema(
     notifName:         { type: String, required: true, trim: true },
     triggerEvent:      { type: String, required: true, trim: true },
     urgency:           { type: String, enum: ["Routine","Urgent","Critical"], default: "Routine" },
+    // original datasheet urgency label (e.g. "Action Required", "Overdue") —
+    // kept for display; `urgency` holds the normalised enum value
+    urgencyLabel:      { type: String, default: "" },
     audience:          [{ type: String }],
     notifCategory:     { type: String, trim: true, default: "" },
     bodyTemplate:      { type: String, default: "" },

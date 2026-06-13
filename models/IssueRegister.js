@@ -5,7 +5,9 @@ const IssueRegisterSchema = new mongoose.Schema(
   {
     client: { type: mongoose.Schema.Types.ObjectId, ref: "Client", index: true },
 
-    issueId: { type: String, unique: true, uppercase: true, trim: true, index: true },
+    // unique PER CLIENT (compound index below) — the value is generated from a
+    // per-client count, so a global unique index collides across clients
+    issueId: { type: String, uppercase: true, trim: true, index: true },
 
     title:       { type: String, required: true, trim: true },
     description: { type: String, trim: true },
@@ -62,6 +64,7 @@ IssueRegisterSchema.pre("save", async function (next) {
 });
 
 IssueRegisterSchema.index({ client: 1, domain: 1, status: 1 });
+IssueRegisterSchema.index({ client: 1, issueId: 1 }, { unique: true });
 IssueRegisterSchema.plugin(mongoosePaginate);
 
 module.exports = mongoose.model("IssueRegister", IssueRegisterSchema);

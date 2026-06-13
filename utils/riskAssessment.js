@@ -229,139 +229,122 @@ const LRC = new Set([
   "south korea",
 ]);
 
-/** canonical FACTORS (from your doc). Exported for reuse/testing */
+/**
+ * canonical FACTORS — CRA Scoring Model V2 (docs/datasheet/CRA_Scoring_Method.md).
+ * 1–5 scale (UHRC jurisdiction = 100). Static fallback / testing reference;
+ * runtime lookups read RiskFactorOption via riskFactorCache.
+ */
 const FACTORS = {
   customerType: [
-    { value: "government_body", score: 10 },
-    { value: "individual", score: 20 },
-    { value: "sole proprietorship", score: 20 },
-    { value: "association", score: 30 },
-    { value: "cooperative", score: 30 },
-    { value: "company", score: 40 },
-    { value: "partnership", score: 40 },
-    { value: "trust", score: 50 },
+    { value: "government_body", score: 1 },
+    { value: "individual", score: 2 },
+    { value: "sole proprietorship", score: 2 },
+    { value: "company", score: 3 },
+    { value: "partnership", score: 3 },
+    { value: "association", score: 4 },
+    { value: "cooperative", score: 4 },
+    { value: "trust", score: 5 },
   ],
   jurisdiction: [
-    { value: "LRC", score: 10 },
-    { value: "MRC", score: 30 },
-    { value: "HRC", score: 50 },
+    { value: "LRC", score: 1 },
+    { value: "MRC", score: 3 },
+    { value: "HRC", score: 5 },
     { value: "UHRC", score: 100 }, // triggers unacceptable
   ],
   customerRetention: [
-    { value: "3+ Years", score: 10 },
-    { value: "1-3 Years", score: 20 },
-    { value: "New", score: 30 },
+    { value: "3+ Years", score: 1 },
+    { value: "1-3 Years", score: 2 },
+    { value: "New", score: 3 },
   ],
-  product: [
-    // Banks/FI products
-    { value: "retail banking", score: 20, risk: "MR", industry: "banks/fi" },
-    {
-      value: "payment processing",
-      score: 30,
-      risk: "MR",
-      industry: "banks/fi",
-    },
-    { value: "wealth management", score: 40, risk: "HR", industry: "banks/fi" },
-    { value: "private banking", score: 40, risk: "HR", industry: "banks/fi" },
-    {
-      value: "correspondent banking",
-      score: 50,
-      risk: "UHR",
-      industry: "banks/fi",
-    },
-
-    // VASP products
-    { value: "stablecoin transfers", score: 20, risk: "MR", industry: "vasp" },
-    { value: "crypto custody", score: 30, risk: "MR", industry: "vasp" },
-    { value: "crypto lending", score: 40, risk: "HR", industry: "vasp" },
-    { value: "staking", score: 40, risk: "HR", industry: "vasp" },
-    {
-      value: "digital currency exchange",
-      score: 40,
-      risk: "HR",
-      industry: "vasp",
-    },
-    { value: "anonymous crypto", score: 50, risk: "UHR", industry: "vasp" },
-
-    // Precious Metals
-    {
-      value: "small jewelry",
-      score: 20,
-      risk: "MR",
-      industry: "precious metals",
-    },
-    {
-      value: "numismatic coins",
-      score: 30,
-      risk: "MR",
-      industry: "precious metals",
-    },
-    {
-      value: "high-value jewelry",
-      score: 40,
-      risk: "HR",
-      industry: "precious metals",
-    },
-    {
-      value: "bullion trading",
-      score: 50,
-      risk: "UHR",
-      industry: "precious metals",
-    },
-  ],
+  // F2F verified (1) … anonymity-preserving (5); canonical set in seedRiskFactors.js
   channel: [
-    { value: "face to face", score: 10, risk: "LR" },
-    { value: "in-branch", score: 10, risk: "LR" },
-    { value: "agent", score: 20, risk: "MR" },
-    { value: "representative", score: 20, risk: "MR" },
-    { value: "web", score: 30, risk: "MR" },
-    { value: "api", score: 30, risk: "MR" },
-    { value: "online", score: 30, risk: "MR" },
-    { value: "mobile app", score: 30, risk: "MR" },
-    { value: "messaging", score: 40, risk: "HR" },
-    { value: "email", score: 40, risk: "HR" },
-    { value: "broker", score: 40, risk: "HR" },
-    { value: "third-party introducer", score: 40, risk: "HR" },
-    { value: "otc trading desk", score: 40, risk: "HR" },
-    { value: "anonymous digital", score: 50, risk: "UHR" },
-    { value: "crypto atm", score: 50, risk: "UHR" },
+    { value: "face to face", score: 1, risk: "LOW" },
+    { value: "in-branch", score: 1, risk: "LOW" },
+    { value: "phone / telephone", score: 2, risk: "MED" },
+    { value: "agent", score: 2, risk: "MED" },
+    { value: "representative", score: 2, risk: "MED" },
+    { value: "web", score: 3, risk: "MED" },
+    { value: "online", score: 3, risk: "MED" },
+    { value: "mobile app", score: 3, risk: "MED" },
+    { value: "api", score: 3, risk: "MED" },
+    { value: "email", score: 4, risk: "HIGH" },
+    { value: "messaging", score: 4, risk: "HIGH" },
+    { value: "broker", score: 4, risk: "HIGH" },
+    { value: "third-party introducer", score: 4, risk: "HIGH" },
+    { value: "otc trading desk", score: 4, risk: "HIGH" },
+    { value: "anonymous digital", score: 5, risk: "UHR" },
+    { value: "crypto atm", score: 5, risk: "UHR" },
   ],
   occupation: [
-    { value: "Professional ", score: 10 },
-    { value: "Manager", score: 10 },
-    { value: "Clerical", score: 20 },
-    { value: "Admin", score: 20 },
-    { value: "Technician", score: 30 },
-    { value: "Skilled Trade", score: 30 },
-    { value: "Sales", score: 30 },
-
-    { value: "Machinery", score: 30 },
-    { value: "Service", score: 40 },
-    { value: "Labourer", score: 40 },
-
-    { value: "Business Owner", score: 40 },
-    { value: "Unemployed", score: 50 },
-    { value: "Student", score: 50 },
-    { value: "Retiree", score: 50 },
+    { value: "Managers", score: 1 },
+    { value: "Professionals", score: 1 },
+    { value: "Clerical and Administrative Workers", score: 2 },
+    { value: "Technicians and Trades Workers", score: 3 },
+    { value: "Sales Workers", score: 3 },
+    { value: "Machinery Operators and Drivers", score: 3 },
+    { value: "Labourers", score: 4 },
+    { value: "Community and Personal Service Workers", score: 4 },
+    { value: "Business Owner", score: 4 },
+    { value: "Unemployed / Retiree", score: 5 },
+    { value: "Student", score: 5 },
   ],
   industry: [
-    { value: "Professional Services", score: 10 },
-    { value: "Tech", score: 10 },
-    { value: "Technology", score: 10 },
-    { value: "Electricity", score: 10 },
-    { value: "Information Technology", score: 10 },
-    { value: "Public Administration", score: 10 },
-
-    { value: "Retail", score: 20 },
-    { value: "Hospitality", score: 20 },
-    { value: "Import-Export", score: 30 },
-    { value: "Wholesale", score: 30 },
-    { value: "Construction", score: 40 },
-    { value: "Gambling", score: 40 },
-    { value: "Financial Services", score: 50 },
-    { value: "Real Estate", score: 50 },
+    { value: "Electricity, Gas, Water and Waste Services", score: 1 },
+    { value: "Information Media and Telecommunications", score: 1 },
+    { value: "Public Administration and Safety", score: 1 },
+    { value: "Education and Training", score: 2 },
+    { value: "Health Care and Social Assistance", score: 2 },
+    { value: "Agriculture, Forestry and Fishing", score: 3 },
+    { value: "Mining", score: 3 },
+    { value: "Manufacturing", score: 3 },
+    { value: "Wholesale Trade", score: 3 },
+    { value: "Accommodation and Food Services", score: 3 },
+    { value: "Transport, Postal and Warehousing", score: 3 },
+    { value: "Professional, Scientific and Technical Services", score: 3 },
+    { value: "Administrative and Support Services", score: 3 },
+    { value: "Retail Trade", score: 4 },
+    { value: "Arts and Recreation Services", score: 4 },
+    { value: "Construction", score: 5 },
+    { value: "Financial and Insurance Services", score: 5 },
+    { value: "Rental, Hiring and Real Estate Services", score: 5 },
+  ],
+  pepStatus: [
+    { value: "Not a PEP", score: 0 },
+    { value: "Domestic PEP / close associate", score: 0 },        // min MEDIUM
+    { value: "Foreign PEP / close associate", score: 0 },         // min HIGH + ECDD
+    { value: "International Organisation PEP", score: 0 },        // min MEDIUM
+  ],
+  sourceOfFunds: [
+    { value: "Clearly established and verified", score: 0 },
+    { value: "Plausible but unverified", score: 3 },
+    { value: "Cannot be explained / refuses", score: 10 },        // + ECDD
+  ],
+  sourceOfWealth: [
+    { value: "Clearly established and verified", score: 0 },
+    { value: "Plausible but unverified", score: 3 },
+    { value: "Cannot be explained / refuses", score: 10 },        // + ECDD
+  ],
+  adverseMedia: [
+    { value: "No adverse media", score: 0 },
+    { value: "Minor adverse media", score: 2 },
+    { value: "Significant adverse media", score: 5 },             // + ECDD
+    { value: "Confirmed criminal connection", score: 10 },        // + ECDD
   ],
 };
+
+/** Score bands (Section 1): Low 0–17 · Medium 18–20 · High 21–99 · Unacceptable 100+ */
+const BANDS = [
+  { label: "Unacceptable", min: 100, reviewYears: null },
+  { label: "High", min: 21, reviewYears: 1 },
+  { label: "Medium", min: 18, reviewYears: 2 },
+  { label: "Low", min: 0, reviewYears: 3 },
+];
+
+const LABEL_ORDER = { Low: 1, Medium: 2, High: 3, Unacceptable: 4 };
+
+function bandForScore(score) {
+  return BANDS.find((b) => score >= b.min) || BANDS[BANDS.length - 1];
+}
 
 /** helper: normalize string */
 function norm(s) {
@@ -395,7 +378,8 @@ function getJurisdictionRisk(countryRaw) {
   );
 
   if (!found) {
-    return { value: countryRaw, score: 30, band: "MRC" };
+    // unknown country — treat as Medium Risk Country (CRA V2: MRC = 3)
+    return { value: countryRaw, score: 3, band: "MRC" };
   }
 
   return {
@@ -425,9 +409,13 @@ function getJurisdictionRisk(countryRaw) {
 // }
 
 
-function lookupFactorDynamic(factorName, raw) {
+function lookupFactorDynamic(factorName, raw, { entityType } = {}) {
   const { factors } = getCache();
-  const list = factors[factorName] || [];
+  let list = factors[factorName] || [];
+  if (entityType) {
+    const scoped = list.filter((x) => norm(x.entityType) === norm(entityType));
+    if (scoped.length) list = scoped;
+  }
   const s = norm(raw);
 
   const found =
@@ -435,8 +423,8 @@ function lookupFactorDynamic(factorName, raw) {
     list.find(x => (x.aliases || []).includes(s));
 
   return found
-    ? { value: found.value, score: found.score }
-    : { value: raw, score: 0 };
+    ? { value: found.value, score: found.score, ecddOverride: !!found.ecddOverride }
+    : { value: raw, score: 0, ecddOverride: false };
 }
 
 
@@ -461,9 +449,9 @@ function parseRetentionValue(value) {
   const clean = value.replace(/\(.*\)/, "").trim();
 
   const map = {
-    New: { value: "New", score: 30 },
-    "1-3 Years": { value: "1-3 Years", score: 20 },
-    "3+ Years": { value: "3+ Years", score: 10 },
+    New: { value: "New", score: 3 },
+    "1-3 Years": { value: "1-3 Years", score: 2 },
+    "3+ Years": { value: "3+ Years", score: 1 },
   };
 
   return map[clean] || null;
@@ -484,14 +472,25 @@ function detectCustomerRetentionScore(customer = {}, relation = {}) {
       ? new Date(customer.createdAt).getTime()
       : null;
 
-  if (!registeredAt) return { value: "New", score: 30 };
+  if (!registeredAt) return { value: "New", score: 3 };
 
   const years = (now - registeredAt) / (1000 * 60 * 60 * 24 * 365.25);
 
-  if (years >= 3) return { value: "3+ Years", score: 10 };
-  if (years >= 1) return { value: "1-3 Years", score: 20 };
+  if (years >= 3) return { value: "3+ Years", score: 1 };
+  if (years >= 1) return { value: "1-3 Years", score: 2 };
 
-  return { value: "New", score: 30 };
+  return { value: "New", score: 3 };
+}
+
+/**
+ * Normalise the PEP input. Accepts the V2 string options or the legacy
+ * boolean flag. An unspecified "is a PEP" is treated conservatively as a
+ * Foreign PEP (min HIGH + mandatory ECDD) until classified.
+ */
+function resolvePepStatus(raw) {
+  if (raw === true) return "Foreign PEP / close associate";
+  if (raw === false || raw == null || raw === "") return "Not a PEP";
+  return String(raw);
 }
 
 /**
@@ -515,6 +514,10 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
   // customerRetention
   const customerRetention = detectCustomerRetentionScore(customer, relation);
 
+  // entity type of the reporting entity — products are catalogued per entity type
+  const entityType =
+    customer.entityType || (customer.metadata && customer.metadata.entityType) || "";
+
   // product: metadata.product OR metadata.products (if array) -> we must pick highest risk (rule)
   let productLookupRaw = "";
   if (customer.metadata && customer.metadata.product)
@@ -524,17 +527,15 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
     Array.isArray(customer.metadata.products) &&
     customer.metadata.products.length
   ) {
-    // choose the highest scoring product from FACTORS.product
+    // choose the highest scoring product for this entity type
     let best = { value: "", score: 0 };
     for (const p of customer.metadata.products) {
-      // const found = lookupFactor(FACTORS.product, p);
-      const found = lookupFactorDynamic("product", p);
+      const found = lookupFactorDynamic("product", p, { entityType });
       if ((found.score || 0) > (best.score || 0)) best = found;
     }
     productLookupRaw = best.value;
   }
-  // const product = lookupFactor(FACTORS.product, productLookupRaw);
-  const product = lookupFactorDynamic("product", productLookupRaw);
+  const product = lookupFactorDynamic("product", productLookupRaw, { entityType });
 
   // channel: relation.source or onboardingChannel or metadata.channel
   const channelRaw =
@@ -571,6 +572,30 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
   // const industry = lookupFactor(FACTORS.industry, industryRaw);
   const industry = lookupFactorDynamic("industry", industryRaw);
 
+  // ── EDD factors (CRA V2 Section 2) ──────────────────────────────────────────
+  const pepRaw = resolvePepStatus(
+    customer.pepStatus ?? customer.metadata?.pepStatus,
+  );
+  const pepStatus = lookupFactorDynamic("pepStatus", pepRaw);
+
+  const sofRaw =
+    customer.sourceOfFunds || customer.metadata?.sourceOfFunds || "";
+  const sourceOfFunds = sofRaw
+    ? lookupFactorDynamic("sourceOfFunds", sofRaw)
+    : { value: "", score: 0, ecddOverride: false };
+
+  const sowRaw =
+    customer.sourceOfWealth || customer.metadata?.sourceOfWealth || "";
+  const sourceOfWealth = sowRaw
+    ? lookupFactorDynamic("sourceOfWealth", sowRaw)
+    : { value: "", score: 0, ecddOverride: false };
+
+  const amRaw =
+    customer.adverseMedia || customer.metadata?.adverseMedia || "";
+  const adverseMedia = amRaw
+    ? lookupFactorDynamic("adverseMedia", amRaw)
+    : { value: "", score: 0, ecddOverride: false };
+
   const assessment = {
     customerType,
     jurisdiction: {
@@ -583,33 +608,88 @@ function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
     channel,
     occupation,
     industry,
+    pepStatus,
+    sourceOfFunds,
+    sourceOfWealth,
+    adverseMedia,
   };
 
-  // compute total (sum of component scores) but enforce "max product" already done
+  // Base formula (Section 4): sum of component scores
   const totalScore = Object.values(assessment).reduce(
     (acc, cur) => acc + (cur && cur.score ? Number(cur.score) : 0),
     0,
   );
 
-  // Labeling rules per CRA doc
-  let riskLabel = "Low";
-  if (assessment.jurisdiction && assessment.jurisdiction.band === "UHRC") {
-    riskLabel = "Unacceptable";
-    // map to high numeric to show automatic unacceptable state - clamp between 401..500
-    // ensure highest at least 401
-    const finalScore = Math.max(totalScore, 401);
-    return { riskAssessment: assessment, riskScore: finalScore, riskLabel };
+  // ── Band + overrides (Section 4) ────────────────────────────────────────────
+  const overrides = [];
+  let band = bandForScore(totalScore);
+  let riskLabel = band.label;
+  let ecddRequired = false;
+  let serviceBlocked = false;
+
+  const raiseLabelTo = (minLabel, reason) => {
+    if (LABEL_ORDER[minLabel] > LABEL_ORDER[riskLabel]) {
+      riskLabel = minLabel;
+      band = BANDS.find((b) => b.label === minLabel) || band;
+    }
+    overrides.push(reason);
+  };
+
+  // UHRC jurisdiction → Unacceptable, block service
+  if (assessment.jurisdiction.band === "UHRC") {
+    raiseLabelTo("Unacceptable", "UHRC jurisdiction — service blocked; contact ASO + AFP; SMR assessment");
+    ecddRequired = true;
+    serviceBlocked = true;
+  }
+  // HRC jurisdiction → mandatory ECDD
+  if (assessment.jurisdiction.band === "HRC") {
+    overrides.push("HRC jurisdiction — mandatory ECDD");
+    ecddRequired = true;
   }
 
-  // otherwise thresholds:
-  // Low 0-179, Medium 180-200, High 201-400, Unacceptable 401+
-  let finalScore = totalScore;
-  if (finalScore >= 401) riskLabel = "Unacceptable";
-  else if (finalScore >= 201) riskLabel = "High";
-  else if (finalScore >= 180) riskLabel = "Medium";
-  else riskLabel = "Low";
+  // PEP overrides
+  const pepNorm = norm(pepStatus.value);
+  if (pepNorm.startsWith("foreign pep")) {
+    raiseLabelTo("High", "Foreign PEP — minimum HIGH; ECDD + Governing Body approval required");
+    ecddRequired = true;
+  } else if (pepNorm.startsWith("domestic pep") || pepNorm.startsWith("international organisation")) {
+    raiseLabelTo("Medium", "PEP — minimum MEDIUM; elevated monitoring");
+  }
 
-  return { riskAssessment: assessment, riskScore: finalScore, riskLabel };
+  // Option-level ECDD overrides (product, SOF/SOW refusal, adverse media ≥ significant)
+  for (const [key, detail] of Object.entries(assessment)) {
+    if (detail && detail.ecddOverride) {
+      overrides.push(`${key} option '${detail.value}' — mandatory ECDD`);
+      ecddRequired = true;
+    }
+  }
+  // Fallback triggers independent of seeded flags (Section 2 mandates these)
+  if (norm(sourceOfFunds.value).startsWith("cannot")) {
+    overrides.push("SOF cannot be explained / refused — mandatory ECDD");
+    ecddRequired = true;
+  }
+  if (norm(sourceOfWealth.value).startsWith("cannot")) {
+    overrides.push("SOW cannot be explained / refused — mandatory ECDD");
+    ecddRequired = true;
+  }
+  if (/^(significant|confirmed)/.test(norm(adverseMedia.value))) {
+    overrides.push("Adverse media (significant or confirmed) — mandatory ECDD");
+    ecddRequired = true;
+  }
+
+  // High / Unacceptable band always require ECDD (Section 1)
+  if (LABEL_ORDER[riskLabel] >= LABEL_ORDER.High) ecddRequired = true;
+  if (riskLabel === "Unacceptable") serviceBlocked = true;
+
+  return {
+    riskAssessment: assessment,
+    riskScore: totalScore,
+    riskLabel,
+    ecddRequired,
+    serviceBlocked,
+    reviewYears: band.reviewYears,
+    overrides,
+  };
 }
 
 /**
@@ -698,7 +778,9 @@ module.exports = {
   buildRiskAssessmentPerRelation,
   buildAssessmentForRelation,
   getJurisdictionRisk,
+  bandForScore,
   FACTORS,
+  BANDS,
   UHRC,
   HRC,
   MRC,

@@ -219,6 +219,16 @@ const CustomerSchema = new Schema(
     consentToScreen: { type: Boolean, default: false }, //Agreement for ongoing screening.
     isActive: { type: Boolean, default: false },
 
+    // ── Lifecycle / offboarding (CRA ECDD gate — decline → 'Offboarded') ─────
+    status: {
+      type: String,
+      enum: ["", "Active", "Offboarded"],
+      default: "",
+    },
+    offboardedAt: { type: Date, default: null },
+    offboardedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
+    offboardReason: { type: String, default: "" },
+
     // generic metadata
     metadata: { type: Schema.Types.Mixed, default: {} },
 
