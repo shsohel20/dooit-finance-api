@@ -71,6 +71,12 @@ const rgMapper = require("./rg-mapper");
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 const afcDocument = require("./afc-document");
 
+// ── Staff Onboarding ──────────────────────────────────────────────────────────
+const staff = require("./staff");
+
+// ── Global OCR ────────────────────────────────────────────────────────────────
+const ocr = require("./ocr");
+
 // ── GRC Notification Engine ───────────────────────────────────────────────────
 const appNotification = require("./app-notification");
 
@@ -149,6 +155,12 @@ router.use("/rg-mapper",          rgMapper);
 
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 router.use("/afc-documents",      afcDocument);
+
+// ── Staff Onboarding ──────────────────────────────────────────────────────────
+router.use("/staff",              staff);
+
+// ── Global OCR ────────────────────────────────────────────────────────────────
+router.use("/ocr",                ocr);
 
 // ── GRC Notification Engine ───────────────────────────────────────────────────
 router.use("/app-notifications",  appNotification);
