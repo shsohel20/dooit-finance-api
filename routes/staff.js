@@ -4,6 +4,7 @@ const {
   updateStaff,
   getStaff,
   getStaffs,
+  getStaffByRoleId,
   reviewStaff,
   initStaffApplicant,
   syncStaffStatus,
@@ -23,6 +24,14 @@ router.get(
   authorize("admin", "client", "branch", "manager"),
   advancedStaffResults(Staff),
   getStaffs,
+);
+
+// Get staff members by Role document ID
+router.get(
+  "/role/:roleId",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  getStaffByRoleId,
 );
 
 // Get single staff member

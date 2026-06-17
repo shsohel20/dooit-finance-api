@@ -4,6 +4,7 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Staff = require("../models/Staff");
 const User = require("../models/User");
+const Role = require("../models/Role");
 const sendEmail = require("../utils/sendEmail");
 const { getRawEmail } = require("../utils/rawUserFields");
 const { generatePassword } = require("../utils/passwordUtils");
@@ -322,6 +323,45 @@ exports.reviewStaff = asyncHandler(async (req, res, next) => {
       reviewedBy: req.user._id,
       reviewedAt: staff.reviewedAt,
     },
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @desc    Get staff members filtered by Role document ID
+// @route   GET /api/v1/staff/role/:roleId
+// @access  Protected (admin / client / branch / manager)
+// ─────────────────────────────────────────────────────────────────────────────
+exports.getStaffByRoleId = asyncHandler(async (req, res, next) => {
+  const { roleId } = req.params;
+
+  const role = await Role.findById(roleId);
+  if (!role) return next(new ErrorResponse("Role not found", 404));
+
+  const users = await User.find({ role: role.name }).select("_id");
+  const userIds = users.map((u) => u._id);
+
+  const page = parseInt(req.query.page, 10) || 1;
+  const limit = parseInt(req.query.limit, 10) || 10;
+  const skip = (page - 1) * limit;
+
+  const [staff, total] = await Promise.all([
+    Staff.find({ user: { $in: userIds } })
+      .populate("user", "name userName email role isActive")
+      .populate("client", "name")
+      .populate("branch", "name")
+      .skip(skip)
+      .limit(limit)
+      .sort("-createdAt"),
+    Staff.countDocuments({ user: { $in: userIds } }),
+  ]);
+
+  return res.status(200).json({
+    success: true,
+    role: { _id: role._id, name: role.name },
+    count: staff.length,
+    total,
+    pagination: { page, limit, totalPages: Math.ceil(total / limit) },
+    data: staff,
   });
 });
 
