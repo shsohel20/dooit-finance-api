@@ -34,13 +34,16 @@ const {
 // ─────────────────────────────────────────────────────────────────────────────
 exports.createStaff = asyncHandler(async (req, res, next) => {
   const {
-    client,
-    branch,
     personal,
     contact,
     employment,
     ...rest
   } = req.body || {};
+
+
+
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
 
   // ── validate required fields ──────────────────────────────────────────────
   if (!personal?.role) {
@@ -484,23 +487,23 @@ exports.runAmlApplicant = asyncHandler(async (req, res, next) => {
       : "Identity profile located — AML intelligence refreshed",
     data: {
       applicantCreated: applicantResult.created,
-      applicantId:      staff.sumsubApplicantId,
-      inspectionId:     staff.sumsubInspectionId,
-      documents:        docSubmission,
-      kycStatus:        statusResult.kycStatus,
-      kycVerifiedAt:    staff.kycVerifiedAt,
-      kycRejectReason:  staff.kycRejectReason,
-      amlStatus:        statusResult.amlStatus,
-      amlRiskLabels:    staff.amlRiskLabels,
-      isPep:            staff.isPep,
-      sanction:         staff.sanction,
+      applicantId: staff.sumsubApplicantId,
+      inspectionId: staff.sumsubInspectionId,
+      documents: docSubmission,
+      kycStatus: statusResult.kycStatus,
+      kycVerifiedAt: staff.kycVerifiedAt,
+      kycRejectReason: staff.kycRejectReason,
+      amlStatus: statusResult.amlStatus,
+      amlRiskLabels: staff.amlRiskLabels,
+      isPep: staff.isPep,
+      sanction: staff.sanction,
       screening: {
-        status:         staff.screening.status,
-        pepMatch:       staff.screening.pepMatch,
+        status: staff.screening.status,
+        pepMatch: staff.screening.pepMatch,
         sanctionsMatch: staff.screening.sanctionsMatch,
-        adverseMedia:   staff.screening.adverseMedia,
-        riskLabels:     staff.screening.riskLabels,
-        checkedAt:      staff.screening.checkedAt,
+        adverseMedia: staff.screening.adverseMedia,
+        riskLabels: staff.screening.riskLabels,
+        checkedAt: staff.screening.checkedAt,
       },
     },
   });
