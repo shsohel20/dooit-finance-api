@@ -164,7 +164,7 @@ function fullWidthRow(ws, text, bgArgb, fgArgb, sizePt, bold, height, subText = 
 async function buildRegisterSheet(wb, params) {
   const { entity, period, version, status, etype, abn, rows } = params;
 
-  const ws = wb.addWorksheet("ML-TF-PF Risk Register", {
+  const ws = wb.addWorksheet(params.name || "ML-TF-PF Risk Register", {
     pageSetup: {
       paperSize:    9,          // A4
       orientation:  "landscape",
@@ -1684,12 +1684,50 @@ exports.exportAssessmentExcel = asyncHandler(async (req, res, next) => {
 });
 
 // ── Consolidated EWRA workbook (alignment-doc Phase 5) ────────────────────────
+// ── Convert RiskRegister model rows → buildRegisterSheet row format ───────────
+function mapRiskRegisterToSheetRows(register) {
+  if (!register?.rows?.length) return null;
+  const coName = register.coName || register.answers?.co_name || "";
+  const smName = register.smName || register.answers?.sm_name || "";
+  const result = [];
+  let curSec = null;
+  for (const r of register.rows) {
+    if (r.sec !== curSec) {
+      curSec = r.sec;
+      result.push({ ref: r.sec, risk_type: `${r.sec} — ${r.secName || r.sec}` });
+    }
+    result.push({
+      ref:                         r.ref,
+      risk_type:                   r.riskType     || "",
+      channel:                     r.ch           || "",
+      risk_name:                   r.riskName     || "",
+      description_cause_red_flags: r.description  || "",
+      pf_sanctions_note:           r.pfSanctionsNote || "",
+      likelihood:                  r.L ?? "",
+      consequence:                 r.C ?? "",
+      inherent_risk:               r.inherentRisk || "",
+      existing_controls:           r.existingControls || "",
+      ctrl_eff:                    r.controlEffectiveness ?? "",
+      residual_risk:               r.residualRisk || "",
+      action_required:             r.actionRequired ? "Yes" : "No",
+      control_ids:                 Array.isArray(r.controlIds) ? r.controlIds.join(", ") : (r.controlIds || ""),
+      controls_owner:              r.controlsOwner || "",
+      risk_appetite:               "Y",
+      prepared_by:                 r.preparedBy   || coName,
+      reviewed_by:                 r.reviewedBy   || smName,
+    });
+  }
+  return result;
+}
+
 // GET /api/v1/ewra/:id/consolidated/export — one audit-ready file:
-//   Overview → Risk Factors → ML/TF/PF Risk Register (live scenarios) →
+//   Overview → Risk Factors → EWRA Risk Register (generated) OR ML/TF/PF Risk Register (scenarios/dummy fallback) →
 //   Controls → 5×5 Risk Matrix
 exports.exportConsolidatedExcel = asyncHandler(async (req, res, next) => {
   const { id } = req.params;
   const EwraRiskScenario = require("../models/EwraRiskScenario");
+
+  const RiskRegister = require("../models/RiskRegister");
 
   const [assessment, factors, controls, scenarios] = await Promise.all([
     EwraAssessment.findById(id)
@@ -1704,28 +1742,45 @@ exports.exportConsolidatedExcel = asyncHandler(async (req, res, next) => {
 
   if (!assessment) return next(new ErrorResponse("Assessment not found", 404));
 
+  const entity = assessment.entityProfile?.entityName || "Assessment";
+  const period = assessment.periodStart
+    ? new Date(assessment.periodStart).toLocaleDateString("en-AU", { month: "long", year: "numeric" })
+    : new Date().toLocaleDateString("en-AU", { month: "long", year: "numeric" });
+  const etype  = assessment.entityProfile?.entityType?.name || "Reporting Entity";
+  const abn    = assessment.entityProfile?.abn || "";
+
+  // Prefer the generated RiskRegister over the scenario/dummy sheet
+  const latestReg = await RiskRegister.findOne({ entityName: entity })
+    .sort({ createdAt: -1 })
+    .lean();
+  const hasGeneratedReg = !!(latestReg?.rows?.length);
+
   const wb = new ExcelJS.Workbook();
   wb.creator        = "dooit.ai";
   wb.lastModifiedBy = "dooit.ai EWRA Module";
   wb.created        = new Date();
   wb.modified       = new Date();
 
-  const entity = assessment.entityProfile?.entityName || "Assessment";
-  const period = assessment.periodStart
-    ? new Date(assessment.periodStart).toLocaleDateString("en-AU", { month: "long", year: "numeric" })
-    : new Date().toLocaleDateString("en-AU", { month: "long", year: "numeric" });
-
   await buildOverviewSheet(wb, assessment, factors, controls);
   await buildRiskFactorSheet(wb, assessment, factors);
-  await buildRegisterSheet(wb, {
-    entity,
-    period,
-    version: assessment.version || "1.0",
-    status: assessment.status || "Draft",
-    etype: assessment.entityProfile?.entityType?.name || "Reporting Entity",
-    abn: assessment.entityProfile?.abn || "",
-    rows: buildScenarioRegisterRows(assessment, scenarios), // null → template fallback
-  });
+
+  if (hasGeneratedReg) {
+    await buildRegisterSheet(wb, {
+      name:    "EWRA Risk Register",
+      entity, period, etype, abn,
+      version: latestReg.status === "Approved" ? (assessment.version || "1.0") : "Draft",
+      status:  latestReg.status || "Draft",
+      rows:    mapRiskRegisterToSheetRows(latestReg),
+    });
+  } else {
+    await buildRegisterSheet(wb, {
+      entity, period, etype, abn,
+      version: assessment.version || "1.0",
+      status:  assessment.status  || "Draft",
+      rows:    buildScenarioRegisterRows(assessment, scenarios),
+    });
+  }
+
   await buildControlsSheet(wb, assessment, controls);
   await buildMatrixSheet(wb);
 

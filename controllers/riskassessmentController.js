@@ -183,70 +183,75 @@ function buildCustomerName(c) {
  *   ?client=clientId (optional filter by relation.client)
  */
 exports.getCustomerDropdown = asyncHandler(async (req, res) => {
+  const mongoose = require("mongoose");
+  const { decrypt } = require("../utils/encryption");
   const { q = "", limit = 50, client } = req.query;
 
-  const filter = {
-    isActive: true,
+  // Customer name/email fields are AES-256-GCM encrypted at rest
+  // (roleEncryptionPlugin), so they CANNOT be regex-searched in Mongo — the
+  // old query only ever matched `uid`. We read raw ciphertext via the native
+  // collection (bypasses the masking hook → context-independent), decrypt the
+  // searchable fields, and filter in app.
+  const looksEncrypted = (v) => {
+    if (!v || typeof v !== "string") return false;
+    const p = v.split(":");
+    return p.length === 3 && p[0].length === 32 && p[1].length === 32;
+  };
+  const dec = (v) => {
+    if (!looksEncrypted(v)) return v || "";
+    try {
+      return decrypt(v);
+    } catch {
+      return "";
+    }
   };
 
-  // filter by client relation if provided
-  if (client) {
-    filter["relations.client"] = client;
+  const lim = Math.min(Number(limit) || 50, 50);
+  const tokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  const mongoFilter = { isActive: true };
+  const clientId = client || req.user?.client?._id || req.user?.clientBelongs;
+  if (clientId && mongoose.isValidObjectId(clientId)) {
+    mongoFilter["relations.client"] = new mongoose.Types.ObjectId(clientId);
   }
 
-  // basic search
-  if (q) {
-    const tokens = q.trim().split(/\s+/);
+  // bounded candidate pool, newest first; only scan more when searching
+  const POOL = tokens.length ? 1000 : lim;
+  const docs = await Customer.collection
+    .find(mongoFilter)
+    .sort({ createdAt: -1 })
+    .limit(POOL)
+    .toArray();
 
-    filter.$and = tokens.map((word) => ({
-      $or: [
-        { uid: new RegExp(word, "i") },
-        {
-          "personalKyc.personal_form.customer_details.given_name":
-            new RegExp(word, "i"),
-        },
-        {
-          "personalKyc.personal_form.customer_details.surname":
-            new RegExp(word, "i"),
-        },
-        {
-          "personalKyc.personal_form.contact_details.email":
-            new RegExp(word, "i"),
-        },
-      ],
-    }));
-  }
+  const data = [];
+  for (const c of docs) {
+    const det = c.personalKyc?.personal_form?.customer_details || {};
+    const contact = c.personalKyc?.personal_form?.contact_details || {};
+    const given = dec(det.given_name);
+    const middle = dec(det.middle_name);
+    const surname = dec(det.surname);
+    const email = dec(contact.email);
+    const name = [given, middle, surname].filter(Boolean).join(" ").trim();
 
-  const customers = await Customer.find(filter)
+    if (tokens.length) {
+      const haystack = `${c.uid || ""} ${name} ${email}`.toLowerCase();
+      // AND semantics — every token must appear somewhere
+      if (!tokens.every((t) => haystack.includes(t))) continue;
+    }
 
-
-    .limit(Number(limit))
-    .sort({ createdAt: -1 });
-  // IMPORTANT → enables your risk virtuals
-
-  // console.log(customers[0])
-
-  const data = customers.map((c) => {
     const rel = c.relations?.[0];
-
-
-
-    return {
+    data.push({
       id: c._id,
       uid: c.uid,
-      // sequence: c.sequence,
-
-      name: buildCustomerName(c),
+      name: name || c.uid || "Unnamed",
       type: rel?.type || "individual",
-
       kycStatus: c.kycStatus,
       country: c.country,
-
-      riskAssessment: c.riskAssessment,
-
+      email: email || undefined,
       createdAt: c.createdAt,
-    };
-  });
+    });
+    if (data.length >= lim) break;
+  }
 
   res.json({
     success: true,

@@ -42,7 +42,7 @@ app.use(
   }),
 );
 
-// app.use(express.json({ limit: "10kb" }));
+// app.use(express.json({ limit: "10mb" })); no need at moment, we are using inside route level
 app.use(express.urlencoded({ extended: true }));
 // app.use(mongoSanitize());
 

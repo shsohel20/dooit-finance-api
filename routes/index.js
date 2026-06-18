@@ -51,8 +51,10 @@ const entityObligation = require("./entity-obligation");
 const control = require("./control");
 
 // ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
-const ewra = require("./ewra");
-const countryRisk = require("./country-risk");
+const ewra         = require("./ewra");
+const countryRisk  = require("./country-risk");
+const riskRegister = require("./risk-register");
+const riskPool     = require("./risk-pool");
 
 // ── Phase 5: Testing Module ───────────────────────────────────────────────────
 const testTemplate = require("./test-template");
@@ -132,6 +134,8 @@ router.use("/control",            control);
 // ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
 router.use("/ewra",               ewra);
 router.use("/country-risk",       countryRisk);
+router.use("/risk-register",      riskRegister);
+router.use("/risk-pool",          riskPool);
 
 // ── Phase 5: Testing Module ───────────────────────────────────────────────────
 router.use("/test-template",      testTemplate);

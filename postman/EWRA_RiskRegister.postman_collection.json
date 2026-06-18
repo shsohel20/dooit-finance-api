@@ -1,0 +1,517 @@
+{
+  "info": {
+    "name": "EWRA Risk Register API",
+    "description": "Complete API test suite for the dooit.ai EWRA Risk Register module.\n\nCovers: generate, list, retrieve, update, manual override, recalculate, submit, approve, export, and delete.\n\nReal-data scenario: **Smith & Associates Lawyers Pty Ltd** — a mid-sized law firm (Lawyers/Conveyancers, Tranche 2) with face-to-face and online delivery, domestic PEP exposure, high-value unfinanced property transactions, and occasional cash handling.\n\n## Auth\nRun **Login** first to capture the `token` variable. All other requests use Bearer `{{token}}`.\n\n## Flow\n1. Login → token captured\n2. Create Risk Register → `registerId` captured\n3. List / Get / Update / Recalculate / Patch Scenario / Submit / Approve / Export / Delete",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",      "value": "http://localhost:6830/api/v1", "type": "string" },
+    { "key": "token",        "value": "",  "type": "string", "description": "Populated by Login request" },
+    { "key": "registerId",   "value": "",  "type": "string", "description": "Populated by Create request" },
+    { "key": "scenarioRef",  "value": "C-002", "type": "string" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.token) {",
+                  "  pm.collectionVariables.set('token', body.token);",
+                  "  console.log('token captured');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@dooit.ai\",\n  \"password\": \"Admin@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Risk Register",
+      "item": [
+        {
+          "name": "Create Risk Register — Smith & Associates",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const body = pm.response.json();",
+                  "if (body.success && body.data && body.data._id) {",
+                  "  pm.collectionVariables.set('registerId', body.data._id);",
+                  "  console.log('registerId:', body.data._id);",
+                  "  console.log('Rows generated:', body.data.rowCount);",
+                  "  console.log('Action required:', body.data.actionCount);",
+                  "  console.log('Overall residual:', body.data.overallResidualLabel);",
+                  "}",
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Has rows', () => pm.expect(body.data.rowCount).to.be.above(0));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"Smith & Associates Lawyers Pty Ltd\",\n    \"entity_type\": \"Lawyers/Conveyancers\",\n    \"abn\": \"12 345 678 901\",\n    \"assessDate\": \"2026-06-17\",\n    \"co_name\": \"Jane Smith\",\n    \"co_email\": \"jane.smith@smithlawyers.com.au\",\n    \"co_phone\": \"0412 345 678\",\n    \"sm_name\": \"Robert Chen\",\n    \"sm_email\": \"r.chen@smithlawyers.com.au\",\n    \"turnover_range\": \"$2M \\u2013 $10M\",\n    \"is_sole_practitioner\": \"No\",\n    \"licence_types\": [\"Legal Practitioner\"],\n    \"client_types\": [\"Individuals\", \"Bodies corporate\", \"Trusts\"],\n    \"foreign_client_proportion\": \"5% \\u2013 30%\",\n    \"complex_structures\": \"Occasionally\",\n    \"pep_exposure\": \"Domestic PEPs only\",\n    \"delivery_channels\": [\"Face to face / in-person\", \"Online platform / web portal\", \"Email or correspondence\"],\n    \"non_f2f_proportion\": \"25% \\u2013 75%\",\n    \"uses_intermediaries\": \"No\",\n    \"handles_cash\": \"Occasionally\",\n    \"ds_high_value_unfinanced\": \"Yes\",\n    \"ds_high_currency\": \"No\",\n    \"ds_intl_transfers\": \"No\",\n    \"ds_anonymous_clients\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"Yes\",\n    \"ds_unusual_services\": \"No\",\n    \"cr_criminal_activity\": \"Occasionally\",\n    \"cr_pep\": \"Domestic PEPs\",\n    \"cr_unexplained_wealth\": \"No\",\n    \"cr_npo\": \"No\",\n    \"ch_remote_only\": \"Yes\",\n    \"ch_third_party_cdd\": \"No\",\n    \"countries_exposure\": [\"Australia only\", \"New Zealand\"],\n    \"medium_risk_country\": \"No\",\n    \"high_risk_country\": \"No\",\n    \"sanctions_screening_confirmed\": \"Confirmed and operational\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 4,\n    \"tm\":  3,\n    \"scr\": 4,\n    \"geo\": 4,\n    \"gov\": 3\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"]
+            }
+          }
+        },
+        {
+          "name": "List Risk Registers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has registers array', () => pm.expect(body.data.registers).to.be.an('array'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"],
+              "query": [
+                { "key": "page",  "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "status", "value": "", "disabled": true },
+                { "key": "entityType", "value": "Lawyers/Conveyancers", "disabled": true }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Risk Register by ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Has rows', () => pm.expect(body.data.rows).to.be.an('array').that.is.not.empty);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Risk Register — raise CDD ctrl-eff",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('CDD ctrl-eff updated', () => pm.expect(body.data.ctrlEff.cdd).to.equal(5));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"Smith & Associates Lawyers Pty Ltd\",\n    \"entity_type\": \"Lawyers/Conveyancers\",\n    \"abn\": \"12 345 678 901\",\n    \"assessDate\": \"2026-06-17\",\n    \"co_name\": \"Jane Smith\",\n    \"co_email\": \"jane.smith@smithlawyers.com.au\",\n    \"co_phone\": \"0412 345 678\",\n    \"sm_name\": \"Robert Chen\",\n    \"sm_email\": \"r.chen@smithlawyers.com.au\",\n    \"client_types\": [\"Individuals\", \"Bodies corporate\", \"Trusts\"],\n    \"pep_exposure\": \"Domestic PEPs only\",\n    \"delivery_channels\": [\"Face to face / in-person\", \"Online platform / web portal\"],\n    \"non_f2f_proportion\": \"25% \\u2013 75%\",\n    \"uses_intermediaries\": \"No\",\n    \"handles_cash\": \"Occasionally\",\n    \"ds_high_value_unfinanced\": \"Yes\",\n    \"ds_high_currency\": \"No\",\n    \"ds_intl_transfers\": \"No\",\n    \"ds_anonymous_clients\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"Yes\",\n    \"ds_unusual_services\": \"No\",\n    \"cr_criminal_activity\": \"Occasionally\",\n    \"cr_pep\": \"Domestic PEPs\",\n    \"cr_unexplained_wealth\": \"No\",\n    \"cr_npo\": \"No\",\n    \"ch_remote_only\": \"Yes\",\n    \"ch_third_party_cdd\": \"No\",\n    \"countries_exposure\": [\"Australia only\", \"New Zealand\"],\n    \"medium_risk_country\": \"No\",\n    \"high_risk_country\": \"No\",\n    \"sanctions_screening_confirmed\": \"Confirmed and operational\",\n    \"foreign_client_proportion\": \"5% \\u2013 30%\",\n    \"complex_structures\": \"Occasionally\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 5,\n    \"tm\":  3,\n    \"scr\": 4,\n    \"geo\": 4,\n    \"gov\": 3\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}"]
+            }
+          }
+        },
+        {
+          "name": "Recalculate Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "console.log('Rows after recalculate:', pm.response.json().data.rowCount);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/recalculate",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "recalculate"]
+            }
+          }
+        },
+        {
+          "name": "Patch Scenario — C-002 manual L/C override",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "console.log('Updated row:', JSON.stringify(body.data.row));",
+                  "pm.test('Manual L stored', () => pm.expect(body.data.row.manualL).to.equal(4));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"L\": 4,\n  \"C\": 4,\n  \"ctrlEff\": 3,\n  \"reviewerNotes\": \"Reviewed by Robert Chen on 2026-06-17. Client base includes several HVC trust structures with multiple layers. L raised from 3 to 4 to reflect actual observed risk.\",\n  \"status\": \"Reviewed\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/scenarios/{{scenarioRef}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "scenarios", "{{scenarioRef}}"]
+            }
+          }
+        },
+        {
+          "name": "Patch Scenario — B-003 extreme override example",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "console.log('B-003 residual after patch:', body.data.row.residualRiskLabel);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"L\": 1,\n  \"C\": 5,\n  \"ctrlEff\": 2,\n  \"reviewerNotes\": \"Scenario B-003 is intentionally kept at highest rating. Document alteration requests — if encountered — are an immediate SMR trigger. Low likelihood but catastrophic consequence maintained.\",\n  \"status\": \"Reviewed\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/scenarios/B-003",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "scenarios", "B-003"]
+            }
+          }
+        },
+        {
+          "name": "Submit for Review",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Status is In Review', () => pm.expect(body.data.status).to.equal('In Review'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/submit",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "submit"]
+            }
+          }
+        },
+        {
+          "name": "Approve Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Status is Approved', () => pm.expect(body.data.status).to.equal('Approved'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/approve",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "approve"]
+            }
+          }
+        },
+        {
+          "name": "Export to Excel (.xls)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Excel content-type', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('vnd.ms-excel');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}/export",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}", "export"]
+            }
+          }
+        },
+        {
+          "name": "List — filter by entityType",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register?entityType=Lawyers%2FConveyancers&status=Approved",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"],
+              "query": [
+                { "key": "entityType", "value": "Lawyers/Conveyancers" },
+                { "key": "status",     "value": "Approved" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Register — VASP/DCEP (high risk)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "console.log('VASP rows:', body.data.rowCount, '| Overall residual:', body.data.overallResidualLabel);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"CryptoEx Australia Pty Ltd\",\n    \"entity_type\": \"VASP/DCEP\",\n    \"abn\": \"98 765 432 109\",\n    \"assessDate\": \"2026-06-17\",\n    \"co_name\": \"Priya Nair\",\n    \"co_email\": \"compliance@cryptoex.com.au\",\n    \"co_phone\": \"0411 000 001\",\n    \"sm_name\": \"Marcus Webb\",\n    \"sm_email\": \"ceo@cryptoex.com.au\",\n    \"client_types\": [\"Individuals\", \"Bodies corporate\"],\n    \"foreign_client_proportion\": \"More than 30%\",\n    \"complex_structures\": \"Regularly\",\n    \"pep_exposure\": \"Both foreign and domestic PEPs\",\n    \"delivery_channels\": [\"Online platform / web portal\", \"Mobile app\", \"API\"],\n    \"non_f2f_proportion\": \"More than 75%\",\n    \"uses_intermediaries\": \"No\",\n    \"handles_cash\": \"No\",\n    \"ds_high_value_unfinanced\": \"No\",\n    \"ds_high_currency\": \"No\",\n    \"ds_intl_transfers\": \"Yes\",\n    \"ds_anonymous_clients\": \"No\",\n    \"ds_virtual_assets\": \"Yes\",\n    \"ds_complex_structures\": \"No\",\n    \"ds_unusual_services\": \"No\",\n    \"cr_criminal_activity\": \"Regularly\",\n    \"cr_pep\": \"Both foreign and domestic PEPs\",\n    \"cr_unexplained_wealth\": \"Yes\",\n    \"cr_npo\": \"No\",\n    \"ch_remote_only\": \"Yes\",\n    \"ch_third_party_cdd\": \"No\",\n    \"countries_exposure\": [\"Australia only\", \"United States\", \"Singapore\", \"United Arab Emirates\"],\n    \"medium_risk_country\": \"Yes\",\n    \"high_risk_country\": \"Yes\",\n    \"sanctions_screening_confirmed\": \"Confirmed and operational\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 3,\n    \"tm\":  3,\n    \"scr\": 3,\n    \"geo\": 2,\n    \"gov\": 2\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"]
+            }
+          }
+        },
+        {
+          "name": "Create Register — Real Estate Agent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "console.log('REA rows:', body.data.rowCount, '| Actions:', body.data.actionCount);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"Metro Property Group Pty Ltd\",\n    \"entity_type\": \"Real Estate Agents\",\n    \"abn\": \"55 111 222 333\",\n    \"assessDate\": \"2026-06-17\",\n    \"co_name\": \"Sarah Kim\",\n    \"co_email\": \"sarah.kim@metroproperty.com.au\",\n    \"sm_name\": \"David Nguyen\",\n    \"client_types\": [\"Individuals\", \"Bodies corporate\"],\n    \"foreign_client_proportion\": \"5% \\u2013 30%\",\n    \"complex_structures\": \"Occasionally\",\n    \"pep_exposure\": \"Domestic PEPs only\",\n    \"delivery_channels\": [\"Face to face / in-person\", \"Online platform / web portal\"],\n    \"non_f2f_proportion\": \"Less than 25%\",\n    \"uses_intermediaries\": \"Yes — via enrolled intermediaries\",\n    \"handles_cash\": \"No\",\n    \"ds_high_value_unfinanced\": \"Yes\",\n    \"ds_high_currency\": \"No\",\n    \"ds_intl_transfers\": \"No\",\n    \"ds_anonymous_clients\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"Yes\",\n    \"ds_unusual_services\": \"No\",\n    \"cr_criminal_activity\": \"Occasionally\",\n    \"cr_pep\": \"Domestic PEPs\",\n    \"cr_unexplained_wealth\": \"No\",\n    \"cr_npo\": \"No\",\n    \"ch_remote_only\": \"No\",\n    \"ch_third_party_cdd\": \"Yes \\u2014 with a formal CDD Arrangement\",\n    \"countries_exposure\": [\"Australia only\", \"China\", \"New Zealand\"],\n    \"medium_risk_country\": \"No\",\n    \"high_risk_country\": \"No\",\n    \"sanctions_screening_confirmed\": \"Confirmed and operational\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 3,\n    \"tm\":  3,\n    \"scr\": 3,\n    \"geo\": 3,\n    \"gov\": 3\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"]
+            }
+          }
+        },
+        {
+          "name": "Create Register — Remittance Provider (high-risk corridor)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "console.log('Remittance rows:', body.data.rowCount, '| Overall:', body.data.overallResidualLabel);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"FastSend Remittance Pty Ltd\",\n    \"entity_type\": \"Remittance\",\n    \"abn\": \"44 999 888 777\",\n    \"assessDate\": \"2026-06-17\",\n    \"co_name\": \"Ahmed Hassan\",\n    \"co_email\": \"compliance@fastsend.com.au\",\n    \"sm_name\": \"Linda Chang\",\n    \"client_types\": [\"Individuals\", \"Sole traders\"],\n    \"foreign_client_proportion\": \"More than 30%\",\n    \"complex_structures\": \"Rarely\",\n    \"pep_exposure\": \"Both foreign and domestic PEPs\",\n    \"delivery_channels\": [\"Face to face / in-person\", \"Mobile app\", \"Agent network\"],\n    \"non_f2f_proportion\": \"25% \\u2013 75%\",\n    \"uses_intermediaries\": \"Yes \\u2014 via enrolled intermediaries\",\n    \"handles_cash\": \"Regularly\",\n    \"ds_high_value_unfinanced\": \"No\",\n    \"ds_high_currency\": \"Yes\",\n    \"ds_intl_transfers\": \"Yes\",\n    \"ds_anonymous_clients\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"No\",\n    \"ds_unusual_services\": \"No\",\n    \"cr_criminal_activity\": \"Occasionally\",\n    \"cr_pep\": \"Both foreign and domestic PEPs\",\n    \"cr_unexplained_wealth\": \"No\",\n    \"cr_npo\": \"No\",\n    \"ch_remote_only\": \"No\",\n    \"ch_third_party_cdd\": \"Yes \\u2014 via agent with formal CDD Arrangement\",\n    \"countries_exposure\": [\"Philippines\", \"Vietnam\", \"India\", \"Pakistan\", \"Somalia\"],\n    \"medium_risk_country\": \"Yes\",\n    \"high_risk_country\": \"Yes\",\n    \"sanctions_screening_confirmed\": \"Confirmed and operational\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 3,\n    \"tm\":  3,\n    \"scr\": 4,\n    \"geo\": 3,\n    \"gov\": 3\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"]
+            }
+          }
+        },
+        {
+          "name": "Error — Create without entity_type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Error message', () => pm.expect(pm.response.json().error).to.include('entity_type'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"name\": \"Missing Entity Type Pty Ltd\"\n  },\n  \"ctrlEff\": { \"cdd\": 3 }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/risk-register",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"]
+            }
+          }
+        },
+        {
+          "name": "Error — Get non-existent ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 404 or 500', () => {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([404, 500]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/000000000000000000000000",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "000000000000000000000000"]
+            }
+          }
+        },
+        {
+          "name": "Delete Risk Register",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('Delete message', () => pm.expect(body.data.message).to.equal('Deleted'));",
+                  "pm.collectionVariables.set('registerId', '');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register/{{registerId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register", "{{registerId}}"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

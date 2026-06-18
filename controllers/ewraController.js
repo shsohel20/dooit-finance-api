@@ -5,6 +5,7 @@ const EwraRiskFactor = require("../models/EwraRiskFactor");
 const EwraControlAssessment = require("../models/EwraControlAssessment");
 const EwraRiskScenario = require("../models/EwraRiskScenario");
 const Control = require("../models/Control");
+const EntityConfig = require("../models/EntityConfig");
 const IssueRegister = require("../models/IssueRegister");
 const RemediationTask = require("../models/RemediationTask");
 const ErrorResponse = require("../utils/errorResponse");
@@ -59,13 +60,11 @@ function effectivenessLabel(score) {
   return "Highly Effective";
 }
 
-// Review cycle years from entity_config seed collection
 async function getReviewCycleYears(entityTypeName) {
   try {
-    const cfg = await mongoose.connection
-      .collection("entity_config")
-      .findOne({ config_field: "default_review_cycle_years" });
-    return cfg?.values?.[entityTypeName] ?? cfg?.[entityTypeName] ?? 3;
+    if (!entityTypeName) return 3;
+    const cfg = await EntityConfig.findOne({ entityType: entityTypeName }).lean();
+    return cfg?.evalYears ?? 3;
   } catch {
     return 3;
   }
