@@ -1,14 +1,14 @@
-"use strict";
-
 const RiskRegister = require("../models/RiskRegister");
 const RiskPoolItem = require("../models/RiskPoolItem");
 const EntityConfig = require("../models/EntityConfig");
-const { buildRiskRegister, summarize, ENTITY_CONFIG } = require("../utils/riskRegisterEngine");
+const Client       = require("../models/Client");
+const { buildRiskRegister, summarize } = require("../utils/riskRegisterEngine");
 const { inherentBand, residualBand, BAND_LABELS } = require("../utils/ewraRiskRegister");
 const { evaluateCondition, applyLMods }  = require("../utils/conditionEvaluator");
 const { RISK_POOL_SEED, ENTITY_CONFIG_SEED } = require("../data/riskPoolSeed");
 
 // ── CTRL_CATEGORY (factorId → ctrl-eff bucket) ───────────────────────────────
+
 const CTRL_CATEGORY = {
   EW_C_001:"cdd",  EW_C_002: "cdd",
   EW_CH_001:"cdd", EW_CH_002:"cdd",
@@ -20,123 +20,14 @@ const CTRL_CATEGORY = {
   EW_E_001:"gov",  EW_E_003:"gov",  EW_E_004:"gov",
 };
 
-/**
- * Build a scored risk register from DB risk pool items.
- * Auto-seeds DB on first call if the collection is empty.
- * Falls back to the static engine if DB is unreachable.
- *
- * @param {object} answers
- * @param {object} ctrlEff  { cdd, tm, scr, geo, gov } each 1-5
- * @returns {Promise<object[]>}
- */
-async function buildFromDB(answers, ctrlEff, cid = null) {
-  try {
-    // Load global items + client-specific items
-    const rawItems = await RiskPoolItem
-      .find({
-        isActive: true,
-        $or: [{ client: null }, ...(cid ? [{ client: cid }] : [])],
-      })
-      .sort({ sortOrder:1, sec:1 })
-      .lean();
-
-    // Auto-seed globals on first use (empty collection)
-    let items = rawItems;
-    if (items.length === 0) {
-      const ops = RISK_POOL_SEED.map(row => ({
-        updateOne: { filter: { ref: row.ref, client: null }, update: { $setOnInsert: { ...row, client: null } }, upsert: true },
-      }));
-      await RiskPoolItem.bulkWrite(ops, { ordered: false });
-
-      const cfgOps = ENTITY_CONFIG_SEED.map(cfg => ({
-        updateOne: { filter: { entityType: cfg.entityType }, update: { $setOnInsert: cfg }, upsert: true },
-      }));
-      await EntityConfig.bulkWrite(cfgOps, { ordered: false });
-
-      items = await RiskPoolItem
-        .find({ isActive: true, $or: [{ client: null }, ...(cid ? [{ client: cid }] : [])] })
-        .sort({ sortOrder:1, sec:1 })
-        .lean();
-    }
-
-    // Client-specific items override globals of the same ref
-    const seen = new Set();
-    const deduped = [];
-    // Process client items first (they appear last in the sort since ObjectId > null)
-    // Reverse, collect client-specific refs, then add globals only if not overridden
-    const clientItems  = items.filter(r => r.client != null);
-    const globalItems  = items.filter(r => r.client == null);
-    clientItems.forEach(r => { seen.add(r.ref); deduped.push(r); });
-    globalItems.forEach(r => { if (!seen.has(r.ref)) deduped.push(r); });
-    // Re-sort by sortOrder after dedup
-    deduped.sort((a, b) => (a.sortOrder - b.sortOrder) || a.ref.localeCompare(b.ref));
-    items = deduped;
-
-    const entityType = answers.entity_type || "";
-    const ce = { cdd:3, tm:3, scr:3, geo:3, gov:3, ...ctrlEff };
-    const owner  = answers.co_name || "AML/CTF CO";
-    const prepBy = answers.co_name || "CO";
-    const revBy  = answers.sm_name || "CO";
-
-    return items
-      .filter(row => {
-        const ents = row.entities;
-        if (ents !== "ALL" && Array.isArray(ents) && !ents.includes(entityType)) return false;
-        return evaluateCondition(row.condition, answers);
-      })
-      .map((row, idx) => {
-        const L = applyLMods(row.lMods, answers, row.L);
-        const C = row.C;
-        const inh  = inherentBand(L, C);
-        const cat  = CTRL_CATEGORY[row.ctrlFactor] || "gov";
-        const ceV  = ce[cat];
-        const res  = residualBand(inh, ceV);
-
-        return {
-          rowNum:              idx + 1,
-          sec:                 row.sec,
-          secName:             row.secName,
-          ref:                 row.ref,
-          riskType:            row.riskType,
-          ch:                  row.ch,
-          riskName:            row.riskName,
-          description:         row.description,
-          pfSanctionsNote:     row.pfSanctionsNote,
-          L, C,
-          inherentRisk:        inh,
-          inherentRiskLabel:   BAND_LABELS[inh] || inh,
-          existingControls:    row.existingControls,
-          controlIds:          row.controlIds || [],
-          ctrlFactor:          row.ctrlFactor,
-          category:            cat,
-          controlEffectiveness: ceV,
-          residualRisk:        res,
-          residualRiskLabel:   BAND_LABELS[res] || res,
-          actionRequired:      res === "H" || res === "E",
-          withinRiskAppetite:  !(res === "H" || res === "E"),
-          controlsOwner:       owner,
-          preparedBy:          prepBy,
-          reviewedBy:          revBy,
-          status:              "Draft",
-          // preserve manual overrides if row came from a re-calc context
-          manualL: undefined, manualC: undefined,
-        };
-      });
-  } catch (dbErr) {
-    // Graceful fallback to static engine if DB query fails
-    console.error("[riskRegister] DB engine error, falling back to static:", dbErr.message);
-    return buildRiskRegister(answers, ctrlEff);
-  }
-}
-
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const ok  = (res, data, code = 200) => res.status(code).json({ success: true,  data });
-const err = (res, msg, code = 400)  => res.status(code).json({ success: false, error: msg });
+const err = (res, msg,  code = 400) => res.status(code).json({ success: false, error: msg });
 
 function parseCtrlEff(raw = {}) {
   const keys = ["cdd", "tm", "scr", "geo", "gov"];
-  const out = {};
+  const out  = {};
   keys.forEach(k => {
     const v = Number(raw[k]);
     out[k] = (v >= 1 && v <= 5) ? v : 3;
@@ -148,6 +39,136 @@ function buildSummary(rows) {
   return summarize(rows);
 }
 
+// ── clientType → entityType fuzzy map ────────────────────────────────────────
+
+const VALID_ENTITY_TYPES = [
+  "Lawyers/Conveyancers", "Accountants", "Real Estate Agents",
+  "Precious Metal Dealers", "TCSPs",
+  "Banks & ADIs", "Remittance", "VASP/DCEP",
+  "Gambling/Casino", "Insurance",
+];
+
+const CLIENT_TYPE_MAP = [
+  [/lawyer|conveyancer/i,              "Lawyers/Conveyancers"],
+  [/accountant/i,                      "Accountants"],
+  [/real\s*estate/i,                   "Real Estate Agents"],
+  [/precious\s*metal/i,                "Precious Metal Dealers"],
+  [/tcsp|trust.*company/i,             "TCSPs"],
+  [/bank|adi|credit\s*union/i,         "Banks & ADIs"],
+  [/remittance|money\s*transfer/i,     "Remittance"],
+  [/vasp|crypto|dcep|digital\s*asset/i,"VASP/DCEP"],
+  [/gambl|casino/i,                    "Gambling/Casino"],
+  [/insurance/i,                       "Insurance"],
+];
+
+function resolveEntityType(clientType = "") {
+  if (VALID_ENTITY_TYPES.includes(clientType)) return clientType;
+  for (const [re, mapped] of CLIENT_TYPE_MAP) {
+    if (re.test(clientType)) return mapped;
+  }
+  return null;
+}
+
+// ── DB risk-pool engine ───────────────────────────────────────────────────────
+
+async function buildFromDB(answers, ctrlEff, cid = null) {
+  try {
+    const rawItems = await RiskPoolItem
+      .find({
+        isActive: true,
+        $or: [{ client: null }, ...(cid ? [{ client: cid }] : [])],
+      })
+      .sort({ sortOrder: 1, sec: 1 })
+      .lean();
+
+    let items = rawItems;
+    if (items.length === 0) {
+      const ops = RISK_POOL_SEED.map(row => ({
+        updateOne: {
+          filter: { ref: row.ref, client: null },
+          update: { $setOnInsert: { ...row, client: null } },
+          upsert: true,
+        },
+      }));
+      await RiskPoolItem.bulkWrite(ops, { ordered: false });
+
+      const cfgOps = ENTITY_CONFIG_SEED.map(cfg => ({
+        updateOne: { filter: { entityType: cfg.entityType }, update: { $setOnInsert: cfg }, upsert: true },
+      }));
+      await EntityConfig.bulkWrite(cfgOps, { ordered: false });
+
+      items = await RiskPoolItem
+        .find({ isActive: true, $or: [{ client: null }, ...(cid ? [{ client: cid }] : [])] })
+        .sort({ sortOrder: 1, sec: 1 })
+        .lean();
+    }
+
+    // Client-specific items override globals of the same ref
+    const seen        = new Set();
+    const deduped     = [];
+    const clientItems = items.filter(r => r.client != null);
+    const globalItems = items.filter(r => r.client == null);
+    clientItems.forEach(r => { seen.add(r.ref); deduped.push(r); });
+    globalItems.forEach(r => { if (!seen.has(r.ref)) deduped.push(r); });
+    deduped.sort((a, b) => (a.sortOrder - b.sortOrder) || a.ref.localeCompare(b.ref));
+    items = deduped;
+
+    const entityType = answers.entity_type || "";
+    const ce         = { cdd: 3, tm: 3, scr: 3, geo: 3, gov: 3, ...ctrlEff };
+    const owner      = answers.co_name || "AML/CTF CO";
+    const prepBy     = answers.co_name || "CO";
+    const revBy      = answers.sm_name || "CO";
+
+    return items
+      .filter(row => {
+        const ents = row.entities;
+        if (ents !== "ALL" && Array.isArray(ents) && !ents.includes(entityType)) return false;
+        return evaluateCondition(row.condition, answers);
+      })
+      .map((row, idx) => {
+        const L   = applyLMods(row.lMods, answers, row.L);
+        const C   = row.C;
+        const inh = inherentBand(L, C);
+        const cat = CTRL_CATEGORY[row.ctrlFactor] || "gov";
+        const ceV = ce[cat];
+        const res = residualBand(inh, ceV);
+
+        return {
+          rowNum:               idx + 1,
+          sec:                  row.sec,
+          secName:              row.secName,
+          ref:                  row.ref,
+          riskType:             row.riskType,
+          ch:                   row.ch,
+          riskName:             row.riskName,
+          description:          row.description,
+          pfSanctionsNote:      row.pfSanctionsNote,
+          L, C,
+          inherentRisk:         inh,
+          inherentRiskLabel:    BAND_LABELS[inh] || inh,
+          existingControls:     row.existingControls,
+          controlIds:           row.controlIds || [],
+          ctrlFactor:           row.ctrlFactor,
+          category:             cat,
+          controlEffectiveness: ceV,
+          residualRisk:         res,
+          residualRiskLabel:    BAND_LABELS[res] || res,
+          actionRequired:       res === "H" || res === "E",
+          withinRiskAppetite:   !(res === "H" || res === "E"),
+          controlsOwner:        owner,
+          preparedBy:           prepBy,
+          reviewedBy:           revBy,
+          status:               "Draft",
+          manualL:              undefined,
+          manualC:              undefined,
+        };
+      });
+  } catch (dbErr) {
+    console.error("[riskRegister] DB engine error, falling back to static:", dbErr.message);
+    return buildRiskRegister(answers, ctrlEff);
+  }
+}
+
 // ── Excel export helper ───────────────────────────────────────────────────────
 
 const BAND_STYLE = {
@@ -157,10 +178,10 @@ const BAND_STYLE = {
   H:  "background:#FFC7CE;color:#9C0006;",
   E:  "background:#C00000;color:#FFFFFF;",
 };
-const SEC_HDR   = "background:#1F3864;color:#FFFFFF;font-weight:bold;font-size:11pt;";
-const COL_HDR   = "background:#2E4057;color:#FFFFFF;font-weight:bold;font-size:9pt;";
-const ENT_HDR   = "background:#17375E;color:#FFFFFF;font-weight:bold;font-size:10pt;";
-const NUM_COLS  = 18;
+const SEC_HDR  = "background:#1F3864;color:#FFFFFF;font-weight:bold;font-size:11pt;";
+const COL_HDR  = "background:#2E4057;color:#FFFFFF;font-weight:bold;font-size:9pt;";
+const ENT_HDR  = "background:#17375E;color:#FFFFFF;font-weight:bold;font-size:10pt;";
+const NUM_COLS = 18;
 
 const COL_HEADERS = [
   "ref","risk_type","channel","risk_name","description_cause_red_flags",
@@ -170,7 +191,7 @@ const COL_HEADERS = [
 ];
 
 function esc(v) {
-  return String(v ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 function td(v, style = "") {
   return `<td${style ? ` style="${style}"` : ""}>${esc(v)}</td>`;
@@ -184,15 +205,14 @@ function tdMerge(v, colspan, style = "") {
 
 function buildXlsHtml(register) {
   const { answers = {}, ctrlEff = {}, rows = [] } = register;
-  const entityName = register.entityName || answers.name || "ENTITY";
+  const entityName = register.entityName || answers.name    || "ENTITY";
   const entityType = register.entityType || "—";
-  const coName     = register.coName  || answers.co_name  || "—";
-  const smName     = register.smName  || answers.sm_name  || "—";
+  const coName     = register.coName     || answers.co_name || "—";
+  const smName     = register.smName     || answers.sm_name || "—";
   const assessDate = register.assessDate
     ? new Date(register.assessDate).toISOString().slice(0, 10)
     : "—";
 
-  // Group by section
   const secMap = {};
   const secs   = [];
   rows.forEach(r => {
@@ -202,7 +222,7 @@ function buildXlsHtml(register) {
 
   let dataRows = "";
   secs.forEach(sec => {
-    const srows  = secMap[sec];
+    const srows   = secMap[sec];
     const secName = srows[0].secName;
     dataRows += `<tr>${tdMerge(`${sec} — ${secName.toUpperCase()}`, NUM_COLS, SEC_HDR)}</tr>`;
     dataRows += `<tr>${COL_HEADERS.map(h => `<td style="${COL_HDR}text-align:center;">${esc(h)}</td>`).join("")}</tr>`;
@@ -212,14 +232,14 @@ function buildXlsHtml(register) {
       const mono = base + "font-family:Consolas,monospace;font-size:8pt;";
       const ctr  = base + "text-align:center;font-weight:bold;";
       dataRows += `<tr>
-        ${td(r.ref,       "font-weight:bold;color:#1F3864;font-family:Consolas,monospace;" + base)}
-        ${td(r.riskType,  base)}
-        ${td(r.ch,        mono + "text-align:center;")}
-        ${td(r.riskName,  "font-weight:600;" + wrap)}
-        ${td(r.description, wrap + "color:#444;")}
+        ${td(r.ref,          "font-weight:bold;color:#1F3864;font-family:Consolas,monospace;" + base)}
+        ${td(r.riskType,     base)}
+        ${td(r.ch,           mono + "text-align:center;")}
+        ${td(r.riskName,     "font-weight:600;" + wrap)}
+        ${td(r.description,  wrap + "color:#444;")}
         ${td(r.pfSanctionsNote, wrap + "color:#444;font-size:8pt;")}
-        ${td(r.L,         ctr)}
-        ${td(r.C,         ctr)}
+        ${td(r.L,            ctr)}
+        ${td(r.C,            ctr)}
         ${tdRisk(r.inherentRisk)}
         ${td(r.existingControls, wrap + "color:#444;font-size:8pt;")}
         ${td(r.controlEffectiveness, ctr)}
@@ -229,19 +249,18 @@ function buildXlsHtml(register) {
             : "color:#375623;text-align:center;" + base)}
         ${td((r.controlIds || []).join(", "), mono + "font-size:7.5pt;color:#666;")}
         ${td(r.controlsOwner, base)}
-        ${td("Y",           ctr + "color:#375623;")}
-        ${td(r.preparedBy,  base)}
-        ${td(r.reviewedBy,  base)}
+        ${td("Y",             ctr + "color:#375623;")}
+        ${td(r.preparedBy,    base)}
+        ${td(r.reviewedBy,    base)}
       </tr>`;
     });
   });
 
-  // Summary footer
-  const inh = { VL:0,L:0,M:0,H:0,E:0 };
-  const res = { VL:0,L:0,M:0,H:0,E:0 };
+  const inh      = { VL: 0, L: 0, M: 0, H: 0, E: 0 };
+  const res      = { VL: 0, L: 0, M: 0, H: 0, E: 0 };
+  const actionCnt = rows.filter(r => r.actionRequired).length;
   rows.forEach(r => { if (inh[r.inherentRisk] !== undefined) inh[r.inherentRisk]++; });
   rows.forEach(r => { if (res[r.residualRisk]  !== undefined) res[r.residualRisk]++; });
-  const actionCnt = rows.filter(r => r.actionRequired).length;
 
   dataRows += `<tr>${tdMerge(
     `RISK REGISTER SUMMARY — ${entityName} | Total: ${rows.length} risks | ` +
@@ -309,37 +328,27 @@ function buildXlsHtml(register) {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
-/**
- * POST /risk-register
- * Generate and persist a new risk register from questionnaire answers.
- */
 exports.createRegister = async (req, res) => {
   try {
-    const {
-      answers = {},
-      ctrlEff: ctrlEffRaw = {},
-      notes,
-    } = req.body;
-
-    console.log(req.body)
+    const { answers = {}, ctrlEff: ctrlEffRaw = {} } = req.body;
 
     if (!answers.entity_type) return err(res, "answers.entity_type is required");
-    if (!answers.name)         return err(res, "answers.name (entity name) is required");
+    if (!answers.name)        return err(res, "answers.name (entity name) is required");
 
     const ctrlEff = parseCtrlEff(ctrlEffRaw);
     const rows    = await buildFromDB(answers, ctrlEff, req.user?.client);
     const summary = buildSummary(rows);
 
     const doc = await RiskRegister.create({
-      entityName:    answers.name,
-      entityType:    answers.entity_type,
-      abn:           answers.abn || "",
-      assessDate:    answers.assessDate ? new Date(answers.assessDate) : new Date(),
-      coName:        answers.co_name  || "",
-      coEmail:       answers.co_email || "",
-      coPhone:       answers.co_phone || "",
-      smName:        answers.sm_name  || "",
-      smEmail:       answers.sm_email || "",
+      entityName: answers.name,
+      entityType: answers.entity_type,
+      abn:        answers.abn       || "",
+      assessDate: answers.assessDate ? new Date(answers.assessDate) : new Date(),
+      coName:     answers.co_name   || "",
+      coEmail:    answers.co_email  || "",
+      coPhone:    answers.co_phone  || "",
+      smName:     answers.sm_name   || "",
+      smEmail:    answers.sm_email  || "",
       answers,
       ctrlEff,
       rows,
@@ -350,18 +359,65 @@ exports.createRegister = async (req, res) => {
 
     return ok(res, doc, 201);
   } catch (e) {
-    console.log(e)
     return err(res, e.message, 500);
   }
 };
 
-/**
- * GET /risk-register
- * List registers for the authenticated client (no rows for performance).
- */
+exports.createFromClient = async (req, res) => {
+  try {
+    const client = await Client.findById(req.params.clientId).lean();
+    if (!client) return err(res, "Client not found", 404);
+
+    const rq = client.riskQuestions || {};
+
+    const entityType = rq.entity_type
+      || resolveEntityType(client.clientType)
+      || "Lawyers/Conveyancers";
+
+    const answers = {
+      name:       client.name,
+      abn:        rq.abn        || client.registrationNumber || "",
+      assessDate: rq.assessDate || new Date().toISOString().slice(0, 10),
+      co_name:    rq.co_name    || client.legalRepresentative?.name  || "",
+      co_email:   rq.co_email   || client.legalRepresentative?.email || client.email || "",
+      co_phone:   rq.co_phone   || client.legalRepresentative?.phone || client.phone || "",
+      sm_name:    rq.sm_name    || "",
+      sm_email:   rq.sm_email   || "",
+      ...rq,
+      entity_type: entityType,
+    };
+
+    const ctrlEff = parseCtrlEff(req.body.ctrlEff || rq.ctrlEff || {});
+    const rows    = await buildFromDB(answers, ctrlEff, req.user?.client);
+    const summary = buildSummary(rows);
+
+    const doc = await RiskRegister.create({
+      entityName: client.name,
+      entityType,
+      abn:        answers.abn       || "",
+      assessDate: answers.assessDate ? new Date(answers.assessDate) : new Date(),
+      coName:     answers.co_name   || "",
+      coEmail:    answers.co_email  || "",
+      coPhone:    answers.co_phone  || "",
+      smName:     answers.sm_name   || "",
+      smEmail:    answers.sm_email  || "",
+      answers,
+      ctrlEff,
+      rows,
+      ...summary,
+      client:    req.user?.client,
+      createdBy: req.user?._id,
+    });
+
+    return ok(res, doc, 201);
+  } catch (e) {
+    return err(res, e.message, 500);
+  }
+};
+
 exports.listRegisters = async (req, res) => {
   try {
-    const filter  = { client: req.user?.client };
+    const filter = { client: req.user?.client };
     if (req.query.status)     filter.status     = req.query.status;
     if (req.query.entityType) filter.entityType = req.query.entityType;
     if (req.query.entityName) filter.entityName = req.query.entityName;
@@ -386,15 +442,10 @@ exports.listRegisters = async (req, res) => {
   }
 };
 
-/**
- * GET /risk-register/:id
- * Get a single register with all rows.
- */
 exports.getRegister = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
-      _id:    req.params.id,
-      client: req.user?.client,
+      _id: req.params.id, client: req.user?.client,
     }).lean();
     if (!doc) return err(res, "Risk register not found", 404);
     return ok(res, doc);
@@ -403,10 +454,6 @@ exports.getRegister = async (req, res) => {
   }
 };
 
-/**
- * PUT /risk-register/:id
- * Update answers / ctrlEff and re-generate rows.
- */
 exports.updateRegister = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
@@ -415,21 +462,21 @@ exports.updateRegister = async (req, res) => {
     if (!doc) return err(res, "Risk register not found", 404);
     if (doc.status === "Approved") return err(res, "Approved registers cannot be edited");
 
-    const answers  = req.body.answers  || doc.answers;
-    const ctrlEff  = parseCtrlEff(req.body.ctrlEff || doc.ctrlEff.toObject?.() || doc.ctrlEff);
-    const rows     = await buildFromDB(answers, ctrlEff, req.user?.client);
-    const summary  = buildSummary(rows);
+    const answers = req.body.answers || doc.answers;
+    const ctrlEff = parseCtrlEff(req.body.ctrlEff || doc.ctrlEff.toObject?.() || doc.ctrlEff);
+    const rows    = await buildFromDB(answers, ctrlEff, req.user?.client);
+    const summary = buildSummary(rows);
 
-    doc.answers      = answers;
-    doc.ctrlEff      = ctrlEff;
-    doc.rows         = rows;
-    doc.entityName   = answers.name        || doc.entityName;
-    doc.entityType   = answers.entity_type || doc.entityType;
-    doc.abn          = answers.abn         || doc.abn;
-    doc.coName       = answers.co_name     || doc.coName;
-    doc.coEmail      = answers.co_email    || doc.coEmail;
-    doc.smName       = answers.sm_name     || doc.smName;
-    doc.updatedBy    = req.user?._id;
+    doc.answers    = answers;
+    doc.ctrlEff    = ctrlEff;
+    doc.rows       = rows;
+    doc.entityName = answers.name        || doc.entityName;
+    doc.entityType = answers.entity_type || doc.entityType;
+    doc.abn        = answers.abn         || doc.abn;
+    doc.coName     = answers.co_name     || doc.coName;
+    doc.coEmail    = answers.co_email    || doc.coEmail;
+    doc.smName     = answers.sm_name     || doc.smName;
+    doc.updatedBy  = req.user?._id;
     Object.assign(doc, summary);
 
     await doc.save();
@@ -439,10 +486,6 @@ exports.updateRegister = async (req, res) => {
   }
 };
 
-/**
- * POST /risk-register/:id/recalculate
- * Re-run engine with existing answers (no body required).
- */
 exports.recalculate = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
@@ -464,10 +507,6 @@ exports.recalculate = async (req, res) => {
   }
 };
 
-/**
- * PUT /risk-register/:id/scenarios/:ref
- * Manual override of a single row (L, C, ctrlEff, notes, status).
- */
 exports.patchScenario = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
@@ -481,21 +520,19 @@ exports.patchScenario = async (req, res) => {
     const row = doc.rows[rowIndex];
     const { L, C, ctrlEff: ceOverride, reviewerNotes, status } = req.body;
 
-    if (L            !== undefined) { row.manualL    = Number(L);           row.L = Number(L); }
-    if (C            !== undefined) { row.manualC    = Number(C);           row.C = Number(C); }
+    if (L            !== undefined) { row.manualL       = Number(L);          row.L = Number(L); }
+    if (C            !== undefined) { row.manualC       = Number(C);          row.C = Number(C); }
     if (ceOverride   !== undefined) { row.manualCtrlEff = Number(ceOverride); row.controlEffectiveness = Number(ceOverride); }
-    if (reviewerNotes!== undefined)   row.reviewerNotes = reviewerNotes;
-    if (status       !== undefined)   row.status        = status;
+    if (reviewerNotes !== undefined) row.reviewerNotes  = reviewerNotes;
+    if (status        !== undefined) row.status         = status;
 
-    // Re-score after manual override
-    const { inherentBand, residualBand, BAND_LABELS } = require("../utils/ewraRiskRegister");
-    const inh    = inherentBand(row.L, row.C);
-    const res_   = residualBand(inh, row.controlEffectiveness);
-    row.inherentRisk      = inh;
-    row.inherentRiskLabel = BAND_LABELS[inh]  || inh;
-    row.residualRisk      = res_;
-    row.residualRiskLabel = BAND_LABELS[res_] || res_;
-    row.actionRequired    = res_ === "H" || res_ === "E";
+    const inh = inherentBand(row.L, row.C);
+    const res_ = residualBand(inh, row.controlEffectiveness);
+    row.inherentRisk       = inh;
+    row.inherentRiskLabel  = BAND_LABELS[inh]  || inh;
+    row.residualRisk       = res_;
+    row.residualRiskLabel  = BAND_LABELS[res_] || res_;
+    row.actionRequired     = res_ === "H" || res_ === "E";
     row.withinRiskAppetite = !row.actionRequired;
 
     doc.rows[rowIndex] = row;
@@ -511,17 +548,13 @@ exports.patchScenario = async (req, res) => {
   }
 };
 
-/**
- * POST /risk-register/:id/submit
- * Submit register for review.
- */
 exports.submitRegister = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
       _id: req.params.id, client: req.user?.client,
     });
-    if (!doc)               return err(res, "Risk register not found", 404);
-    if (doc.status !== "Draft") return err(res, "Only Draft registers can be submitted");
+    if (!doc)                    return err(res, "Risk register not found", 404);
+    if (doc.status !== "Draft")  return err(res, "Only Draft registers can be submitted");
 
     doc.status      = "In Review";
     doc.submittedAt = new Date();
@@ -533,16 +566,12 @@ exports.submitRegister = async (req, res) => {
   }
 };
 
-/**
- * POST /risk-register/:id/approve
- * Approve a register that is In Review.
- */
 exports.approveRegister = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
       _id: req.params.id, client: req.user?.client,
     });
-    if (!doc)                    return err(res, "Risk register not found", 404);
+    if (!doc)                       return err(res, "Risk register not found", 404);
     if (doc.status !== "In Review") return err(res, "Only In Review registers can be approved");
 
     doc.status     = "Approved";
@@ -556,10 +585,32 @@ exports.approveRegister = async (req, res) => {
   }
 };
 
-/**
- * DELETE /risk-register/:id
- * Soft-delete via status or hard-delete.
- */
+exports.amendRegister = async (req, res) => {
+  try {
+    const original = await RiskRegister.findOne({
+      _id: req.params.id, client: req.user?.client,
+    }).lean();
+    if (!original) return err(res, "Risk register not found", 404);
+    if (original.status !== "Approved") return err(res, "Only Approved registers can be amended");
+
+    const { _id, createdAt, updatedAt, submittedAt, approvedAt, approvedBy, __v, ...rest } = original;
+
+    const amendment = await RiskRegister.create({
+      ...rest,
+      status:      "Draft",
+      version:     (original.version || 1) + 1,
+      amendedFrom: original._id,
+      createdBy:   req.user?._id,
+      updatedBy:   req.user?._id,
+      client:      req.user?.client,
+    });
+
+    return ok(res, amendment, 201);
+  } catch (e) {
+    return err(res, e.message, 500);
+  }
+};
+
 exports.deleteRegister = async (req, res) => {
   try {
     const doc = await RiskRegister.findOneAndDelete({
@@ -572,21 +623,17 @@ exports.deleteRegister = async (req, res) => {
   }
 };
 
-/**
- * GET /risk-register/:id/export
- * Stream a styled Excel (.xls) file for the register.
- */
 exports.exportExcel = async (req, res) => {
   try {
     const doc = await RiskRegister.findOne({
       _id: req.params.id, client: req.user?.client,
     }).lean();
-    if (!doc) return err(res, "Risk register not found", 404);
+    if (!doc)              return err(res, "Risk register not found", 404);
     if (!doc.rows?.length) return err(res, "Register has no rows to export");
 
-    const html      = buildXlsHtml(doc);
-    const safeName  = (doc.entityName || "ENTITY").replace(/[^a-z0-9]/gi, "_");
-    const filename  = `${safeName}_EWRA_Risk_Register.xls`;
+    const html     = buildXlsHtml(doc);
+    const safeName = (doc.entityName || "ENTITY").replace(/[^a-z0-9]/gi, "_");
+    const filename = `${safeName}_EWRA_Risk_Register.xls`;
 
     res.setHeader("Content-Type", "application/vnd.ms-excel;charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);

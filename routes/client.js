@@ -8,6 +8,8 @@ const {
   deleteClient,
   filterClientSection,
   updateClientStatus,
+  getRiskQuestionsSchema,
+  updateRiskQuestions,
   getClientBySlug,
   createDummyClient,
   downloadQR,
@@ -21,6 +23,10 @@ const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
 router.route("/public/:id").get(getClient);
+
+// questionnaire schema — static, no auth needed
+router.route("/risk-questions/schema").get(getRiskQuestionsSchema);
+
 // protect all client routes; authorization is applied per-route below
 router.use(protect);
 
@@ -45,6 +51,11 @@ router.route("/new").post(authorize("admin"), createClient);
 router
   .route("/update-status/:id")
   .put(authorize("admin"), updateClientStatus);
+
+// merge questionnaire answers into riskQuestions
+router
+  .route("/:id/risk-questions")
+  .put(authorize("admin", "client"), updateRiskQuestions);
 
 // CRUD by id
 router

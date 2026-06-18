@@ -13,6 +13,9 @@ router.put( "/entity-configs/:entityType", protect, ctrl.updateEntityConfig);
 // ── Seed ─────────────────────────────────────────────────────────────────────
 router.post("/seed", protect, ctrl.seedItems);
 
+// ── Meta (must come before /:ref) ────────────────────────────────────────────
+router.get("/meta", protect, ctrl.getMeta);
+
 // ── Risk pool CRUD ────────────────────────────────────────────────────────────
 router.route("/")
   .get(protect,  ctrl.listItems)

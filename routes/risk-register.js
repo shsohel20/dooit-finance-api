@@ -11,6 +11,9 @@ router.route("/")
   .get(protect,  ctrl.listRegisters)
   .post(protect, ctrl.createRegister);
 
+// ── Auto-generate from client record ─────────────────────────────────────────
+router.post("/from-client/:clientId", protect, ctrl.createFromClient);
+
 // ── Document routes ───────────────────────────────────────────────────────────
 router.route("/:id")
   .get(protect,    ctrl.getRegister)
@@ -19,6 +22,7 @@ router.route("/:id")
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 router.post("/:id/recalculate",       protect, ctrl.recalculate);
+router.post("/:id/amend",             protect, ctrl.amendRegister);
 router.put( "/:id/scenarios/:ref",    protect, ctrl.patchScenario);
 router.post("/:id/submit",            protect, ctrl.submitRegister);
 router.post("/:id/approve",           protect, ctrl.approveRegister);

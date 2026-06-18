@@ -72,6 +72,35 @@ exports.listItems = async (req, res) => {
   }
 };
 
+// Canonical ctrl-eff bucket definitions — single source of truth for UI + scoring
+const CTRL_EFF_CATEGORIES = [
+  { id: "cdd", label: "Customer Due Diligence", desc: "ID verification, KYC, ECDD, PEP & BO checks, SOF/SOW procedures",                                    defaultValue: 3 },
+  { id: "tm",  label: "Transaction Monitoring",  desc: "Cash threshold monitoring, structuring detection, TM rule alerts",                                    defaultValue: 3 },
+  { id: "scr", label: "Sanctions Screening",     desc: "DFAT/OFAC/UN screening, PEP database, screening refresh frequency",                                  defaultValue: 3 },
+  { id: "geo", label: "Geographic Controls",     desc: "Country risk ratings, HRC & FATF grey-list updates, corridor risk scoring",                          defaultValue: 3 },
+  { id: "gov", label: "Governance & Training",   desc: "Board approval, staff AML/CTF training, compliance calendar, independent evaluation",                 defaultValue: 3 },
+];
+
+/**
+ * GET /api/v1/risk-pool/meta
+ * Returns:
+ *   ctrlFactors       — all EWRA factors from ewra_factors collection (for ctrlFactor dropdown)
+ *   ctrlEffCategories — ctrl-eff bucket definitions with defaultValue (for initCtrlEff + Step 7 UI)
+ */
+exports.getMeta = async (req, res) => {
+  try {
+    const mongoose = require("mongoose");
+    const ctrlFactors = await mongoose.connection
+      .collection("ewra_factors")
+      .find({}, { projection: { factor_id: 1, factor_name: 1, category: 1, _id: 0 } })
+      .sort({ category: 1, factor_id: 1 })
+      .toArray();
+    return ok(res, { ctrlFactors, ctrlEffCategories: CTRL_EFF_CATEGORIES });
+  } catch (e) {
+    return err(res, e.message, 500);
+  }
+};
+
 /**
  * GET /api/v1/risk-pool/:ref
  * Looks up client-specific item first; falls back to global.

@@ -48,7 +48,8 @@ const obligationLibrary = require("./obligation-library");
 const entityObligation = require("./entity-obligation");
 
 // ── Phase 2: Controls Library ─────────────────────────────────────────────────
-const control = require("./control");
+const control            = require("./control");
+const controlAssignments = require("./control-assignments");
 
 // ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
 const ewra         = require("./ewra");
@@ -136,6 +137,7 @@ router.use("/entity-obligation",  entityObligation);
 
 // ── Phase 2: Controls Library ─────────────────────────────────────────────────
 router.use("/control",            control);
+router.use("/control-assignments", controlAssignments);
 
 // ── Phase 3: EWRA Risk Assessment ─────────────────────────────────────────────
 router.use("/ewra",               ewra);

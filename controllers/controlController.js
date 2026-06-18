@@ -151,6 +151,28 @@ exports.assignOwner = asyncHandler(async (req, res) => {
   res.status(200).json({ success: true, data: { matched: result.matchedCount, modified: result.modifiedCount } });
 });
 
+// @desc   Sync industryTags on controls from Controls_Entity_Map seed data
+// @route  POST /api/v1/control/sync-industry-tags
+// @access Protected
+exports.syncIndustryTags = asyncHandler(async (req, res) => {
+  const { CONTROL_INDUSTRY_TAGS } = require("../data/controlAssignmentSeed");
+
+  const ops = Object.entries(CONTROL_INDUSTRY_TAGS)
+    .filter(([, tags]) => tags.length > 0)
+    .map(([controlId, tags]) => ({
+      updateOne: {
+        filter: { controlId },
+        update: { $set: { industryTags: tags } },
+      },
+    }));
+
+  const result = await Control.bulkWrite(ops, { ordered: false });
+  res.status(200).json({
+    success: true,
+    data: { matched: result.matchedCount, modified: result.modifiedCount, total: ops.length },
+  });
+});
+
 // @desc   Get controls linked to a specific obligation
 // @route  GET /api/v1/control/by-obligation/:obligationId
 // @access Protected
