@@ -1,0 +1,772 @@
+{
+  "info": {
+    "name": "AML Document Generation",
+    "description": "Template listing, on-demand .docx generation, and history for AUSTRAC AML/CTF compliance documents. Covers all 9 entity-type templates (Tranche 1 & 2). Generated files are uploaded to FileVault and saved as PolicyHubTemplate records for 7-year AML retention.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "clientId",
+      "value": "",
+      "type": "string",
+      "description": "Client ObjectId — set this to the client you want to generate docs for"
+    },
+    {
+      "key": "templateConfigId",
+      "value": "",
+      "type": "string",
+      "description": "TemplateConfig ObjectId — auto-set by List Templates test script"
+    },
+    {
+      "key": "policyHubTemplateId",
+      "value": "",
+      "type": "string",
+      "description": "PolicyHubTemplate ObjectId — auto-set by generation test scripts"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Templates",
+      "item": [
+        {
+          "name": "List All Active Templates",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('success', () => pm.expect(res.success).to.be.true);",
+                  "pm.test('returns array', () => pm.expect(res.data).to.be.an('array'));",
+                  "if (res.data && res.data.length > 0) {",
+                  "  pm.collectionVariables.set('templateConfigId', res.data[0]._id);",
+                  "  console.log('templateConfigId set:', res.data[0]._id);",
+                  "  console.log('Available templateKeys:', res.data.map(t => t.templateKey).join(', '));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"]
+            },
+            "description": "Returns all active TemplateConfig documents with their eligibleTypes and variableMap."
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Templates — Lawyers & Conveyancers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('success', () => pm.expect(res.success).to.be.true);",
+                  "if (res.data && res.data.length > 0) {",
+                  "  pm.collectionVariables.set('templateConfigId', res.data[0]._id);",
+                  "  console.log('templateConfigId set:', res.data[0]._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates?entityTypeName=Tranche 2 - Lawyers%2FConveyancers",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"],
+              "query": [
+                { "key": "entityTypeName", "value": "Tranche 2 - Lawyers/Conveyancers" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Templates — Accountants",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates?entityTypeName=Tranche 2 - Accountants",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"],
+              "query": [
+                { "key": "entityTypeName", "value": "Tranche 2 - Accountants" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Templates — Real Estate",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates?entityTypeName=Tranche 2 - Real Estate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"],
+              "query": [
+                { "key": "entityTypeName", "value": "Tranche 2 - Real Estate" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Templates — Banks & ADIs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates?entityTypeName=Tranche 1 - Banks %26 ADIs",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"],
+              "query": [
+                { "key": "entityTypeName", "value": "Tranche 1 - Banks & ADIs" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Filter Templates — VASP/DCEP",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/templates?entityTypeName=Tranche 1 - VASP%2FDCEP",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "templates"],
+              "query": [
+                { "key": "entityTypeName", "value": "Tranche 1 - VASP/DCEP" }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2. Generate — Tranche 2 (New Obligations from 1 Jul 2026)",
+      "item": [
+        {
+          "name": "Generate — Lawyers & Conveyancers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});",
+                  "console.log('Content-Disposition:', pm.response.headers.get('Content-Disposition'));",
+                  "// Check PolicyHubTemplate was saved — query history after this"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_LAW\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Returns a .docx file download. Saves a PolicyHubTemplate record (generatedFileUrl, generatedSnapshotData) for 7-year AML audit retention.\n\nEligible entity type: Tranche 2 - Lawyers/Conveyancers"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Accountants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_ACCOUNTING\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 2 - Accountants"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Real Estate Agents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_REALESTATE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 2 - Real Estate"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Jewellers & Precious Metals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_JEWELLERS\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 2 - Precious Metal Dealers"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3. Generate — Tranche 1 (Existing AUSTRAC Entities)",
+      "item": [
+        {
+          "name": "Generate — Banks & ADIs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_BANKS\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 1 - Banks & ADIs"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Gambling & Casino",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_GAMBLING\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 1 - Gambling/Casino"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Insurance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_INSURANCE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 1 - Insurance"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — VASPs & Digital Assets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_VASP\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 1 - VASP/DCEP"
+          },
+          "response": []
+        },
+        {
+          "name": "Generate — Remittance & Money Transfer",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_REMITTANCE\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Eligible entity type: Tranche 1 - Remittance"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4. Generate — Client User (session-resolved)",
+      "item": [
+        {
+          "name": "Generate — From JWT Session (no clientId needed)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('content-type is docx', () => {",
+                  "  pm.expect(pm.response.headers.get('Content-Type')).to.include('wordprocessingml');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"templateKey\": \"AML_PROGRAM_LAW\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "When the logged-in user is a client-role user, their clientId is resolved automatically from req.user.client._id — no need to pass `client` in the body. Use a client-user JWT token."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5. Error Cases",
+      "item": [
+        {
+          "name": "Error — Missing templateKey",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 400', () => pm.response.to.have.status(400));",
+                  "const res = pm.response.json();",
+                  "pm.test('error message present', () => pm.expect(res.error).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Expects 400 — templateKey is required"
+          },
+          "response": []
+        },
+        {
+          "name": "Error — Wrong Entity Type (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 403', () => pm.response.to.have.status(403));",
+                  "const res = pm.response.json();",
+                  "pm.test('error message present', () => pm.expect(res.error).to.include('not available'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_LAW\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Use a client whose riskQuestions.entity_type does NOT match Lawyers/Conveyancers. Expects 403 — Template not available for this entity type."
+          },
+          "response": []
+        },
+        {
+          "name": "Error — Template Not Found (404)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 404', () => pm.response.to.have.status(404));",
+                  "const res = pm.response.json();",
+                  "pm.test('error message present', () => pm.expect(res.error).to.be.a('string'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_INVALID\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "Expects 404 — template key does not exist"
+          },
+          "response": []
+        },
+        {
+          "name": "Error — Unauthenticated (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('status 401', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"templateKey\": \"AML_PROGRAM_LAW\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/aml-document/generate",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "aml-document", "generate"]
+            },
+            "description": "No Authorization header — expects 401"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6. Generation History (PolicyHubTemplate)",
+      "item": [
+        {
+          "name": "History — All AML docs for a Client",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('success', () => pm.expect(res.success).to.be.true);",
+                  "if (res.data && res.data.length > 0) {",
+                  "  pm.collectionVariables.set('policyHubTemplateId', res.data[0]._id);",
+                  "  console.log('policyHubTemplateId set:', res.data[0]._id);",
+                  "  console.log('docs found:', res.data.length);",
+                  "  res.data.forEach(d => console.log(' -', d.name, '|', d.generatedFileUrl));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates?client={{clientId}}&sort=-createdAt&limit=20",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates"],
+              "query": [
+                { "key": "client", "value": "{{clientId}}" },
+                { "key": "sort", "value": "-createdAt" },
+                { "key": "limit", "value": "20" },
+                { "key": "sourceTemplateConfig", "value": "", "disabled": true, "description": "Optionally filter by specific template" }
+              ]
+            },
+            "description": "Returns all PolicyHubTemplate records for a client that were generated by the AML doc-gen system. Each record has generatedFileUrl (download link) and generatedSnapshotData (AML 7-yr audit snapshot)."
+          },
+          "response": []
+        },
+        {
+          "name": "History — Filter by TemplateConfig",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates?client={{clientId}}&sourceTemplateConfig={{templateConfigId}}&sort=-createdAt",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates"],
+              "query": [
+                { "key": "client", "value": "{{clientId}}" },
+                { "key": "sourceTemplateConfig", "value": "{{templateConfigId}}" },
+                { "key": "sort", "value": "-createdAt" }
+              ]
+            },
+            "description": "History for a specific template (e.g. all Lawyers program versions for this client)."
+          },
+          "response": []
+        },
+        {
+          "name": "History — Single Record Detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "pm.test('success', () => pm.expect(res.success).to.be.true);",
+                  "if (res.data) {",
+                  "  console.log('generatedFileUrl:', res.data.generatedFileUrl);",
+                  "  console.log('snapshot keys:', Object.keys(res.data.generatedSnapshotData || {}).join(', '));",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{policyHubTemplateId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{policyHubTemplateId}}"]
+            },
+            "description": "Full detail of one generated document record, including generatedSnapshotData (AML audit trail)."
+          },
+          "response": []
+        },
+        {
+          "name": "History — All AML-generated (admin, no client filter)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates?sort=-createdAt&limit=50&page=1",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates"],
+              "query": [
+                { "key": "sort", "value": "-createdAt" },
+                { "key": "limit", "value": "50" },
+                { "key": "page", "value": "1" }
+              ]
+            },
+            "description": "Admin view — all PolicyHubTemplate records across all clients, newest first."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -426,6 +426,7 @@ const createRiskRegisterFromClient = async (clientId, ctrlEffOverride = {}, user
 };
 
 exports.createRiskRegisterFromClient = createRiskRegisterFromClient;
+exports.resolveEntityType = resolveEntityType;
 
 exports.createFromClient = async (req, res) => {
   try {
@@ -462,6 +463,25 @@ exports.listRegisters = async (req, res) => {
     ]);
 
     return ok(res, { registers: docs, total, page, pages: Math.ceil(total / limit) });
+  } catch (e) {
+    return err(res, e.message, 500);
+  }
+};
+
+exports.getRegisterByEntityName = async (req, res) => {
+  try {
+    const name = req.params.entityName?.trim();
+    if (!name) return err(res, "entityName param is required");
+
+    const doc = await RiskRegister.findOne({
+      client:     req.user?.client,
+      entityName: { $regex: `^${name}$`, $options: "i" },
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    if (!doc) return err(res, `No risk register found for entity "${name}"`, 404);
+    return ok(res, doc);
   } catch (e) {
     return err(res, e.message, 500);
   }

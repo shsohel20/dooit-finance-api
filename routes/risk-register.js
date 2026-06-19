@@ -14,6 +14,9 @@ router.route("/")
 // ── Auto-generate from client record ─────────────────────────────────────────
 router.post("/from-client/:clientId", protect, ctrl.createFromClient);
 
+// ── Lookup by entity name ─────────────────────────────────────────────────────
+router.get("/by-entity/:entityName", protect, ctrl.getRegisterByEntityName);
+
 // ── Document routes ───────────────────────────────────────────────────────────
 router.route("/:id")
   .get(protect,    ctrl.getRegister)

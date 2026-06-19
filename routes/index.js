@@ -74,6 +74,9 @@ const rgMapper = require("./rg-mapper");
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 const afcDocument = require("./afc-document");
 
+// ── AML Document Generation ───────────────────────────────────────────────────
+const amlDocument = require("./amlDocument");
+
 // ── Onboarding Step ───────────────────────────────────────────────────────────
 const onboardingStep = require("./onboardingStep");
 
@@ -165,6 +168,7 @@ router.use("/rg-mapper",          rgMapper);
 
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 router.use("/afc-documents",      afcDocument);
+router.use("/aml-document",       amlDocument);
 
 // ── Onboarding Step ───────────────────────────────────────────────────────────
 router.use("/onboarding-step",    onboardingStep);

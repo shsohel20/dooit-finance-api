@@ -109,6 +109,11 @@ const RiskQuestionsSchema = new Schema(
     // No | Occasionally | Regularly
     handles_cash: { type: String, trim: true },
 
+    // ── Designated Services Narrative ────────────────────────────────────────
+    // Free-text list of specific services for AML/CTF Program document body.
+    // Accountants: Table 7 services; Real Estate: Table 8 services, etc.
+    designatedServicesText: { type: String, trim: true },
+
     // ── Designated Service Flags ──────────────────────────────────────────────
     ds_high_value_unfinanced: { type: String, trim: true },  // Yes/No
     ds_high_currency: { type: String, trim: true },  // Yes/No

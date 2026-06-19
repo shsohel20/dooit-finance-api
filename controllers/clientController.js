@@ -7,6 +7,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
 const { createRiskRegisterFromClient } = require("./riskRegisterController");
 const { runInBackground } = require("../utils/backgroundJob");
+const { generateAMLDocsForClient } = require("../utils/amlDocGenService");
 
 /**
  * Simple filter helper similar to filterUserSection
@@ -772,6 +773,7 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   runInBackground(`riskRegister:createFromClient:${client._id}`, async () => {
     await createRiskRegisterFromClient(client._id, {}, req.user);
     await markOnboardingStep({ client: client._id }, "risk_assessment", "completed", req.user?.id);
+    await generateAMLDocsForClient(client._id, req.user?.id);
   });
 });
 

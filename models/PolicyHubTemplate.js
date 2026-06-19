@@ -22,12 +22,28 @@ const PolicyHubTemplateSchema = new Schema(
     docs: { type: String, default: "" }, // rich text HTML
     metadata: { type: Schema.Types.Mixed, default: {} },
     tags: { type: [String], default: [] },
-    // reference to the source PolicyHub (optional — null if created directly)
+    // ── Source references ─────────────────────────────────────────────────────
+    // Set when created from a PolicyHub master template
     sourcePolicyHub: {
       type: Schema.Types.ObjectId,
       ref: "PolicyHub",
       default: null,
     },
+    // Set when generated via docxTemplateService from a TemplateConfig
+    sourceTemplateConfig: {
+      type: Schema.Types.ObjectId,
+      ref: "TemplateConfig",
+      default: null,
+    },
+
+    // ── Generated .docx file (AML doc-gen output) ─────────────────────────────
+    // Populated after docxTemplateService generates the Word document.
+    // Null for policy templates created manually (docs field used instead).
+    generatedFileVaultId:  { type: String, default: null },
+    generatedFileUrl:      { type: String, default: null },
+    // Snapshot of the render payload at generation time — AML 7-year retention
+    generatedSnapshotData: { type: Schema.Types.Mixed, default: null },
+
     createdBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
     isGlobal: { type: Boolean, default: false }, // admin-only: share across all clients
   },
