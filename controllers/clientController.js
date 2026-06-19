@@ -2,9 +2,11 @@
 const asyncHandler = require("../middleware/async");
 const Client = require("../models/Client");
 const User = require("../models/User");
-const { validateClientCreation } = require("../utils");
+const { validateClientCreation, markOnboardingStep } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
+const { createRiskRegisterFromClient } = require("./riskRegisterController");
+const { runInBackground } = require("../utils/backgroundJob");
 
 /**
  * Simple filter helper similar to filterUserSection
@@ -482,7 +484,10 @@ const RISK_QUESTIONS_SCHEMA = [
         ],
       },
       { key: "abn",           label: "ABN",             type: "text",  placeholder: "XX XXX XXX XXX" },
-      { key: "assessDate",    label: "Assessment Date",  type: "date" },
+      { key: "assessDate",        label: "Assessment Date",         type: "date" },
+      { key: "documentDate",      label: "Document Date",           type: "text", placeholder: "e.g. 15 June 2026" },
+      { key: "effectiveDate",     label: "Program Effective Date",  type: "text", placeholder: "e.g. 1 July 2026" },
+      { key: "austracEnrolmentRef", label: "AUSTRAC Enrolment Reference", type: "text", placeholder: "e.g. ENR-20260001" },
       {
         key: "austrac_enrolled", label: "AUSTRAC Enrolment Status", type: "single-select",
         options: ["Enrolled and current", "Enrolment in progress", "Not yet enrolled", "Exempt"],
@@ -763,6 +768,11 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   await client.save();
 
   res.status(200).json({ success: true, data: { riskQuestions: client.riskQuestions } });
+
+  runInBackground(`riskRegister:createFromClient:${client._id}`, async () => {
+    await createRiskRegisterFromClient(client._id, {}, req.user);
+    await markOnboardingStep({ client: client._id }, "risk_assessment", "completed", req.user?.id);
+  });
 });
 
 /**

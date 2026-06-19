@@ -4,6 +4,7 @@ const Client = require("../models/Client");
 const User = require("../models/User");
 const ErrorResponse = require("./errorResponse");
 const Branch = require("../models/Branch");
+const OnboardingStep = require("../models/OnboardingStep");
 const crypto = require("crypto");
 const { hashForSearch } = require("./encryption");
 // ** Checks if an object is empty (returns boolean)
@@ -384,6 +385,77 @@ const validateBranchUpdate = async (branchId, data, next) => {
   return true;
 };
 
+/**
+ * Mark an onboarding step by name from any controller.
+ * - If the step exists → updates its status (and completedAt/completedBy if completed).
+ * - If the step does not exist → pushes it with order = max(existing orders) + 1.
+ *
+ * @param {Object} filter      - { client: ObjectId } or { branch: ObjectId }
+ * @param {string} stepName    - The step string to match (e.g. "risk_assessment")
+ * @param {string} status      - pending | in_progress | completed | skipped | failed
+ * @param {string} [userId]    - req.user.id — set as completedBy when completing
+ * @returns {Promise<Document|null>}
+ */
+const markOnboardingStep = async (filter, stepName, status, userId = null) => {
+  const setFields = { "steps.$[el].status": status };
+
+  if (status === "completed") {
+    setFields["steps.$[el].completedAt"] = new Date();
+    if (userId) setFields["steps.$[el].completedBy"] = userId;
+  }
+
+  // Try updating existing step by name
+  const updated = await OnboardingStep.findOneAndUpdate(
+    { ...filter, "steps.step": stepName },
+    { $set: setFields },
+    { arrayFilters: [{ "el.step": stepName }], new: true }
+  );
+
+  if (updated) return updated;
+
+  // Step not in array yet — compute next order and push
+  const record = await OnboardingStep.findOne(filter);
+  if (!record) return null;
+
+  const nextOrder =
+    record.steps.length > 0
+      ? Math.max(...record.steps.map((s) => s.order)) + 1
+      : 1;
+
+  const newStep = {
+    step: stepName,
+    order: nextOrder,
+    status,
+    ...(status === "completed" && {
+      completedAt: new Date(),
+      ...(userId && { completedBy: userId }),
+    }),
+  };
+
+  return OnboardingStep.findOneAndUpdate(
+    filter,
+    { $push: { steps: newStep } },
+    { new: true }
+  );
+};
+
+const validateOnboardingStep = (data, next) => {
+  const { step, order } = data;
+
+  if (!step || !step.trim())
+    return next(new ErrorResponse("Step name is required.", 400));
+
+  if (order === undefined || order === null)
+    return next(new ErrorResponse("Step order is required.", 400));
+
+  if (!Number.isInteger(Number(order)) || Number(order) < 0)
+    return next(
+      new ErrorResponse("Step order must be a non-negative integer.", 400)
+    );
+
+  return true;
+};
+
 function generateRandomPassword(length = 10) {
   const chars =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()";
@@ -413,6 +485,8 @@ module.exports = {
   validateClientCreation,
   validateBranchCreation,
   validateBranchUpdate,
+  validateOnboardingStep,
+  markOnboardingStep,
   generateRandomPassword,
   createInviteToken,
   hashToken,

@@ -72,6 +72,9 @@ const RiskQuestionsSchema = new Schema(
     abn: { type: String, trim: true },
     assessDate: { type: Date },
     austrac_enrolled: { type: String, trim: true },
+    austracEnrolmentRef: { type: String, trim: true },  // e.g. "ENR-20260001"
+    effectiveDate:       { type: String, trim: true },  // e.g. "1 July 2026"
+    documentDate:        { type: String, trim: true },  // e.g. "15 June 2026"
 
     // ── Compliance Officer (mirrors Client.legalRepresentative) ───────────────
     co_name: { type: String, trim: true },

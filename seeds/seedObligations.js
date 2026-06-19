@@ -3,10 +3,17 @@
  * Run: node api/scripts/seedObligations.js
  */
 require("dotenv").config({ path: "./config/config.env" });
+const path = require("path");
+const fs   = require("fs");
 const mongoose = require("mongoose");
 const { connectDB } = require("../config/db");
 const ObligationLibrary = require("../models/ObligationLibrary");
 require("colors");
+
+// AML/CTF obligations from seed/obligations.json (AML-001 → INS-002)
+const amlObligations = JSON.parse(
+  fs.readFileSync(path.resolve(__dirname, "../../seed/obligations.json"), "utf-8")
+);
 
 const obligations = [
   // ── GOVERNANCE (GOV) ──────────────────────────────────────────────────────
@@ -86,8 +93,9 @@ async function seed() {
   await connectDB();
   console.log("Connected to MongoDB");
 
+  const allObligations = [...obligations, ...amlObligations];
   let inserted = 0, updated = 0, errors = 0;
-  for (const ob of obligations) {
+  for (const ob of allObligations) {
     try {
       const result = await ObligationLibrary.findOneAndUpdate(
         { obligationId: ob.obligationId },

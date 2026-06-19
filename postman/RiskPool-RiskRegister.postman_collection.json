@@ -1,0 +1,520 @@
+{
+  "info": {
+    "name": "Dooit — Risk Pool & Risk Register",
+    "description": "All endpoints for the Risk Pool (scenario library) and Risk Register (entity-level scored register) modules.\n\nVariables:\n  baseUrl    → http://localhost:5000/api/v1\n  token      → Bearer JWT\n  poolRef    → ref of a RiskPoolItem (e.g. C-001)\n  registerId → ObjectId of a RiskRegister\n  clientId   → ObjectId of a Client\n  scenarioRef→ ref of a register row (e.g. C-001)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",     "value": "http://localhost:5000/api/v1" },
+    { "key": "token",       "value": "PASTE_JWT_HERE" },
+    { "key": "poolRef",     "value": "C-001" },
+    { "key": "registerId",  "value": "" },
+    { "key": "clientId",    "value": "" },
+    { "key": "scenarioRef", "value": "C-001" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+
+    {
+      "name": "Risk Pool — Library",
+      "item": [
+
+        {
+          "name": "List pool items",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool"],
+              "query": [
+                { "key": "sec",        "value": "",     "description": "Section code: S1–S8", "disabled": true },
+                { "key": "riskType",   "value": "",     "description": "Customer | Product | Channel | Geographic | Behaviour | Operational", "disabled": true },
+                { "key": "entityType", "value": "",     "description": "Lawyers/Conveyancers | Banks & ADIs | VASP/DCEP | etc.", "disabled": true },
+                { "key": "scope",      "value": "",     "description": "global (seed rows only) | custom (client rows only)", "disabled": true },
+                { "key": "isActive",   "value": "true", "disabled": true },
+                { "key": "search",     "value": "",     "description": "Searches riskName and ref", "disabled": true }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "List pool items — by section",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool?sec=S1",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool"],
+              "query": [
+                { "key": "sec", "value": "S1" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "List pool items — by entity type",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool?entityType=Lawyers%2FConveyancers",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool"],
+              "query": [
+                { "key": "entityType", "value": "Lawyers/Conveyancers" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Get meta (ctrl factors + eff categories)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-pool/meta",
+            "description": "Returns all 21 EWRA ctrl factors and the 5 ctrl-eff bucket definitions. Used to populate dropdowns on the pool editor."
+          }
+        },
+
+        {
+          "name": "Get single pool item",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-pool/{{poolRef}}"
+          }
+        },
+
+        {
+          "name": "Create custom pool item",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const ref = pm.response.json()?.data?.ref;",
+                "if (ref) pm.collectionVariables.set('poolRef', ref);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-pool",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ref\": \"CUST-001\",\n  \"sec\": \"S1\",\n  \"secName\": \"Customer Type Risks\",\n  \"riskType\": \"Customer\",\n  \"ch\": \"F,D,T\",\n  \"riskName\": \"Legal professional privilege — information barrier risk\",\n  \"description\": \"LPP may prevent disclosure of suspicious activity to AUSTRAC in specific circumstances, creating a blind spot in ML/TF detection.\",\n  \"pfSanctionsNote\": \"LPP does not override AUSTRAC reporting obligations for tipping-off provisions.\",\n  \"L\": 3,\n  \"C\": 4,\n  \"existingControls\": \"LPP policy documented. Legal team reviews all potential LPP claims before SMR suppression.\",\n  \"controlIds\": [\"CTRL_GOV_001\", \"CTRL_RPT_001\"],\n  \"ctrlFactor\": \"EW_C_001\",\n  \"entities\": [\"Lawyers/Conveyancers\"],\n  \"sortOrder\": 999,\n  \"isActive\": true\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Update pool item",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-pool/{{poolRef}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"L\": 4,\n  \"C\": 4,\n  \"existingControls\": \"Enhanced LPP review process implemented post-AUSTRAC guidance update.\",\n  \"controlIds\": [\"CTRL_GOV_001\", \"CTRL_RPT_001\", \"CTRL_CDD_004\"],\n  \"isActive\": true\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Delete pool item",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/risk-pool/{{poolRef}}"
+          }
+        },
+
+        {
+          "name": "Seed from master template",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-pool/seed",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Seeds global risk pool rows from RISK_POOL_SEED. Set force:true to overwrite existing global rows."
+          }
+        },
+
+        {
+          "name": "Seed — force overwrite",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-pool/seed",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"force\": true\n}"
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Risk Pool — Entity Configs",
+      "item": [
+
+        {
+          "name": "List entity configs",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-pool/entity-configs",
+            "description": "Returns per-entity-type configuration: which risk pool sections are active, default ctrl-eff values, NRA baseline."
+          }
+        },
+
+        {
+          "name": "Update entity config — Lawyers",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool/entity-configs/Lawyers%2FConveyancers",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool", "entity-configs", "Lawyers%2FConveyancers"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activeSections\": [\"S1\",\"S2\",\"S3\",\"S4\",\"S5\",\"S6\",\"S7\",\"S8\"],\n  \"defaultCtrlEff\": {\n    \"cdd\": 3,\n    \"tm\": 3,\n    \"scr\": 2,\n    \"geo\": 3,\n    \"gov\": 4\n  },\n  \"nraBaseline\": \"High\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Update entity config — VASP/DCEP",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool/entity-configs/VASP%2FDCEP",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool", "entity-configs", "VASP%2FDCEP"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activeSections\": [\"S1\",\"S2\",\"S3\",\"S4\",\"S5\",\"S6\",\"S7\",\"S8\"],\n  \"defaultCtrlEff\": {\n    \"cdd\": 4,\n    \"tm\": 4,\n    \"scr\": 4,\n    \"geo\": 3,\n    \"gov\": 3\n  },\n  \"nraBaseline\": \"High\"\n}"
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Risk Register",
+      "item": [
+
+        {
+          "name": "List registers",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-register?limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-register"],
+              "query": [
+                { "key": "limit",      "value": "50" },
+                { "key": "entityName", "value": "", "disabled": true, "description": "Filter by entity name" },
+                { "key": "status",     "value": "", "disabled": true, "description": "Draft | Submitted | Approved | Archived" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Get register",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}"
+          }
+        },
+
+        {
+          "name": "Create register (manual answers)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('registerId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"entity_type\": \"Lawyers/Conveyancers\",\n    \"name\": \"Smith & Associates Pty Ltd\",\n    \"abn\": \"12 345 678 901\",\n    \"assessDate\": \"2026-06-19\",\n    \"co_name\": \"Jane Smith\",\n    \"co_email\": \"jane@smithlaw.com.au\",\n    \"co_phone\": \"+61 2 9000 0000\",\n    \"sm_name\": \"Tom Jones\",\n    \"sm_email\": \"tom@smithlaw.com.au\",\n\n    \"client_types\": [\"Individual\", \"Corporate\"],\n    \"foreign_client_proportion\": \"10-25%\",\n    \"complex_structures\": \"Yes\",\n    \"pep_exposure\": \"Yes\",\n    \"delivery_channels\": [\"Face-to-face\", \"Online platform\"],\n    \"non_f2f_proportion\": \"25-50%\",\n    \"uses_intermediaries\": \"Sometimes\",\n    \"handles_cash\": \"Rarely\",\n    \"ds_high_value_unfinanced\": \"Yes\",\n    \"ds_intl_transfers\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"Yes\",\n    \"medium_risk_country\": \"Yes\",\n    \"high_risk_country\": \"No\",\n    \"sanctions_screening_confirmed\": \"Yes\",\n    \"cr_criminal_activity\": \"Low\",\n    \"cr_pep\": \"Medium\",\n    \"cr_unexplained_wealth\": \"Low\",\n    \"cr_npo\": \"Low\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 3,\n    \"tm\": 3,\n    \"scr\": 3,\n    \"geo\": 3,\n    \"gov\": 4\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+
+        {
+          "name": "Create register — Banks & ADIs",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('registerId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"entity_type\": \"Banks & ADIs\",\n    \"name\": \"Metro Community Bank\",\n    \"abn\": \"98 765 432 109\",\n    \"assessDate\": \"2026-06-19\",\n    \"co_name\": \"Sarah Chen\",\n    \"co_email\": \"s.chen@metrobank.com.au\",\n    \"co_phone\": \"+61 3 9000 0001\",\n    \"sm_name\": \"David Park\",\n    \"sm_email\": \"d.park@metrobank.com.au\",\n\n    \"client_types\": [\"Individual\", \"Corporate\", \"SME\"],\n    \"foreign_client_proportion\": \"10-25%\",\n    \"complex_structures\": \"Yes\",\n    \"pep_exposure\": \"Yes\",\n    \"delivery_channels\": [\"Face-to-face\", \"Online platform\", \"API\"],\n    \"non_f2f_proportion\": \"50-75%\",\n    \"uses_intermediaries\": \"Yes\",\n    \"handles_cash\": \"Regularly\",\n    \"ds_high_value_unfinanced\": \"No\",\n    \"ds_intl_transfers\": \"Yes\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"Yes\",\n    \"medium_risk_country\": \"Yes\",\n    \"high_risk_country\": \"Yes\",\n    \"sanctions_screening_confirmed\": \"Yes\",\n    \"cr_criminal_activity\": \"Medium\",\n    \"cr_pep\": \"High\",\n    \"cr_unexplained_wealth\": \"Medium\",\n    \"cr_npo\": \"Low\"\n  },\n  \"ctrlEff\": {\n    \"cdd\": 4,\n    \"tm\": 4,\n    \"scr\": 4,\n    \"geo\": 3,\n    \"gov\": 4\n  }\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Generate from client (auto)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('registerId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register/from-client/{{clientId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ctrlEff\": {\n    \"cdd\": 3,\n    \"tm\": 3,\n    \"scr\": 3,\n    \"geo\": 3,\n    \"gov\": 3\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Reads client's riskQuestions from MongoDB and auto-builds a scored register. ctrlEff is optional — defaults to 3 if not supplied."
+          }
+        },
+
+        {
+          "name": "Update register",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register/{{registerId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ctrlEff\": {\n    \"cdd\": 4,\n    \"tm\": 3,\n    \"scr\": 4,\n    \"geo\": 3,\n    \"gov\": 4\n  },\n  \"answers\": {\n    \"entity_type\": \"Lawyers/Conveyancers\",\n    \"name\": \"Smith & Associates Pty Ltd\",\n    \"abn\": \"12 345 678 901\",\n    \"assessDate\": \"2026-06-19\",\n    \"co_name\": \"Jane Smith\",\n    \"co_email\": \"jane@smithlaw.com.au\"\n  }\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Patch scenario row (CO-adjust)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/scenarios/{{scenarioRef}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"L\": 4,\n  \"C\": 4,\n  \"ctrlEff\": 2,\n  \"reviewerNotes\": \"Elevated after Q2 file review — 3 high-risk matters identified with third-party funders\",\n  \"status\": \"Reviewed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Manually override Likelihood (L), Consequence (C) and/or control effectiveness for a single scenario row. Inherent/residual bands are recalculated server-side."
+          }
+        },
+
+        {
+          "name": "Recalculate all rows",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/recalculate",
+            "description": "Re-runs the scoring engine across all rows using current answers + ctrlEff, resetting any manual overrides."
+          }
+        },
+
+        {
+          "name": "Submit for review",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/submit"
+          }
+        },
+
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/approve"
+          }
+        },
+
+        {
+          "name": "Amend (create new version)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/amend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Tranche 2 commencement — updated entity type designation and added new designated services\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Export to Excel",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/export",
+            "description": "Returns an .xls file (application/vnd.ms-excel). In Postman, save the response to a file."
+          }
+        },
+
+        {
+          "name": "Delete register",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Full Workflow (ordered)",
+      "description": "Walk through a complete Risk Register lifecycle: seed pool → create register → adjust scenarios → submit → approve → export.",
+      "item": [
+
+        {
+          "name": "1 — Seed pool (first time)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-pool/seed",
+            "body": { "mode": "raw", "raw": "{ \"force\": false }" }
+          }
+        },
+
+        {
+          "name": "2 — Check meta (ctrl factors)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-pool/meta"
+          }
+        },
+
+        {
+          "name": "3 — List pool for entity type",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/risk-pool?entityType=Lawyers%2FConveyancers",
+              "host": ["{{baseUrl}}"],
+              "path": ["risk-pool"],
+              "query": [{ "key": "entityType", "value": "Lawyers/Conveyancers" }]
+            }
+          }
+        },
+
+        {
+          "name": "4 — Create register",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('registerId', id);",
+                "console.log('registerId:', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"answers\": {\n    \"entity_type\": \"Lawyers/Conveyancers\",\n    \"name\": \"Workflow Test Entity\",\n    \"abn\": \"11 111 111 111\",\n    \"assessDate\": \"2026-06-19\",\n    \"co_name\": \"Test CO\",\n    \"co_email\": \"co@test.com\",\n    \"client_types\": [\"Individual\"],\n    \"foreign_client_proportion\": \"<10%\",\n    \"complex_structures\": \"No\",\n    \"pep_exposure\": \"No\",\n    \"delivery_channels\": [\"Face-to-face\"],\n    \"non_f2f_proportion\": \"<25%\",\n    \"uses_intermediaries\": \"No\",\n    \"handles_cash\": \"Rarely\",\n    \"ds_high_value_unfinanced\": \"No\",\n    \"ds_intl_transfers\": \"No\",\n    \"ds_virtual_assets\": \"No\",\n    \"ds_complex_structures\": \"No\",\n    \"medium_risk_country\": \"No\",\n    \"high_risk_country\": \"No\",\n    \"sanctions_screening_confirmed\": \"Yes\",\n    \"cr_criminal_activity\": \"Low\",\n    \"cr_pep\": \"Low\",\n    \"cr_unexplained_wealth\": \"Low\",\n    \"cr_npo\": \"Low\"\n  },\n  \"ctrlEff\": { \"cdd\": 3, \"tm\": 3, \"scr\": 3, \"geo\": 3, \"gov\": 3 }\n}"
+            }
+          }
+        },
+
+        {
+          "name": "5 — Get register (check rows)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}"
+          }
+        },
+
+        {
+          "name": "6 — Patch a scenario row",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/scenarios/C-001",
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"L\": 3, \"C\": 3, \"ctrlEff\": 4, \"reviewerNotes\": \"Standard client profile, good CDD controls in place\" }"
+            }
+          }
+        },
+
+        {
+          "name": "7 — Recalculate",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/recalculate"
+          }
+        },
+
+        {
+          "name": "8 — Submit",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/submit"
+          }
+        },
+
+        {
+          "name": "9 — Approve",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/approve"
+          }
+        },
+
+        {
+          "name": "10 — Export Excel",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/risk-register/{{registerId}}/export"
+          }
+        }
+
+      ]
+    }
+
+  ]
+}

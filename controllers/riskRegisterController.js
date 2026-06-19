@@ -17,7 +17,9 @@ const CTRL_CATEGORY = {
   EW_P_003:"tm",   EW_P_004:"gov",
   EW_G_001:"scr",  EW_G_002:"scr",
   EW_G_003:"geo",
-  EW_E_001:"gov",  EW_E_003:"gov",  EW_E_004:"gov",
+  EW_C_003:"cdd",  EW_C_004:"cdd",
+  EW_G_004:"geo",
+  EW_E_001:"gov",  EW_E_002:"gov",  EW_E_003:"gov",  EW_E_004:"gov",  EW_E_005:"gov",
 };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -363,55 +365,78 @@ exports.createRegister = async (req, res) => {
   }
 };
 
+/**
+ * Core logic for building a RiskRegister from a Client record.
+ * Exported so other controllers (e.g. onboarding flow) can call it directly.
+ *
+ * @param {string} clientId       - Client._id
+ * @param {Object} ctrlEffOverride - Raw ctrlEff object from request body (optional)
+ * @param {Object} user            - req.user (provides client ref + createdBy)
+ * @returns {Promise<Document>}    - Created RiskRegister document
+ */
+const createRiskRegisterFromClient = async (clientId, ctrlEffOverride = {}, user = {}) => {
+  const client = await Client.findById(clientId).lean();
+  if (!client) {
+    const e = new Error("Client not found");
+    e.statusCode = 404;
+    throw e;
+  }
+
+  const rq = client.riskQuestions || {};
+
+  const entityType =
+    rq.entity_type ||
+    resolveEntityType(client.clientType) ||
+    "Lawyers/Conveyancers";
+
+  const answers = {
+    name:       client.name,
+    abn:        rq.abn        || client.registrationNumber || "",
+    assessDate: rq.assessDate || new Date().toISOString().slice(0, 10),
+    co_name:    rq.co_name    || client.legalRepresentative?.name  || "",
+    co_email:   rq.co_email   || client.legalRepresentative?.email || client.email || "",
+    co_phone:   rq.co_phone   || client.legalRepresentative?.phone || client.phone || "",
+    sm_name:    rq.sm_name    || "",
+    sm_email:   rq.sm_email   || "",
+    ...rq,
+    entity_type: entityType,
+  };
+
+  const ctrlEff = parseCtrlEff(ctrlEffOverride || rq.ctrlEff || {});
+  const rows    = await buildFromDB(answers, ctrlEff, user?.client);
+  const summary = buildSummary(rows);
+
+  return RiskRegister.create({
+    entityName: client.name,
+    entityType,
+    abn:        answers.abn       || "",
+    assessDate: answers.assessDate ? new Date(answers.assessDate) : new Date(),
+    coName:     answers.co_name   || "",
+    coEmail:    answers.co_email  || "",
+    coPhone:    answers.co_phone  || "",
+    smName:     answers.sm_name   || "",
+    smEmail:    answers.sm_email  || "",
+    answers,
+    ctrlEff,
+    rows,
+    ...summary,
+    client:    user?.client,
+    createdBy: user?._id,
+  });
+};
+
+exports.createRiskRegisterFromClient = createRiskRegisterFromClient;
+
 exports.createFromClient = async (req, res) => {
   try {
-    const client = await Client.findById(req.params.clientId).lean();
-    if (!client) return err(res, "Client not found", 404);
-
-    const rq = client.riskQuestions || {};
-
-    const entityType = rq.entity_type
-      || resolveEntityType(client.clientType)
-      || "Lawyers/Conveyancers";
-
-    const answers = {
-      name:       client.name,
-      abn:        rq.abn        || client.registrationNumber || "",
-      assessDate: rq.assessDate || new Date().toISOString().slice(0, 10),
-      co_name:    rq.co_name    || client.legalRepresentative?.name  || "",
-      co_email:   rq.co_email   || client.legalRepresentative?.email || client.email || "",
-      co_phone:   rq.co_phone   || client.legalRepresentative?.phone || client.phone || "",
-      sm_name:    rq.sm_name    || "",
-      sm_email:   rq.sm_email   || "",
-      ...rq,
-      entity_type: entityType,
-    };
-
-    const ctrlEff = parseCtrlEff(req.body.ctrlEff || rq.ctrlEff || {});
-    const rows    = await buildFromDB(answers, ctrlEff, req.user?.client);
-    const summary = buildSummary(rows);
-
-    const doc = await RiskRegister.create({
-      entityName: client.name,
-      entityType,
-      abn:        answers.abn       || "",
-      assessDate: answers.assessDate ? new Date(answers.assessDate) : new Date(),
-      coName:     answers.co_name   || "",
-      coEmail:    answers.co_email  || "",
-      coPhone:    answers.co_phone  || "",
-      smName:     answers.sm_name   || "",
-      smEmail:    answers.sm_email  || "",
-      answers,
-      ctrlEff,
-      rows,
-      ...summary,
-      client:    req.user?.client,
-      createdBy: req.user?._id,
-    });
-
+    const doc = await createRiskRegisterFromClient(
+      req.params.clientId,
+      req.body.ctrlEff,
+      req.user
+    );
     return ok(res, doc, 201);
   } catch (e) {
-    return err(res, e.message, 500);
+    return err(res, e.message, e.statusCode || 500);
   }
 };
 

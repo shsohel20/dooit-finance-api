@@ -1,0 +1,660 @@
+{
+  "info": {
+    "name": "Dooit — EWRA",
+    "description": "Enterprise-Wide Risk Assessment API — all routes for assessments, factors, scenarios, controls, workflow, exports, and dashboard.\n\nVariables required:\n  baseUrl  → https://dev-api.dooit.ai/api/v1  (or http://localhost:5000/api/v1)\n  token    → Bearer JWT from /auth/login\n  ewraId   → ObjectId of an EwraAssessment\n  factorId → ObjectId of an EwraRiskFactor\n  scenarioId → ObjectId of an EwraRiskScenario\n  controlAssessId → ObjectId of an EwraControlAssessment\n  entityId → ObjectId of an EntityProfile (for dashboard)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl",         "value": "http://localhost:5000/api/v1" },
+    { "key": "token",           "value": "PASTE_JWT_HERE" },
+    { "key": "ewraId",          "value": "" },
+    { "key": "factorId",        "value": "" },
+    { "key": "scenarioId",      "value": "" },
+    { "key": "controlAssessId", "value": "" },
+    { "key": "entityId",        "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+
+    {
+      "name": "Assessments",
+      "item": [
+
+        {
+          "name": "List assessments",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/ewra?page=1&limit=20&status=Draft",
+              "host": ["{{baseUrl}}"],
+              "path": ["ewra"],
+              "query": [
+                { "key": "page",   "value": "1" },
+                { "key": "limit",  "value": "20" },
+                { "key": "status", "value": "Draft", "description": "Draft | In Review | Approved | Archived" }
+              ]
+            }
+          }
+        },
+
+        {
+          "name": "Create assessment",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('ewraId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assessmentName\": \"FY2026 EWRA — Lawyers & Conveyancers\",\n  \"entityProfile\": \"ENTITY_PROFILE_ID\",\n  \"assessmentType\": \"EWRA\",\n  \"riskTypes\": [\"ML\", \"TF\"],\n  \"periodStart\": \"2026-01-01\",\n  \"periodEnd\": \"2026-12-31\",\n  \"version\": \"1.0\",\n  \"ewraAnswers\": {}\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Get assessment",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}"
+          }
+        },
+
+        {
+          "name": "Update assessment",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assessmentName\": \"FY2026 EWRA — Updated Name\",\n  \"reviewNotes\": \"Updated by CO after board feedback\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Delete assessment",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Risk Factors",
+      "item": [
+
+        {
+          "name": "Get factors",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors"
+          }
+        },
+
+        {
+          "name": "Add factor",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('factorId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"factorId\": \"EW_C_001\",\n  \"factorName\": \"Customer Type\",\n  \"category\": \"Customer\",\n  \"description\": \"Risk from high-risk customer types served by the entity\",\n  \"weight\": 20,\n  \"likelihood\": 3,\n  \"impact\": 3,\n  \"controlEffectiveness\": 3,\n  \"rationale\": \"Mix of individual and corporate clients; moderate PEP exposure\",\n  \"keyIndicators\": \"PEP count, corporate complexity ratio\",\n  \"status\": \"In Progress\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Update factor (scores + rationale)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors/{{factorId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"likelihood\": 4,\n  \"impact\": 3,\n  \"controlEffectiveness\": 3,\n  \"rationale\": \"High PEP exposure noted in Q1 onboarding review\",\n  \"status\": \"Complete\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Delete factor",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors/{{factorId}}"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Risk Scenarios (Register)",
+      "item": [
+
+        {
+          "name": "Get scenarios",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/scenarios"
+          }
+        },
+
+        {
+          "name": "Add scenario (manual)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('scenarioId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/scenarios",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"riskSection\": \"S1\",\n  \"risk_name\": \"High-risk individual client — complex structure\",\n  \"description\": \"Individual clients with complex ownership structures or third-party representation present elevated ML risk\",\n  \"riskType\": \"Customer Type Risks\",\n  \"category\": \"Customer\",\n  \"ch\": \"F,D,T\",\n  \"likelihood\": 3,\n  \"consequence\": 4,\n  \"existingControls\": \"CTRL_CDD_001, CTRL_CDD_004\",\n  \"controlIds\": [\"CTRL_CDD_001\", \"CTRL_CDD_004\"],\n  \"ctrlEff\": 3,\n  \"entities\": [\"Lawyers/Conveyancers\"],\n  \"actionRequired\": true\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Update scenario (CO-adjust scores)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/scenarios/{{scenarioId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"likelihood\": 4,\n  \"consequence\": 4,\n  \"ctrlEff\": 2,\n  \"existingControls\": \"CTRL_CDD_001, CTRL_CDD_018\",\n  \"controlIds\": [\"CTRL_CDD_001\", \"CTRL_CDD_018\"],\n  \"actionRequired\": true,\n  \"notes\": \"Elevated following Q2 file review findings\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Delete scenario",
+          "request": {
+            "method": "DELETE",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/scenarios/{{scenarioId}}"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Register Sections",
+      "item": [
+
+        {
+          "name": "Add section",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/sections",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"label\": \"NPO & Charity Exposure\",\n  \"category\": \"Customer\",\n  \"basis\": \"Custom section added per board directive June 2026\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Delete section",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{baseUrl}}/ewra/{{ewraId}}/sections/S9",
+              "host": ["{{baseUrl}}"],
+              "path": ["ewra", "{{ewraId}}", "sections", "S9"]
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Control Assessments",
+      "item": [
+
+        {
+          "name": "Get control assessments",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls"
+          }
+        },
+
+        {
+          "name": "Add controls from library",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls/add-from-library",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": \"CDD\",\n  \"controlIds\": [\"CTRL_CDD_001\", \"CTRL_CDD_004\", \"CTRL_CDD_006\"]\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Add controls from library — full domain",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls/add-from-library",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": \"GOV\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Update control assessment (rate design + performance)",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('controlAssessId', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls/{{controlAssessId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"designRating\": 4,\n  \"performanceRating\": 3,\n  \"evidenceNotes\": \"KYC procedures reviewed — design adequate, minor gaps in re-verification cycle\",\n  \"gaps\": \"Periodic review not completed for 12% of Medium-risk clients\",\n  \"actionRequired\": true,\n  \"controlOwner\": \"Head of Compliance\",\n  \"status\": \"Complete\"\n}"
+            }
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Workflow",
+      "item": [
+
+        {
+          "name": "Calculate (score all factors)",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/calculate"
+          }
+        },
+
+        {
+          "name": "Submit for review",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/submit"
+          }
+        },
+
+        {
+          "name": "Approve",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/approve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewNotes\": \"Approved by Board — 19 Jun 2026. All factors reviewed and validated.\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Get results",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/results"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Amendment",
+      "item": [
+
+        {
+          "name": "Create amendment (trigger event)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/amend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amendmentType\": \"trigger_update\",\n  \"triggerReason\": \"AML/CTF Amendment Act 2024 — Tranche 2 commencement 1 Jul 2026 requires full EWRA update for newly designated services\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Create amendment (annual review)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/amend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amendmentType\": \"annual_review\",\n  \"triggerReason\": \"Scheduled annual review — FY2027\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "Get amendment diff",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/amend-diff"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Exports",
+      "item": [
+
+        {
+          "name": "Export — Risk Register (all assessments)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/risk-register/export",
+            "description": "Downloads consolidated risk register Excel across all approved assessments."
+          }
+        },
+
+        {
+          "name": "Export — Assessment risk-register (per EWRA)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/risk-register/export",
+            "description": "Downloads the scenario-level risk register for a single assessment as Excel."
+          }
+        },
+
+        {
+          "name": "Export — Assessment risk report",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/risk-report/export",
+            "description": "Downloads the full EWRA risk report (factor scores, category scores, residual ratings) as Excel."
+          }
+        },
+
+        {
+          "name": "Export — Consolidated workbook",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/consolidated/export",
+            "description": "Downloads the 5-sheet consolidated workbook: Overview + Factors + Risk Register + Controls + Matrix."
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "EWRA Dashboard",
+      "item": [
+
+        {
+          "name": "Risk summary",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/risk-summary"
+          }
+        },
+
+        {
+          "name": "Compliance health",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/compliance-health"
+          }
+        },
+
+        {
+          "name": "Control effectiveness",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/control-effectiveness"
+          }
+        },
+
+        {
+          "name": "Regulatory deadlines",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/regulatory-deadlines"
+          }
+        },
+
+        {
+          "name": "Top risks",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/top-risks"
+          }
+        },
+
+        {
+          "name": "Issues",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/issues"
+          }
+        },
+
+        {
+          "name": "Testing status",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/testing-status"
+          }
+        },
+
+        {
+          "name": "Audit readiness",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/audit-readiness"
+          }
+        },
+
+        {
+          "name": "Heatmap",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/heatmap"
+          }
+        },
+
+        {
+          "name": "KRI metrics",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra-dashboard/{{entityId}}/kri-metrics"
+          }
+        }
+
+      ]
+    },
+
+    {
+      "name": "Full Workflow (ordered)",
+      "description": "Run these requests top-to-bottom to walk through a complete EWRA lifecycle: create → score factors → calculate → submit → approve → amend.",
+      "item": [
+
+        {
+          "name": "1 — Create assessment",
+          "event": [{
+            "listen": "test",
+            "script": {
+              "exec": [
+                "const id = pm.response.json()?.data?._id;",
+                "if (id) pm.collectionVariables.set('ewraId', id);",
+                "console.log('ewraId set to', id);"
+              ]
+            }
+          }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"assessmentName\": \"FY2026 EWRA — Workflow Test\",\n  \"entityProfile\": \"ENTITY_PROFILE_ID\",\n  \"assessmentType\": \"EWRA\",\n  \"riskTypes\": [\"ML\", \"TF\"],\n  \"periodStart\": \"2026-01-01\",\n  \"periodEnd\": \"2026-12-31\",\n  \"version\": \"1.0\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "2 — Get factors (auto-seeded)",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors"
+          }
+        },
+
+        {
+          "name": "3 — Score a factor (update EW_C_001)",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/factors/{{factorId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"likelihood\": 3,\n  \"impact\": 4,\n  \"controlEffectiveness\": 3,\n  \"rationale\": \"Client base includes 15% foreign nationals and 3 PEPs\",\n  \"status\": \"Complete\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "4 — Add controls from CDD domain",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls/add-from-library",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"domain\": \"CDD\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "5 — Rate a control",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/controls/{{controlAssessId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"designRating\": 4,\n  \"performanceRating\": 3,\n  \"evidenceNotes\": \"KYC procedure documented and tested\",\n  \"status\": \"Complete\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "6 — Calculate",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/calculate"
+          }
+        },
+
+        {
+          "name": "7 — Get results",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/results"
+          }
+        },
+
+        {
+          "name": "8 — Submit for review",
+          "request": {
+            "method": "POST",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/submit"
+          }
+        },
+
+        {
+          "name": "9 — Approve",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/approve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reviewNotes\": \"Board approved at 19 Jun 2026 meeting\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "10 — Create amendment (trigger event)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/amend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amendmentType\": \"trigger_update\",\n  \"triggerReason\": \"Tranche 2 commencement — new designated services added\"\n}"
+            }
+          }
+        },
+
+        {
+          "name": "11 — Export consolidated workbook",
+          "request": {
+            "method": "GET",
+            "url": "{{baseUrl}}/ewra/{{ewraId}}/consolidated/export"
+          }
+        }
+
+      ]
+    }
+
+  ]
+}

@@ -74,6 +74,9 @@ const rgMapper = require("./rg-mapper");
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 const afcDocument = require("./afc-document");
 
+// ── Onboarding Step ───────────────────────────────────────────────────────────
+const onboardingStep = require("./onboardingStep");
+
 // ── Staff Onboarding ──────────────────────────────────────────────────────────
 const staff = require("./staff");
 
@@ -81,7 +84,8 @@ const staff = require("./staff");
 const ocr = require("./ocr");
 
 // ── GRC Notification Engine ───────────────────────────────────────────────────
-const appNotification = require("./app-notification");
+const appNotification  = require("./app-notification");
+const monitoringRule   = require("./monitoringRule");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -162,6 +166,9 @@ router.use("/rg-mapper",          rgMapper);
 // ── AFC Documents ─────────────────────────────────────────────────────────────
 router.use("/afc-documents",      afcDocument);
 
+// ── Onboarding Step ───────────────────────────────────────────────────────────
+router.use("/onboarding-step",    onboardingStep);
+
 // ── Staff Onboarding ──────────────────────────────────────────────────────────
 router.use("/staff",              staff);
 
@@ -170,5 +177,6 @@ router.use("/ocr",                ocr);
 
 // ── GRC Notification Engine ───────────────────────────────────────────────────
 router.use("/app-notifications",  appNotification);
+router.use("/monitoring-rule",    monitoringRule);
 
 module.exports = router;

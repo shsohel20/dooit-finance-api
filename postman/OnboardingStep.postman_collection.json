@@ -1,0 +1,491 @@
+{
+  "info": {
+    "name": "Onboarding Step",
+    "description": "Client & Branch onboarding step management — init, upsert, status update, remove step, delete record.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "clientId",
+      "value": "",
+      "type": "string",
+      "description": "Client ObjectId — paste here or auto-set by Init (Client)"
+    },
+    {
+      "key": "branchId",
+      "value": "",
+      "type": "string",
+      "description": "Branch ObjectId — paste here or auto-set by Init (Branch)"
+    },
+    {
+      "key": "onboardingId",
+      "value": "",
+      "type": "string",
+      "description": "OnboardingStep document _id — auto-set by Init requests"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Get Onboarding Record",
+      "item": [
+        {
+          "name": "Get by Client (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step?client={{clientId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step"],
+              "query": [
+                {
+                  "key": "client",
+                  "value": "{{clientId}}",
+                  "description": "Client ObjectId (admin override)"
+                },
+                {
+                  "key": "branch",
+                  "value": "{{branchId}}",
+                  "disabled": true,
+                  "description": "Branch ObjectId — disable client & enable this for branch lookup"
+                }
+              ]
+            },
+            "description": "Admin: pass ?client= or ?branch= to look up any record.\nClient/Branch user: query params are optional — record is resolved from the JWT session automatically."
+          },
+          "response": []
+        },
+        {
+          "name": "Get by Branch (admin)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step?branch={{branchId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step"],
+              "query": [
+                {
+                  "key": "branch",
+                  "value": "{{branchId}}",
+                  "description": "Branch ObjectId"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get from Session (client/branch user)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step"]
+            },
+            "description": "No query params needed — client/branch ID is resolved automatically from the logged-in user's JWT session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Initialize Onboarding",
+      "item": [
+        {
+          "name": "Init — Client (empty)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('onboardingId', res.data._id);",
+                  "  console.log('onboardingId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/init",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "init"]
+            },
+            "description": "Creates an onboarding record with an empty steps array. Returns 200 + existing record if already initialized."
+          },
+          "response": []
+        },
+        {
+          "name": "Init — Client (with steps)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('onboardingId', res.data._id);",
+                  "  console.log('onboardingId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"steps\": [\n    { \"step\": \"kyc\",                  \"order\": 1, \"status\": \"pending\", \"required\": true  },\n    { \"step\": \"document_upload\",       \"order\": 2, \"status\": \"pending\", \"required\": true  },\n    { \"step\": \"risk_assessment\",       \"order\": 3, \"status\": \"pending\", \"required\": true  },\n    { \"step\": \"sanctions_check\",       \"order\": 4, \"status\": \"pending\", \"required\": true  },\n    { \"step\": \"pep_check\",             \"order\": 5, \"status\": \"pending\", \"required\": true  },\n    { \"step\": \"beneficial_ownership\",  \"order\": 6, \"status\": \"pending\", \"required\": false },\n    { \"step\": \"ecdd\",                  \"order\": 7, \"status\": \"pending\", \"required\": false },\n    { \"step\": \"account_activation\",    \"order\": 8, \"status\": \"pending\", \"required\": true  }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/init",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "init"]
+            },
+            "description": "Initializes onboarding with a full pre-seeded step list. Idempotent — returns existing if already initialized."
+          },
+          "response": []
+        },
+        {
+          "name": "Init — Branch",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('onboardingId', res.data._id);",
+                  "  console.log('onboardingId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"branch\": \"{{branchId}}\",\n  \"steps\": [\n    { \"step\": \"branch_registration\", \"order\": 1, \"status\": \"pending\", \"required\": true },\n    { \"step\": \"document_upload\",      \"order\": 2, \"status\": \"pending\", \"required\": true },\n    { \"step\": \"risk_assessment\",      \"order\": 3, \"status\": \"pending\", \"required\": true },\n    { \"step\": \"account_activation\",   \"order\": 4, \"status\": \"pending\", \"required\": true }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/init",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "init"]
+            },
+            "description": "Creates an onboarding record scoped to a branch."
+          },
+          "response": []
+        },
+        {
+          "name": "Init — from Session (client/branch user)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('onboardingId', res.data._id);",
+                  "  console.log('onboardingId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/init",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "init"]
+            },
+            "description": "No client/branch in body — resolved from the logged-in user's JWT session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Upsert Step",
+      "item": [
+        {
+          "name": "Add New Step",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"step\": \"kyc\",\n  \"order\": 1,\n  \"status\": \"pending\",\n  \"required\": true,\n  \"dueDate\": \"2026-07-01T00:00:00.000Z\",\n  \"notes\": \"Customer identification procedure required.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"]
+            },
+            "description": "Pushes a new step at the given order. If the record does not exist, it is created (upsert). If a step with this order already exists, it is replaced."
+          },
+          "response": []
+        },
+        {
+          "name": "Update Existing Step",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"step\": \"kyc\",\n  \"order\": 1,\n  \"status\": \"in_progress\",\n  \"required\": true,\n  \"notes\": \"Documents under review.\",\n  \"data\": {\n    \"sumsubApplicantId\": \"abc123\",\n    \"reviewStatus\": \"pending\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"]
+            },
+            "description": "Matches by order number and overwrites the step data. The data field can hold any step-specific payload (doc IDs, scores, etc.)."
+          },
+          "response": []
+        },
+        {
+          "name": "Upsert Step — from Session",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"step\": \"document_upload\",\n  \"order\": 2,\n  \"status\": \"pending\",\n  \"required\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"]
+            },
+            "description": "No client/branch in body — resolved from the JWT session of a logged-in client or branch user."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Update Step Status",
+      "item": [
+        {
+          "name": "Mark Step In Progress",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"order\": 1,\n  \"status\": \"in_progress\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step-status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step-status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Step Completed",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"order\": 1,\n  \"status\": \"completed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step-status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step-status"]
+            },
+            "description": "When status is 'completed', completedAt and completedBy are set automatically from the server time and the logged-in user's ID."
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Step Skipped",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"order\": 6,\n  \"status\": \"skipped\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step-status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step-status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Step Failed",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client\": \"{{clientId}}\",\n  \"order\": 4,\n  \"status\": \"failed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step-status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step-status"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Step Status — from Session",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order\": 2,\n  \"status\": \"completed\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step-status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step-status"]
+            },
+            "description": "Client/branch user — no client or branch field needed."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Remove Step",
+      "item": [
+        {
+          "name": "Remove Step by Order — Client (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step?client={{clientId}}&order=6",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"],
+              "query": [
+                { "key": "client", "value": "{{clientId}}", "description": "Client ObjectId" },
+                { "key": "order",  "value": "6",            "description": "Step order number to remove" }
+              ]
+            },
+            "description": "Pulls the step at the given order number from the steps array."
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Step by Order — Branch (admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step?branch={{branchId}}&order=3",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"],
+              "query": [
+                { "key": "branch", "value": "{{branchId}}", "description": "Branch ObjectId" },
+                { "key": "order",  "value": "3",            "description": "Step order number to remove" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Remove Step — from Session",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/step?order=2",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "step"],
+              "query": [
+                { "key": "order", "value": "2", "description": "Step order number to remove" }
+              ]
+            },
+            "description": "Client/branch user — entity resolved from session, only order is required."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Delete Onboarding Record",
+      "item": [
+        {
+          "name": "Delete Onboarding Record",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/onboarding-step/{{onboardingId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "onboarding-step", "{{onboardingId}}"]
+            },
+            "description": "Hard deletes the entire onboarding record (all steps). Use with caution."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
