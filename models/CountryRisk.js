@@ -2,19 +2,18 @@ const mongoose = require("mongoose");
 const mongoosePaginate = require("mongoose-paginate-v2");
 
 const CountryRiskSchema = new mongoose.Schema({
-  // ── Original fields (unchanged) ───────────────────────────────────────────
+  // ── Legacy fields (kept for backward compat, not required) ───────────────
   country: {
     type: String,
-    required: true,
     unique: true,
+    sparse: true,
     lowercase: true,
     trim: true,
   },
 
   band: {
     type: String,
-    enum: ["LRC", "MRC", "HRC", "UHRC"],
-    required: true,
+    enum: ["LRC", "MRC", "HRC", "UHRC", ""],
     index: true,
   },
 
@@ -77,5 +76,12 @@ const CountryRiskSchema = new mongoose.Schema({
 
 CountryRiskSchema.index({ riskTier: 1, countryName: 1 });
 CountryRiskSchema.plugin(mongoosePaginate);
+
+// Keep band ↔ riskTier in sync so legacy and new fields never diverge
+CountryRiskSchema.pre("save", function (next) {
+  if (this.riskTier && !this.band) this.band     = this.riskTier;
+  if (this.band     && !this.riskTier) this.riskTier = this.band;
+  next();
+});
 
 module.exports = mongoose.model("CountryRisk", CountryRiskSchema);

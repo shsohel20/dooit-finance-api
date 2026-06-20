@@ -6,7 +6,7 @@
  * Safe to re-run — uses upsert; existing records are not overwritten.
  */
 
-require("dotenv").config({ path: require("path").join(__dirname, "../../config/config.env") });
+require("dotenv").config({ path: require("path").resolve(__dirname, "../config/config.env") });
 const mongoose = require("mongoose");
 const EntityConfig = require("../models/EntityConfig");
 const { ENTITY_CONFIG_SEED } = require("../data/riskPoolSeed");

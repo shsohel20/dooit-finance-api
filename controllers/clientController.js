@@ -467,6 +467,64 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
   }
 });
 
+// ── Client ↔ Risk-Question field mapping ─────────────────────────────────────
+// Maps a riskQuestions question key to the dot-path on the Client document.
+// Priority for value resolution: riskQuestion answer → client profile field → type default.
+const CLIENT_FIELD_MAP = {
+  entity_type: "clientType",
+  abn: "registrationNumber",
+  co_name: "legalRepresentative.name",
+  co_email: "legalRepresentative.email",
+  co_phone: "legalRepresentative.phone",
+};
+
+// Safely traverse a dot-path on any plain object; returns undefined when missing.
+function getNestedValue(obj, dotPath) {
+  if (!obj || !dotPath) return undefined;
+  return dotPath.split(".").reduce(
+    (acc, key) => (acc != null && typeof acc === "object" ? acc[key] : undefined),
+    obj
+  );
+}
+
+// Return a type-appropriate empty/default value for a field definition.
+function getTypeDefault(field) {
+  if (field.default !== undefined) return field.default;
+  switch (field.type) {
+    case "multi-select": return [];
+    case "rating": return field.min ?? 1;
+    case "number": return null;
+    case "date": return null;
+    case "yes-no":
+    case "single-select": return "";
+    case "text":
+    case "email":
+    default: return "";
+  }
+}
+
+// Resolve a field's display value using the priority chain:
+//   1. Existing riskQuestions answer
+//   2. Mapped client profile field
+//   3. Type-appropriate default
+function resolveFieldValue(field, riskAnswers, client) {
+  const saved = getNestedValue(riskAnswers, field.key);
+  const savedHasValue = saved !== undefined && saved !== null &&
+    (Array.isArray(saved) ? saved.length > 0 : saved !== "");
+  if (savedHasValue) return saved;
+
+  const clientPath = CLIENT_FIELD_MAP[field.key];
+  if (client && clientPath) {
+    const clientObj = typeof client.toObject === "function" ? client.toObject() : client;
+    const clientVal = getNestedValue(clientObj, clientPath);
+    const clientHasValue = clientVal !== undefined && clientVal !== null &&
+      (Array.isArray(clientVal) ? clientVal.length > 0 : clientVal !== "");
+    if (clientHasValue) return clientVal;
+  }
+
+  return getTypeDefault(field);
+}
+
 // ── Risk questions schema (static config — no DB call) ────────────────────────
 
 const RISK_QUESTIONS_SCHEMA = [
@@ -484,20 +542,20 @@ const RISK_QUESTIONS_SCHEMA = [
           "Remittance", "VASP/DCEP", "Gambling/Casino", "Insurance",
         ],
       },
-      { key: "abn",           label: "ABN",             type: "text",  placeholder: "XX XXX XXX XXX" },
-      { key: "assessDate",        label: "Assessment Date",         type: "date" },
-      { key: "documentDate",      label: "Document Date",           type: "text", placeholder: "e.g. 15 June 2026" },
-      { key: "effectiveDate",     label: "Program Effective Date",  type: "text", placeholder: "e.g. 1 July 2026" },
+      { key: "abn", label: "ABN", type: "text", placeholder: "XX XXX XXX XXX" },
+      { key: "assessDate", label: "Assessment Date", type: "date" },
+      { key: "documentDate", label: "Document Date", type: "text", placeholder: "e.g. 15 June 2026" },
+      { key: "effectiveDate", label: "Program Effective Date", type: "text", placeholder: "e.g. 1 July 2026" },
       { key: "austracEnrolmentRef", label: "AUSTRAC Enrolment Reference", type: "text", placeholder: "e.g. ENR-20260001" },
       {
         key: "austrac_enrolled", label: "AUSTRAC Enrolment Status", type: "single-select",
         options: ["Enrolled and current", "Enrolment in progress", "Not yet enrolled", "Exempt"],
       },
-      { key: "co_name",  label: "Compliance Officer — Name",  type: "text",  required: true, placeholder: "Full name" },
+      { key: "co_name", label: "Compliance Officer — Name", type: "text", required: true, placeholder: "Full name" },
       { key: "co_email", label: "Compliance Officer — Email", type: "email", placeholder: "co@firm.com.au" },
-      { key: "co_phone", label: "Compliance Officer — Phone", type: "text",  placeholder: "+61 4xx xxx xxx" },
-      { key: "sm_name",  label: "Senior Manager — Name",      type: "text",  placeholder: "Full name" },
-      { key: "sm_email", label: "Senior Manager — Email",     type: "email", placeholder: "sm@firm.com.au" },
+      { key: "co_phone", label: "Compliance Officer — Phone", type: "text", placeholder: "+61 4xx xxx xxx" },
+      { key: "sm_name", label: "Senior Manager — Name", type: "text", placeholder: "Full name" },
+      { key: "sm_email", label: "Senior Manager — Email", type: "email", placeholder: "sm@firm.com.au" },
     ],
   },
   {
@@ -729,27 +787,92 @@ const RISK_QUESTIONS_SCHEMA = [
   },
 ];
 
+// ── Validate CLIENT_FIELD_MAP against Client schema at startup ────────────────
+; (function _validateClientFieldMap() {
+  const missing = [];
+  Object.entries(CLIENT_FIELD_MAP).forEach(([qKey, clientPath]) => {
+    try {
+      if (!Client.schema.path(clientPath)) {
+        missing.push(`"${qKey}" → "${clientPath}"`);
+      }
+    } catch (_) {
+      missing.push(`"${qKey}" → "${clientPath}" (validation error)`);
+    }
+  });
+  if (missing.length) {
+    console.warn("[CLIENT_FIELD_MAP] Paths not found in Client schema:", missing);
+  }
+})();
+
 /**
- * Return the risk questionnaire schema (sections + fields + options).
- * Fully static — no DB call. Used by UI to data-bind dynamic question forms.
+ * Return the risk questionnaire schema with resolved field values.
+ *
+ * Without ?clientId  → sections + type-appropriate defaults for every field.
+ * With    ?clientId  → each field value is resolved via priority chain:
+ *                       1. Existing riskQuestions answer
+ *                       2. Mapped client profile field (CLIENT_FIELD_MAP)
+ *                       3. Type-appropriate default
+ *
+ * Each field in the response includes:
+ *   value        – resolved value (always present)
+ *   default      – type-appropriate fallback
+ *   clientMapped – true when the field syncs to a client profile property
+ *   clientPath   – the client document path (only when clientMapped is true)
+ *
  * @route  GET /api/v1/clients/risk-questions/schema
+ * @route  GET /api/v1/clients/risk-questions/schema?clientId=<id>
  */
-exports.getRiskQuestionsSchema = asyncHandler(async (req, res) => {
+exports.getRiskQuestionsSchema = asyncHandler(async (req, res, next) => {
+  // Use the pre-populated client from the auth middleware (no extra DB round-trip).
+  // Admins who have no linked client can still pass ?clientId=<id> explicitly.
+  let client = req?.user?.client ?? null;
+
+  if (!client && req.query.clientId) {
+    client = await Client.findById(req.query.clientId);
+    if (!client) {
+      return next(new ErrorResponse(`Client not found with id of ${req.query.clientId}`, 404));
+    }
+  }
+
+  const riskAnswers = client ? client.riskQuestions : {};
+  const mappedKeys = new Set(Object.keys(CLIENT_FIELD_MAP));
+
+  const enrichedSections = RISK_QUESTIONS_SCHEMA.map(section => ({
+    ...section,
+    fields: section.fields.map(field => {
+      const clientMapped = mappedKeys.has(field.key);
+      return {
+        ...field,
+        default: getTypeDefault(field),
+        value: resolveFieldValue(field, riskAnswers, client),
+        clientMapped,
+        ...(clientMapped ? { clientPath: CLIENT_FIELD_MAP[field.key] } : {}),
+      };
+    }),
+  }));
+
   const flat = RISK_QUESTIONS_SCHEMA.flatMap(s => s.fields).map(f => f.key);
+
   res.status(200).json({
     success: true,
     data: {
-      sections: RISK_QUESTIONS_SCHEMA,
+      sections: enrichedSections,
       fieldKeys: flat,
       totalFields: flat.length,
+      ...(client ? { clientId: client._id } : {}),
     },
   });
 });
 
 /**
  * Upsert / merge riskQuestions on a client.
- * Merges the incoming questions object into the existing riskQuestions,
- * so partial updates only overwrite the supplied keys.
+ * Merges the incoming questions object into the existing riskQuestions so
+ * partial updates only overwrite the supplied keys.
+ *
+ * Bidirectional sync: any answer whose key appears in CLIENT_FIELD_MAP is
+ * written back to the corresponding client profile field so both sources
+ * stay consistent (e.g. co_name → legalRepresentative.name).
+ *
  * @route  PUT /api/v1/clients/:id/risk-questions
  */
 exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
@@ -759,6 +882,14 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain a 'questions' object", 400));
   }
 
+  // Client-role users may only update their own risk questions
+  // if ((req.user?.role ?? "").toLowerCase() === "client") {
+  //   const userClientId = req?.user?.client?._id?.toString();
+  //   if (!userClientId || userClientId !== req.params.id) {
+  //     return next(new ErrorResponse("Not authorized to update this client's risk questions", 403));
+  //   }
+  // }
+
   const client = await Client.findById(req.params.id);
   if (!client) {
     return next(new ErrorResponse(`Client not found with id of ${req.params.id}`, 404));
@@ -766,9 +897,34 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
 
   // Merge individual keys so a partial update only overwrites supplied fields
   Object.assign(client.riskQuestions, questions);
+
+  // ── Bidirectional sync: write mapped answers back to client profile ──────
+  const syncedKeys = [];
+  Object.entries(CLIENT_FIELD_MAP).forEach(([qKey, clientPath]) => {
+    if (questions[qKey] === undefined) return;
+    const parts = clientPath.split(".");
+    if (parts.length === 1) {
+      client[parts[0]] = questions[qKey];
+    } else {
+      // Ensure the parent object exists before setting a nested property
+      if (!client[parts[0]] || typeof client[parts[0]] !== "object") {
+        client[parts[0]] = {};
+      }
+      client[parts[0]][parts[1]] = questions[qKey];
+      client.markModified(parts[0]);
+    }
+    syncedKeys.push(qKey);
+  });
+
   await client.save();
 
-  res.status(200).json({ success: true, data: { riskQuestions: client.riskQuestions } });
+  res.status(200).json({
+    success: true,
+    data: {
+      riskQuestions: client.riskQuestions,
+      ...(syncedKeys.length ? { syncedClientFields: syncedKeys } : {}),
+    },
+  });
 
   runInBackground(`riskRegister:createFromClient:${client._id}`, async () => {
     await createRiskRegisterFromClient(client._id, {}, req.user);

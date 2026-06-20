@@ -1,4 +1,4 @@
-require("dotenv").config({ path: require("path").join(__dirname, "../.env") });
+require("dotenv").config({ path: require("path").resolve(__dirname, "../config/config.env") });
 const mongoose = require("mongoose");
 const questions = require("../../seed/onboarding_questions.json");
 

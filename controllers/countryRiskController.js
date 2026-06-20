@@ -6,7 +6,7 @@ const ErrorResponse = require("../utils/errorResponse");
 exports.getCountries = asyncHandler(async (req, res) => {
   const { riskTier, region, search, page = 1, limit = 100 } = req.query;
   const filter = { active: true };
-  if (riskTier) filter.riskTier = riskTier;
+  if (riskTier) filter.$or = [{ riskTier }, { band: riskTier }];
   if (region) filter.region = region;
   if (search) {
     filter.$or = [

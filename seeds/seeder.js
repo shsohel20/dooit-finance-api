@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const colors = require("colors");
 const dotenv = require("dotenv");
 // Load env vars
-dotenv.config({ path: "../config/config.env" });
+dotenv.config({ path: "./config/config.env" });
 
 const User = require("../models/User");
 const Role = require("../models/Role");

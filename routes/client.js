@@ -24,11 +24,11 @@ router.use(express.json({ limit: "100kb" }));
 
 router.route("/public/:id").get(getClient);
 
-// questionnaire schema — static, no auth needed
-router.route("/risk-questions/schema").get(getRiskQuestionsSchema);
-
 // protect all client routes; authorization is applied per-route below
 router.use(protect);
+
+// schema endpoint — protected; hydrates field values from req.user.client automatically
+router.route("/risk-questions/schema").get(getRiskQuestionsSchema);
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router
