@@ -876,7 +876,7 @@ exports.getRiskQuestionsSchema = asyncHandler(async (req, res, next) => {
  * @route  PUT /api/v1/client/:id/risk-questions
  */
 exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
-  const { questions } = req.body;
+  const questions = req.body;
 
   if (!questions || typeof questions !== "object" || Array.isArray(questions)) {
     return next(new ErrorResponse("Body must contain a 'questions' object", 400));
