@@ -44,14 +44,23 @@ async function generateDocument(payloadObj, templateConfig) {
   const response = await axios.get(templateConfig.fileVaultUrl, { responseType: "arraybuffer" });
   const buffer   = Buffer.from(response.data);
 
+  const renderData = buildRenderData(payloadObj, templateConfig.variableMap);
+
+  // Diagnose blank-doc issues: log mapping count and flag empty values
+  const emptyKeys = Object.entries(renderData).filter(([, v]) => v === "").map(([k]) => k);
+  console.log(`[docxTemplate] ${templateConfig.templateKey} — variableMap: ${templateConfig.variableMap.length} entries | renderData keys: ${Object.keys(renderData).length}`);
+  if (emptyKeys.length) console.warn(`[docxTemplate] Empty values for: ${emptyKeys.join(", ")}`);
+  if (!templateConfig.variableMap.length) console.warn(`[docxTemplate] variableMap is EMPTY — no placeholders will be filled`);
+
   const zip = new PizZip(buffer);
   const doc = new Docxtemplater(zip, {
     delimiters:    { start: "[", end: "]" },
     paragraphLoop: true,
     linebreaks:    true,
+    nullGetter:    () => "",
   });
 
-  doc.render(buildRenderData(payloadObj, templateConfig.variableMap));
+  doc.render(renderData);
   return doc.getZip().generate({ type: "nodebuffer" });
 }
 

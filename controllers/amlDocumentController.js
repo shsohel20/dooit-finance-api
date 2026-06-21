@@ -8,35 +8,15 @@ const EntityType            = require("../models/EntityType");
 const PolicyHubTemplate     = require("../models/PolicyHubTemplate");
 const { generateDocument }  = require("../utils/docxTemplateService");
 const fileVaultService      = require("../utils/fileVaultService");
-const { resolveEntityType } = require("./riskRegisterController");
+const { resolveEntityType } = require("../utils/entityTypeResolver");
+const { buildRenderPayload, fetchLatestRiskRegister } = require("../utils/amlDocGenService");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const DS_FIELDS = [
-  "ds_high_value_unfinanced", "ds_high_currency", "ds_intl_transfers",
-  "ds_anonymous_clients",     "ds_virtual_assets", "ds_complex_structures",
-  "ds_unusual_services",
-];
-
-function buildRenderPayload(client) {
-  const rq = client.riskQuestions || {};
-  const hasDesignatedServices = DS_FIELDS.some(k => rq[k] && rq[k] !== "No");
-
-  return {
-    firmName:                   client.name,
-    abn:                        rq.abn                    || client.registrationNumber || "",
-    acn:                        client.taxId              || "",
-    state:                      client.address?.state     || "",
-    complianceOfficerName:      rq.co_name                || client.legalRepresentative?.name || "",
-    complianceOfficerNameTitle: rq.co_name                || "",
-    austracEnrolmentRef:        rq.austracEnrolmentRef    || "",
-    effectiveDate:              rq.effectiveDate          || "",
-    documentDate:               rq.documentDate           || "",
-    hasDesignatedServices,
-    designatedServicesText:     rq.designatedServicesText || "",
-    agencyLicenseNumber:        rq.abn                    || client.registrationNumber || "",
-    _entityTypeName:            rq.entity_type            || resolveEntityType(client.clientType),
-  };
+// Render payload comes from the canonical buildRenderPayload in amlDocGenService.
+// Entity-type name (used only for the eligibility check) is resolved separately.
+async function resolveEntityTypeName(client) {
+  return client.riskQuestions?.entity_type || await resolveEntityType(client.clientType);
 }
 
 function resolveClientId(req, source = "query") {
@@ -89,8 +69,9 @@ exports.generateDoc = asyncHandler(async (req, res, next) => {
   if (!client)         return next(new ErrorResponse("Client not found", 404));
   if (!templateConfig) return next(new ErrorResponse(`Template "${templateKey}" not found or inactive`, 404));
 
-  const payload        = buildRenderPayload(client);
-  const entityTypeName = payload._entityTypeName;
+  const riskRegister   = await fetchLatestRiskRegister(client);
+  const payload        = buildRenderPayload(client, riskRegister);
+  const entityTypeName = await resolveEntityTypeName(client);
 
   const eligible = templateConfig.eligibleTypes.some(et => et.name === entityTypeName);
   if (!eligible) {
@@ -113,15 +94,13 @@ exports.generateDoc = asyncHandler(async (req, res, next) => {
   const generatedFileVaultId = uploadResult?.file?.id  || uploadResult?.file?._id  || null;
   const generatedFileUrl     = uploadResult?.file?.publicUrl || null;
 
-  const { _entityTypeName, ...snapshotData } = payload;
-
   await PolicyHubTemplate.create({
     client:                clientId,
     sourceTemplateConfig:  templateConfig._id,
     name:                  `${templateConfig.label} — ${client.name}`,
     generatedFileVaultId,
     generatedFileUrl,
-    generatedSnapshotData: snapshotData,
+    generatedSnapshotData: payload,
     createdBy:             req.user?.id || null,
   });
 

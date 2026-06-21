@@ -26,95 +26,116 @@ const fileVaultService = require("../utils/fileVaultService");
 // entityTypePattern: regex matched against EntityType.name (case-insensitive)
 // variableMap: declarative placeholder → field mappings
 
+// Variables present in EVERY .docx template (extracted via docxtemplater nullGetter — the
+// authoritative source of truth). Re-run scripts/verifyAMLTemplates.js after editing any .docx.
 const COMMON_VARIABLES = [
-  { placeholder: "[FIRM NAME]",                        field: "firmName" },
-  { placeholder: "[INSERT DATE]",                      field: "documentDate" },
+  { placeholder: "[INSERT ABN]",                       field: "abn" },
+  { placeholder: "[INSERT ACN]",                       field: "acn" },
   { placeholder: "[INSERT EFFECTIVE DATE]",            field: "effectiveDate" },
   { placeholder: "[INSERT ENROLMENT DATE AND NUMBER]", field: "austracEnrolmentRef" },
   { placeholder: "[INSERT NAME]",                      field: "complianceOfficerName" },
   { placeholder: "[INSERT NAME AND TITLE]",            field: "complianceOfficerNameTitle" },
-  { placeholder: "[INSERT ABN]",                       field: "abn" },
-  { placeholder: "[INSERT ACN]",                       field: "acn" },
+  { placeholder: "[INSERT REVIEW DATE]",               field: "reviewDate" },
+  { placeholder: "[INSERT REIVEW DATE]",               field: "reviewDate" }, // typo in Banks/Lawyers/RealEstate docx — mapped so both spellings fill
+  { placeholder: "[INSERT — Board / Partners / Trustees / Committee]", field: "governanceBody" },
+  { placeholder: "[INSERT — Low / Medium / High, with brief rationale based on the EWRA findings]", field: "overallRiskRating" },
+  { placeholder: "[If applicable: insert Reporting Group name, Lead Entity details, and member details. Reporting Groups replaced Designated Business Groups (DBGs) from 31 March 2026. A Reporting Group may be formed by entities in a business group or by elective agreement between two or more reporting entities.]", field: "reportingGroupDetails" },
+  { placeholder: "[does not currently form / is a member of]", field: "designatedGroupStatus" },
   { placeholder: "[YES/NO]",                           field: "hasDesignatedServices", transform: "BOOL_YES_NO" },
 ];
 
 const TEMPLATES = [
   {
-    templateKey:        "AML_PROGRAM_LAW",
-    label:              "AML/CTF Compliance Program — Lawyers & Conveyancers",
-    docFile:            "AML_Program_v2_Lawyers_Conveyancers.docx",
-    entityTypePattern:  /lawyer|conveyancer/i,
-    variableMap: COMMON_VARIABLES,
-  },
-  {
-    templateKey:        "AML_PROGRAM_ACCOUNTING",
-    label:              "AML/CTF Compliance Program — Accounting Firms",
-    docFile:            "AML_Program_v2_Accountants.docx",
-    entityTypePattern:  /accountant/i,
+    templateKey:       "AML_PROGRAM_LAW",
+    label:             "AML/CTF Compliance Program — Lawyers & Conveyancers",
+    docFile:           "AML_Program_v2_Lawyers_Conveyancers.docx",
+    entityTypePattern: /lawyer|conveyancer/i,
     variableMap: [
+      { placeholder: "[FIRM NAME]", field: "firmName" },
       ...COMMON_VARIABLES,
-      { placeholder: "[DESIGNATED SERVICES]", field: "designatedServicesText" },
     ],
   },
   {
-    templateKey:        "AML_PROGRAM_REALESTATE",
-    label:              "AML/CTF Compliance Program — Real Estate Agencies",
-    docFile:            "AML_Program_v2_Real_Estate_Agents.docx",
-    entityTypePattern:  /real.?estate/i,
+    templateKey:       "AML_PROGRAM_ACCOUNTING",
+    label:             "AML/CTF Compliance Program — Accounting Firms",
+    docFile:           "AML_Program_v2_Accountants.docx",
+    entityTypePattern: /accountant/i,
     variableMap: [
-      { placeholder: "[FIRM NAME]",                        field: "firmName" },
-      { placeholder: "[AGENCY NAME]",                      field: "firmName" },
-      { placeholder: "[PRINCIPAL NAME]",                   field: "complianceOfficerName" },
-      { placeholder: "[INSERT DATE]",                      field: "documentDate" },
-      { placeholder: "[INSERT EFFECTIVE DATE]",            field: "effectiveDate" },
-      { placeholder: "[INSERT ENROLMENT DATE AND NUMBER]", field: "austracEnrolmentRef" },
-      { placeholder: "[INSERT ABN]",                       field: "abn" },
-      { placeholder: "[INSERT LICENSE NUMBER]",            field: "agencyLicenseNumber" },
-      { placeholder: "[INSERT STATE]",                     field: "state", transform: "UPPER" },
-      { placeholder: "[YES/NO]",                           field: "hasDesignatedServices", transform: "BOOL_YES_NO" },
+      { placeholder: "[FIRM NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
     ],
   },
   {
-    templateKey:        "AML_PROGRAM_JEWELLERS",
-    label:              "AML/CTF Compliance Program — Jewellers & Precious Metal Dealers",
-    docFile:            "AML_Program_v2_Jewellers.docx",
-    entityTypePattern:  /jewel|precious.?metal/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_REALESTATE",
+    label:             "AML/CTF Compliance Program — Real Estate Agencies",
+    docFile:           "AML_Program_v2_Real_Estate_Agents.docx",
+    entityTypePattern: /real.?estate/i,
+    variableMap: [
+      { placeholder: "[AGENCY NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
+    ],
   },
   {
-    templateKey:        "AML_PROGRAM_BANKS",
-    label:              "AML/CTF Compliance Program — Banks & ADIs",
-    docFile:            "AML_Program_v2_Banks_ADIs.docx",
-    entityTypePattern:  /bank|adi|credit.?union/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_JEWELLERS",
+    label:             "AML/CTF Compliance Program — Jewellers & Precious Metal Dealers",
+    docFile:           "AML_Program_v2_Jewellers.docx",
+    entityTypePattern: /jewel|precious.?metal/i,
+    variableMap: [
+      { placeholder: "[BUSINESS NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
+    ],
   },
   {
-    templateKey:        "AML_PROGRAM_GAMBLING",
-    label:              "AML/CTF Compliance Program — Gambling & Casino",
-    docFile:            "AML_Program_v2_Gambling.docx",
-    entityTypePattern:  /gambl|casino/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_BANKS",
+    label:             "AML/CTF Compliance Program — Banks & ADIs",
+    docFile:           "AML_Program_v2_Banks_ADIs.docx",
+    entityTypePattern: /bank|adi|credit.?union/i,
+    variableMap: [
+      { placeholder: "[BANK NAME]",        field: "firmName" },
+      { placeholder: "[INSERT THRESHOLD]", field: "thresholdAmount" },
+      ...COMMON_VARIABLES,
+    ],
   },
   {
-    templateKey:        "AML_PROGRAM_INSURANCE",
-    label:              "AML/CTF Compliance Program — Insurance",
-    docFile:            "AML_Program_v2_Insurance.docx",
-    entityTypePattern:  /insurance/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_GAMBLING",
+    label:             "AML/CTF Compliance Program — Gambling & Casino",
+    docFile:           "AML_Program_v2_Gambling.docx",
+    entityTypePattern: /gambl|casino/i,
+    variableMap: [
+      { placeholder: "[OPERATOR NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
+    ],
   },
   {
-    templateKey:        "AML_PROGRAM_VASP",
-    label:              "AML/CTF Compliance Program — VASPs & Digital Asset Exchanges",
-    docFile:            "AML_Program_v2_VASPs.docx",
-    entityTypePattern:  /vasp|crypto|digital.?asset|dcep/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_INSURANCE",
+    label:             "AML/CTF Compliance Program — Insurance",
+    docFile:           "AML_Program_v2_Insurance.docx",
+    entityTypePattern: /insurance/i,
+    variableMap: [
+      { placeholder: "[ENTITY NAME]",      field: "firmName" },
+      { placeholder: "[INSERT THRESHOLD]", field: "thresholdAmount" },
+      ...COMMON_VARIABLES,
+    ],
   },
   {
-    templateKey:        "AML_PROGRAM_REMITTANCE",
-    label:              "AML/CTF Compliance Program — Remittance & Money Transfer",
-    docFile:            "AML_Program_v2_Remittance.docx",
-    entityTypePattern:  /remittance|money.?transfer/i,
-    variableMap: COMMON_VARIABLES,
+    templateKey:       "AML_PROGRAM_VASP",
+    label:             "AML/CTF Compliance Program — VASPs & Digital Asset Exchanges",
+    docFile:           "AML_Program_v2_VASPs.docx",
+    entityTypePattern: /vasp|crypto|digital.?asset|dcep/i,
+    variableMap: [
+      { placeholder: "[ENTITY NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
+    ],
+  },
+  {
+    templateKey:       "AML_PROGRAM_REMITTANCE",
+    label:             "AML/CTF Compliance Program — Remittance & Money Transfer",
+    docFile:           "AML_Program_v2_Remittance.docx",
+    entityTypePattern: /remittance|money.?transfer/i,
+    variableMap: [
+      { placeholder: "[BUSINESS NAME]", field: "firmName" },
+      ...COMMON_VARIABLES,
+    ],
   },
 ];
 
@@ -239,7 +260,13 @@ async function seed() {
   process.exit(0);
 }
 
-seed().catch(err => {
-  console.error("❌ Seed failed:", err);
-  process.exit(1);
-});
+// Export template definitions so scripts/verifyAMLTemplates.js can validate them
+// against the actual .docx tags without triggering a DB seed.
+module.exports = { TEMPLATES, COMMON_VARIABLES, DOCS_DIR };
+
+if (require.main === module) {
+  seed().catch(err => {
+    console.error("❌ Seed failed:", err);
+    process.exit(1);
+  });
+}

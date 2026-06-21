@@ -873,7 +873,7 @@ exports.getRiskQuestionsSchema = asyncHandler(async (req, res, next) => {
  * written back to the corresponding client profile field so both sources
  * stay consistent (e.g. co_name → legalRepresentative.name).
  *
- * @route  PUT /api/v1/clients/:id/risk-questions
+ * @route  PUT /api/v1/client/:id/risk-questions
  */
 exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   const { questions } = req.body;

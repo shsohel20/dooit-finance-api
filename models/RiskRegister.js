@@ -61,16 +61,7 @@ const RiskRegisterSchema = new Schema(
   {
     // Entity identity
     entityName:   { type: String, required: true, trim: true },
-    entityType:   {
-      type: String,
-      required: true,
-      enum: [
-        "Lawyers/Conveyancers", "Accountants", "Real Estate Agents",
-        "Precious Metal Dealers", "TCSPs",
-        "Banks & ADIs", "Remittance", "VASP/DCEP",
-        "Gambling/Casino", "Insurance",
-      ],
-    },
+    entityType:   { type: String, required: true, trim: true },
     abn:          { type: String, trim: true },
     assessDate:   { type: Date, default: Date.now },
 

@@ -10,7 +10,8 @@ const EntityTypeSchema = new mongoose.Schema(
       enum: ["Tranche 1", "Tranche 2"],
     },
     description: { type: String, trim: true },
-    riskModelRef: { type: String, trim: true },                   // links to RiskModel.name
+    riskModelRef:   { type: String, trim: true },                   // links to RiskModel.name
+    matchKeywords:  [{ type: String, trim: true, lowercase: true }], // e.g. ["lawyer","conveyancer"]
     active: { type: Boolean, default: true },
     client: { type: mongoose.Schema.Types.ObjectId, ref: "Client", index: true },
   },

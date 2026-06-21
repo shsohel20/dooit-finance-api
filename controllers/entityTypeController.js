@@ -1,6 +1,7 @@
 const asyncHandler = require("../middleware/async");
 const EntityType = require("../models/EntityType");
 const ErrorResponse = require("../utils/errorResponse");
+const { invalidateCache } = require("../utils/entityTypeResolver");
 
 // @desc   Get all entity types
 // @route  GET /api/v1/entity-type
@@ -28,6 +29,7 @@ exports.getEntityType = asyncHandler(async (req, res, next) => {
 // @access Protected
 exports.createEntityType = asyncHandler(async (req, res) => {
   const type = await EntityType.create(req.body);
+  invalidateCache();
   res.status(201).json({ success: true, data: type });
 });
 
@@ -40,6 +42,7 @@ exports.updateEntityType = asyncHandler(async (req, res, next) => {
     runValidators: true,
   });
   if (!type) return next(new ErrorResponse("Entity type not found", 404));
+  invalidateCache();
   res.status(200).json({ success: true, data: type });
 });
 
@@ -49,5 +52,6 @@ exports.updateEntityType = asyncHandler(async (req, res, next) => {
 exports.deleteEntityType = asyncHandler(async (req, res, next) => {
   const type = await EntityType.findByIdAndDelete(req.params.id);
   if (!type) return next(new ErrorResponse("Entity type not found", 404));
+  invalidateCache();
   res.status(200).json({ success: true, data: {} });
 });

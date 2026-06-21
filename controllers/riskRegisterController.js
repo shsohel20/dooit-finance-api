@@ -6,6 +6,7 @@ const { buildRiskRegister, summarize } = require("../utils/riskRegisterEngine");
 const { inherentBand, residualBand, BAND_LABELS } = require("../utils/ewraRiskRegister");
 const { evaluateCondition, applyLMods }  = require("../utils/conditionEvaluator");
 const { RISK_POOL_SEED, ENTITY_CONFIG_SEED } = require("../data/riskPoolSeed");
+const { resolveEntityType } = require("../utils/entityTypeResolver");
 
 // ── CTRL_CATEGORY (factorId → ctrl-eff bucket) ───────────────────────────────
 
@@ -41,35 +42,6 @@ function buildSummary(rows) {
   return summarize(rows);
 }
 
-// ── clientType → entityType fuzzy map ────────────────────────────────────────
-
-const VALID_ENTITY_TYPES = [
-  "Lawyers/Conveyancers", "Accountants", "Real Estate Agents",
-  "Precious Metal Dealers", "TCSPs",
-  "Banks & ADIs", "Remittance", "VASP/DCEP",
-  "Gambling/Casino", "Insurance",
-];
-
-const CLIENT_TYPE_MAP = [
-  [/lawyer|conveyancer/i,              "Lawyers/Conveyancers"],
-  [/accountant/i,                      "Accountants"],
-  [/real\s*estate/i,                   "Real Estate Agents"],
-  [/precious\s*metal/i,                "Precious Metal Dealers"],
-  [/tcsp|trust.*company/i,             "TCSPs"],
-  [/bank|adi|credit\s*union/i,         "Banks & ADIs"],
-  [/remittance|money\s*transfer/i,     "Remittance"],
-  [/vasp|crypto|dcep|digital\s*asset/i,"VASP/DCEP"],
-  [/gambl|casino/i,                    "Gambling/Casino"],
-  [/insurance/i,                       "Insurance"],
-];
-
-function resolveEntityType(clientType = "") {
-  if (VALID_ENTITY_TYPES.includes(clientType)) return clientType;
-  for (const [re, mapped] of CLIENT_TYPE_MAP) {
-    if (re.test(clientType)) return mapped;
-  }
-  return null;
-}
 
 // ── DB risk-pool engine ───────────────────────────────────────────────────────
 
@@ -386,7 +358,7 @@ const createRiskRegisterFromClient = async (clientId, ctrlEffOverride = {}, user
 
   const entityType =
     rq.entity_type ||
-    resolveEntityType(client.clientType) ||
+    await resolveEntityType(client.clientType) ||
     "Lawyers/Conveyancers";
 
   const answers = {
@@ -565,11 +537,25 @@ exports.patchScenario = async (req, res) => {
     const row = doc.rows[rowIndex];
     const { L, C, ctrlEff: ceOverride, reviewerNotes, status } = req.body;
 
-    if (L            !== undefined) { row.manualL       = Number(L);          row.L = Number(L); }
-    if (C            !== undefined) { row.manualC       = Number(C);          row.C = Number(C); }
-    if (ceOverride   !== undefined) { row.manualCtrlEff = Number(ceOverride); row.controlEffectiveness = Number(ceOverride); }
-    if (reviewerNotes !== undefined) row.reviewerNotes  = reviewerNotes;
-    if (status        !== undefined) row.status         = status;
+    if (L !== undefined) { row.manualL = Number(L); row.L = Number(L); }
+    if (C !== undefined) { row.manualC = Number(C); row.C = Number(C); }
+    if (ceOverride !== undefined) {
+      let ceV;
+      if (ceOverride !== null && typeof ceOverride === "object") {
+        const parsed = parseCtrlEff(ceOverride);
+        const cat    = row.category || CTRL_CATEGORY[row.ctrlFactor] || "gov";
+        ceV = parsed[cat] ?? 3;
+        // persist updated values at document level so future recalculate uses them
+        Object.assign(doc.ctrlEff, parsed);
+        doc.markModified("ctrlEff");
+      } else {
+        ceV = Math.min(5, Math.max(1, Number(ceOverride) || 3));
+      }
+      row.manualCtrlEff        = ceV;
+      row.controlEffectiveness = ceV;
+    }
+    if (reviewerNotes !== undefined) row.reviewerNotes = reviewerNotes;
+    if (status        !== undefined) row.status        = status;
 
     const inh = inherentBand(row.L, row.C);
     const res_ = residualBand(inh, row.controlEffectiveness);
