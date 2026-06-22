@@ -163,6 +163,9 @@ const ClientSchema = new Schema(
     name: { type: String, required: true, trim: true },
     slug: { type: String, unique: true, sparse: true, index: true },
     clientType: { type: String, required: true },
+    // EntityType _id companion to clientType (the name). Stored as String (not an
+    // ObjectId ref) so an empty/unmatched value never throws a CastError on save.
+    clientTypeId: { type: String, trim: true },
 
     // official identifiers
     registrationNumber: { type: String, trim: true, index: true, sparse: true },

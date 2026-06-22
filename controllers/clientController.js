@@ -50,6 +50,7 @@ exports.createClient = asyncHandler(async (req, res, next) => {
   const {
     name,
     clientType,
+    clientTypeId,
     registrationNumber,
     taxId,
     email,
@@ -93,6 +94,7 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     user: user._id,
     name,
     clientType,
+    clientTypeId,
     registrationNumber,
     taxId,
     email,
@@ -1010,6 +1012,7 @@ exports.createDummyClient = asyncHandler(async (req, res, next) => {
   const {
     name,
     clientType,
+    clientTypeId,
     registrationNumber,
     taxId,
     email,
@@ -1051,6 +1054,7 @@ exports.createDummyClient = asyncHandler(async (req, res, next) => {
     user: user._id,
     name,
     clientType,
+    clientTypeId,
     registrationNumber,
     taxId,
     email,
