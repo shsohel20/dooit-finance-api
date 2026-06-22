@@ -32,7 +32,7 @@ const buildStaffApplicantPayload = (staff) => ({
     dob: staff.personal?.dateOfBirth
       ? new Date(staff.personal.dateOfBirth).toISOString().split("T")[0]
       : undefined,
-    country: staff.personal?.nationality || undefined,
+    country: staff.personal?.country || undefined,
   },
   lang: "en",
 });
@@ -279,7 +279,9 @@ const submitStaffDocuments = async (staff) => {
     throw new Error("Staff has no Sumsub applicant — call ensureStaffApplicant first");
   }
 
-  const idDocs = (staff.documents || []).filter((d) => DOC_TYPE_MAP[d.docType]);
+  console.log(staff.documents)
+  const idDocs = (staff.documents || []).filter((d) => DOC_TYPE_MAP[d.docType?.toLowerCase()]);
+  console.log(idDocs)
   if (!idDocs.length) return { submitted: 0, skipped: 0, results: [] };
 
   const sideCount = {};
@@ -288,7 +290,7 @@ const submitStaffDocuments = async (staff) => {
   let skipped = 0;
 
   for (const doc of idDocs) {
-    const idDocType = DOC_TYPE_MAP[doc.docType];
+    const idDocType = DOC_TYPE_MAP[doc.docType?.toLowerCase()];
     sideCount[idDocType] = (sideCount[idDocType] || 0) + 1;
     const occurrenceIndex = sideCount[idDocType] - 1; // 0 = first, 1 = second
 
@@ -308,6 +310,7 @@ const submitStaffDocuments = async (staff) => {
     try {
       const { buffer, contentType } = await downloadBuffer(doc.url);
       const filename = doc.name || `${idDocType.toLowerCase()}_${occurrenceIndex}.jpg`;
+      console.log(filename)
       const formData = buildDocFormData(metadata, buffer, contentType, filename);
 
       const { status, data } = await sumsubPostForm(

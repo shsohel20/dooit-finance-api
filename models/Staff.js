@@ -102,7 +102,10 @@ const PersonalInfoSchema = new Schema(
     },
     nationality: {
       type: String, required: true, uppercase: true,
-      match: [/^[A-Z]{3}$/, 'Use ISO 3166-1 alpha-3 country code (e.g. BGD, GBR)'],
+    },
+      country: {
+      type: String, required: true, uppercase: true,
+      // match: [/^[A-Z]{3}$/, 'Use ISO 3166-1 alpha-3 country code (e.g. BGD, GBR)'],
     },
     nationalId: { type: String, trim: true, maxlength: 50 },
     passportNo: { type: String, trim: true, maxlength: 50 },
@@ -123,7 +126,7 @@ const ContactInfoSchema = new Schema(
     },
     phone: {
       type: String, required: true,
-      match: [/^\+[1-9]\d{6,14}$/, 'Phone must be in E.164 format (+8801XXXXXXXXX)'],
+      // match: [/^\+[1-9]\d{6,14}$/, 'Phone must be in E.164 format (+8801XXXXXXXXX)'],
     },
     emergencyPhone: {
       type: String,
@@ -138,7 +141,7 @@ const EmploymentInfoSchema = new Schema(
   {
     startDate: { type: Date, required: true },
     department: { type: String, required: true, enum: Object.values(Department) },
-    jobTitle: { type: String, required: true, enum: Object.values(JobTitle) },
+    jobTitle: { type: String, required: true },
     reportsTo: { type: String, trim: true, default: "" },
     employmentType: { type: String, required: true, enum: Object.values(EmploymentType), default: EmploymentType.FULL_TIME },
   },

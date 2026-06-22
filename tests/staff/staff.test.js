@@ -72,6 +72,7 @@ const BASE_PAYLOAD = () => ({
     lastName:    "Smith",
     dateOfBirth: "1990-05-15",
     nationality: "BGD",
+    country:     "BGD",
   },
   contact: {
     workEmail:           "alice.smith@dooit.com",
