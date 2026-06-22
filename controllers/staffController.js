@@ -9,6 +9,7 @@ const sendEmail = require("../utils/sendEmail");
 const { getRawEmail } = require("../utils/rawUserFields");
 const { generatePassword } = require("../utils/passwordUtils");
 const { staffWelcomeHtml } = require("../utils/email-template/staffEmailTemplate");
+const { attachUserRoleId } = require("../utils/attachUserRoleId");
 const {
   ensureStaffApplicant,
   submitStaffDocuments,
@@ -270,7 +271,7 @@ exports.getStaff = asyncHandler(async (req, res, next) => {
 
   if (!staff) return next(new ErrorResponse("Staff member not found", 404));
 
-  return res.status(200).json({ success: true, data: staff });
+  return res.status(200).json({ success: true, data: await attachUserRoleId(staff) });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -385,7 +386,7 @@ exports.getStaffByRoleId = asyncHandler(async (req, res, next) => {
     count: staff.length,
     total,
     pagination: { page, limit, totalPages: Math.ceil(total / limit) },
-    data: staff,
+    data: await attachUserRoleId(staff),
   });
 });
 

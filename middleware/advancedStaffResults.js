@@ -1,5 +1,7 @@
 "use strict";
 
+const { attachUserRoleId } = require("../utils/attachUserRoleId");
+
 const isEmpty = (v) => v === undefined || v === null || v === "" || v === "null";
 const toBool  = (v) => v === "true" || v === true;
 
@@ -98,7 +100,7 @@ module.exports = (Staff) => async (req, res, next) => {
       totalRecords: total,
       count: results.length,
       pagination,
-      data: results,
+      data: await attachUserRoleId(results),
     };
 
     next();
