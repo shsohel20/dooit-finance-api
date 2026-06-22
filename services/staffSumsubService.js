@@ -15,6 +15,7 @@
  */
 
 const { sumsubPost, sumsubGet, sumsubPostForm, downloadBuffer, buildDocFormData } = require("../utils/sumsubClient");
+const { toAlpha3 } = require("../utils/countryUtils");
 
 const LEVEL_NAME = () => process.env.SUMSUB_LEVEL_NAME || "kyc-level";
 
@@ -32,7 +33,9 @@ const buildStaffApplicantPayload = (staff) => ({
     dob: staff.personal?.dateOfBirth
       ? new Date(staff.personal.dateOfBirth).toISOString().split("T")[0]
       : undefined,
-    country: staff.personal?.country || undefined,
+    // Sumsub requires ISO 3166-1 alpha-3; resolve from whatever is stored
+    // (full name / alpha-2 / alpha-3) at submission time.
+    country: toAlpha3(staff.personal?.country) || undefined,
   },
   lang: "en",
 });
@@ -301,7 +304,8 @@ const submitStaffDocuments = async (staff) => {
 
     const metadata = {
       idDocType,
-      country: staff.personal?.nationality || undefined,
+      // issuing country — Sumsub expects ISO alpha-3
+      country: toAlpha3(staff.personal?.country) || undefined,
     };
     if (MULTI_SIDE_DOCS.has(idDocType)) {
       metadata.idDocSubType = occurrenceIndex === 0 ? "FRONT_SIDE" : "BACK_SIDE";

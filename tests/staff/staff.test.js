@@ -122,14 +122,15 @@ describe("POST /api/v1/staff — createStaff", () => {
     expect(res.body.data.user.role).toBe("admin");
   });
 
-  it("201 — resolves nationality full name to alpha-3", async () => {
+  it("201 — stores nationality as-is (alpha-3 built only at Sumsub submission)", async () => {
     as(ADMIN);
     const payload = BASE_PAYLOAD();
     payload.personal.nationality = "Bangladesh";
     const res = await api("post", "/api/v1/staff").send(payload);
 
     expect(res.status).toBe(201);
-    expect(res.body.data.staff.personal.nationality).toBe("BGD");
+    // controller no longer resolves to alpha-3; model only uppercases the value
+    expect(res.body.data.staff.personal.nationality).toBe("BANGLADESH");
   });
 
   it("201 — sends welcome email", async () => {
@@ -182,14 +183,15 @@ describe("POST /api/v1/staff — createStaff", () => {
     expect(res.body.error).toMatch(/invalid/i);
   });
 
-  it("400 — unrecognized nationality", async () => {
+  it("201 — accepts unrecognized nationality (no controller-side validation)", async () => {
     as(ADMIN);
     const payload = BASE_PAYLOAD();
     payload.personal.nationality = "Westeros";
     const res = await api("post", "/api/v1/staff").send(payload);
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/nationality/i);
+    // controller no longer validates against ISO list; value is stored uppercased
+    expect(res.status).toBe(201);
+    expect(res.body.data.staff.personal.nationality).toBe("WESTEROS");
   });
 
   it("409 — duplicate workEmail on second create", async () => {
@@ -226,7 +228,7 @@ describe("PUT /api/v1/staff/:staffId — updateStaff", () => {
     expect(res.body.data.staff.personal.lastName).toBe("Smith");
   });
 
-  it("200 — resolves updated nationality from full name", async () => {
+  it("200 — stores updated nationality as-is (uppercased, no alpha-3 resolution)", async () => {
     const staff = await seedStaff();
     as(ADMIN);
     const res = await api("put", `/api/v1/staff/${staff._id}`).send({
@@ -234,7 +236,7 @@ describe("PUT /api/v1/staff/:staffId — updateStaff", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(res.body.data.staff.personal.nationality).toBe("GBR");
+    expect(res.body.data.staff.personal.nationality).toBe("UNITED KINGDOM");
   });
 
   it("200 — updates employment sub-doc", async () => {
@@ -249,15 +251,15 @@ describe("PUT /api/v1/staff/:staffId — updateStaff", () => {
     expect(res.body.data.staff.employment.jobTitle).toBe("kyc_analyst"); // unchanged
   });
 
-  it("400 — invalid nationality on update", async () => {
+  it("200 — accepts unrecognized nationality on update (no validation)", async () => {
     const staff = await seedStaff();
     as(ADMIN);
     const res = await api("put", `/api/v1/staff/${staff._id}`).send({
       personal: { nationality: "Nowhere" },
     });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/nationality/i);
+    expect(res.status).toBe(200);
+    expect(res.body.data.staff.personal.nationality).toBe("NOWHERE");
   });
 
   it("404 — staff not found", async () => {

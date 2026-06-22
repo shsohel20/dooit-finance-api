@@ -9,7 +9,6 @@ const sendEmail = require("../utils/sendEmail");
 const { getRawEmail } = require("../utils/rawUserFields");
 const { generatePassword } = require("../utils/passwordUtils");
 const { staffWelcomeHtml } = require("../utils/email-template/staffEmailTemplate");
-const { toAlpha3 } = require("../utils/countryUtils");
 const {
   ensureStaffApplicant,
   submitStaffDocuments,
@@ -77,15 +76,15 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
   // }
 
   // ── resolve country (residence): accept full name, alpha-2, or alpha-3 ─────
-  if (personal?.country) {
-    const alpha3 = toAlpha3(personal.country);
-    if (!alpha3) {
-      return next(
-        new ErrorResponse(`Unrecognized country: "${personal.country}"`, 400),
-      );
-    }
-    personal.country = alpha3;
-  }
+  // if (personal?.country) {
+  //   const alpha3 = toAlpha3(personal.country);
+  //   if (!alpha3) {
+  //     return next(
+  //       new ErrorResponse(`Unrecognized country: "${personal.country}"`, 400),
+  //     );
+  //   }
+  //   personal.country = alpha3;
+  // }
 
   // ── derive user fields from staff payload ─────────────────────────────────
   const fullName = `${personal.firstName} ${personal.lastName}`;
@@ -177,26 +176,26 @@ exports.updateStaff = asyncHandler(async (req, res, next) => {
   }
 
   // ── resolve nationality if provided ───────────────────────────────────────
-  if (personal?.nationality) {
-    const alpha3 = toAlpha3(personal.nationality);
-    if (!alpha3) {
-      return next(
-        new ErrorResponse(`Unrecognized nationality: "${personal.nationality}"`, 400),
-      );
-    }
-    personal.nationality = alpha3;
-  }
+  // if (personal?.nationality) {
+  //   const alpha3 = toAlpha3(personal.nationality);
+  //   if (!alpha3) {
+  //     return next(
+  //       new ErrorResponse(`Unrecognized nationality: "${personal.nationality}"`, 400),
+  //     );
+  //   }
+  //   personal.nationality = alpha3;
+  // }
 
   // ── resolve country (residence) if provided ───────────────────────────────
-  if (personal?.country) {
-    const alpha3 = toAlpha3(personal.country);
-    if (!alpha3) {
-      return next(
-        new ErrorResponse(`Unrecognized country: "${personal.country}"`, 400),
-      );
-    }
-    personal.country = alpha3;
-  }
+  // if (personal?.country) {
+  //   const alpha3 = toAlpha3(personal.country);
+  //   if (!alpha3) {
+  //     return next(
+  //       new ErrorResponse(`Unrecognized country: "${personal.country}"`, 400),
+  //     );
+  //   }
+  //   personal.country = alpha3;
+  // }
 
   // ── merge nested sub-documents ────────────────────────────────────────────
   if (personal) Object.assign(staff.personal, personal);
