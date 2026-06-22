@@ -1,32 +1,54 @@
-# ---- deps: install production dependencies ----
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-# install production dependencies only
-RUN npm ci --only=production
+# ---------- deps ----------
+FROM node:20-bookworm-slim AS deps
 
-# ---- builder: install dev deps & build (if you have a build step) ----
-FROM node:18-alpine AS builder
 WORKDIR /app
-COPY . .
-# copy deps from deps stage so builder can run build quickly
+
+COPY package*.json ./
+
+RUN npm ci --omit=dev
+
+
+# ---------- builder ----------
+FROM node:20-bookworm-slim AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
 COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+
 RUN npm ci
-# If you have a build step (TypeScript / transpile), uncomment:
+
+# If applicable:
 # RUN npm run build
 
-# ---- runner: production image ----
-FROM node:18-alpine AS runner
+
+# ---------- runner ----------
+FROM node:20-bookworm-slim AS runner
+
 WORKDIR /app
+
 ENV NODE_ENV=production
-# copy prod node_modules from deps stage
+ENV LIBREOFFICE_PATH=/usr/bin/soffice
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libreoffice-writer \
+        fonts-liberation \
+        fonts-dejavu \
+        fonts-crosextra-carlito \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /tmp && chmod 1777 /tmp
+
 COPY --from=deps /app/node_modules ./node_modules
-# copy built app (or source if no build)
-COPY --from=builder /app . 
+COPY --from=builder /app ./
+
+RUN addgroup --system app && \
+    adduser --system --ingroup app app
+
+USER app
 
 EXPOSE 6830
-# optional non-root user
-RUN addgroup -S app && adduser -S app -G app
-USER app
 
 CMD ["npm", "start"]
