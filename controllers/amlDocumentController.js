@@ -9,7 +9,7 @@ const PolicyHubTemplate     = require("../models/PolicyHubTemplate");
 const { generateDocument }  = require("../utils/docxTemplateService");
 const fileVaultService      = require("../utils/fileVaultService");
 const { resolveEntityType } = require("../utils/entityTypeResolver");
-const { buildRenderPayload, fetchLatestRiskRegister } = require("../utils/amlDocGenService");
+const { buildRenderPayload, fetchLatestRiskRegister, generateAMLDocsForClient } = require("../utils/amlDocGenService");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -107,4 +107,39 @@ exports.generateDoc = asyncHandler(async (req, res, next) => {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
   res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
   res.send(docBuffer);
+});
+
+/**
+ * POST /api/v1/aml-document/regenerate
+ * Body: { client?: "<clientId>" }   — defaults to the caller's own client (JWT)
+ * Re-generates ALL AML/CTF documents eligible for the client's entity type,
+ * refreshing the existing PolicyHubTemplate records in place (idempotent upsert).
+ * Mirrors the background generation that runs after the risk questionnaire is saved.
+ */
+exports.regenerateDocs = asyncHandler(async (req, res, next) => {
+  const clientId = resolveClientId(req, "body");
+  if (!clientId) return next(new ErrorResponse("client is required", 400));
+
+  const client = await Client.findById(clientId);
+  if (!client) return next(new ErrorResponse("Client not found", 404));
+
+  const result = await generateAMLDocsForClient(clientId, req.user?.id);
+
+  // Map a "nothing generated" reason to a friendly message for the UI.
+  const REASON_MESSAGES = {
+    no_entity_type: "Complete the risk assessment (entity type) before generating documents.",
+    no_entity_match: "Could not match the entity type to a document set.",
+    no_templates: "No document templates are configured for this entity type.",
+    client_not_found: "Client not found.",
+  };
+
+  res.status(200).json({
+    success: true,
+    generated: result.generated,
+    total: result.total,
+    message:
+      result.generated > 0
+        ? `Regenerated ${result.generated} document${result.generated === 1 ? "" : "s"}.`
+        : REASON_MESSAGES[result.reason] || "No documents were generated.",
+  });
 });

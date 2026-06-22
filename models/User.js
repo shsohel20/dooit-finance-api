@@ -191,12 +191,20 @@ UserSchema.pre("save", async function (next) {
 
 
 UserSchema.methods.getSignedJwtToken = function () {
+  // name/email are AES-256-GCM encrypted at rest (roleEncryptionPlugin).
+  // On public routes (login/register/reset) there is no decrypt context, so
+  // autoDecryptDoc masks them to "***". Force-decrypt here so the issued JWT
+  // always carries the real plaintext values. decryptForRole() falls back to
+  // the pre-mask ciphertext snapshot, raw ciphertext, or plaintext as needed.
+  const decrypted =
+    typeof this.decryptForRole === "function" ? this.decryptForRole() : this;
+
   return jwt.sign(
     {
       id: this._id,
-      email: this.email,
+      email: decrypted.email,
       userType: this.userType,
-      name: this.name,
+      name: decrypted.name,
       role: this.role,
       photoUrl: this.photoUrl,
       isActive: this.isActive,

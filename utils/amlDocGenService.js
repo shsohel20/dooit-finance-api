@@ -51,6 +51,16 @@ function formatAU(date) {
   return new Date(date).toLocaleDateString("en-AU", { day: "2-digit", month: "long", year: "numeric" });
 }
 
+// Format a stored date value to AU long form. The questionnaire's date fields now
+// store ISO (YYYY-MM-DD) from the date picker; legacy records may hold free text
+// like "1 July 2026". Returns the raw value if it isn't a parseable date, or
+// `fallback` when empty.
+function formatAUDate(value, fallback = "") {
+  if (!value) return fallback;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? String(value) : formatAU(d);
+}
+
 function escapeRegex(str = "") {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -115,7 +125,7 @@ function buildRenderPayload(client, riskRegister = null) {
 
     // Dates & enrolment
     austracEnrolmentRef:        rq.austracEnrolmentRef || "",
-    effectiveDate:              rq.effectiveDate       || todayStr,
+    effectiveDate:              formatAUDate(rq.effectiveDate, todayStr),
     reviewDate:                 rq.reviewDate          || reviewStr,
 
     // Entity-specific / choice fields
@@ -136,16 +146,20 @@ function buildRenderPayload(client, riskRegister = null) {
  * Generate all active TemplateConfig docs that match the client's entity type.
  * Uploads each generated .docx to FileVault and saves a PolicyHubTemplate record.
  *
+ * Idempotent: upserts the PolicyHubTemplate per (client, sourceTemplateConfig) so
+ * re-running (onboarding re-save, or an explicit regenerate) refreshes the existing
+ * generated docs instead of piling up duplicates.
+ *
  * @param {string|ObjectId} clientId
- * @param {string|ObjectId} [userId]   — createdBy reference
- * @returns {Promise<void>}
+ * @param {string|ObjectId} [userId]   — createdBy reference (set on first insert only)
+ * @returns {Promise<{ generated: number, total: number, reason: string|null }>}
  */
 async function generateAMLDocsForClient(clientId, userId = null) {
   const client = await Client.findById(clientId);
-  if (!client) return;
+  if (!client) return { generated: 0, total: 0, reason: "client_not_found" };
 
   const entityTypeName = client.riskQuestions?.entity_type;
-  if (!entityTypeName) return;
+  if (!entityTypeName) return { generated: 0, total: 0, reason: "no_entity_type" };
 
   // Exact name match first; fall back to matchKeywords for fuzzy values like "Financial"
   let entityType = await EntityType.findOne({ name: entityTypeName });
@@ -154,19 +168,20 @@ async function generateAMLDocsForClient(clientId, userId = null) {
   }
   if (!entityType) {
     console.warn(`[amlDocGenService] No EntityType matched "${entityTypeName}" — skipping doc gen for client ${clientId}`);
-    return;
+    return { generated: 0, total: 0, reason: "no_entity_match" };
   }
 
   const templates = await TemplateConfig.find({
     isActive:      true,
     eligibleTypes: entityType._id,
   });
-  if (!templates.length) return;
+  if (!templates.length) return { generated: 0, total: 0, reason: "no_templates" };
 
   const riskRegister = await fetchLatestRiskRegister(client);
   const payload      = buildRenderPayload(client, riskRegister);
   const safeName     = client.name.replace(/[^a-zA-Z0-9]/g, "_");
 
+  let generated = 0;
   for (const tmpl of templates) {
     try {
       const docBuffer = await generateDocument(payload, tmpl);
@@ -197,22 +212,32 @@ async function generateAMLDocsForClient(clientId, userId = null) {
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       );
 
-      await PolicyHubTemplate.create({
-        client:                clientId,
-        sourceTemplateConfig:  tmpl._id,
-        name:                  `${tmpl.label} — ${client.name}`,
-        docs:                  htmlContent,
-        headerHtml,
-        footerHtml,
-        generatedFileVaultId:  uploadResult?.file?.id  || uploadResult?.file?._id  || null,
-        generatedFileUrl:      uploadResult?.file?.publicUrl || null,
-        generatedSnapshotData: payload,
-        createdBy:             userId,
-      });
+      // Upsert by (client, sourceTemplateConfig): refresh the existing generated
+      // doc in place, or create it the first time. createdBy is preserved on
+      // re-generation (set only on insert).
+      await PolicyHubTemplate.findOneAndUpdate(
+        { client: clientId, sourceTemplateConfig: tmpl._id },
+        {
+          $set: {
+            name:                  `${tmpl.label} — ${client.name}`,
+            docs:                  htmlContent,
+            headerHtml,
+            footerHtml,
+            generatedFileVaultId:  uploadResult?.file?.id  || uploadResult?.file?._id  || null,
+            generatedFileUrl:      uploadResult?.file?.publicUrl || null,
+            generatedSnapshotData: payload,
+          },
+          $setOnInsert: { createdBy: userId },
+        },
+        { upsert: true, new: true, setDefaultsOnInsert: true },
+      );
+      generated++;
     } catch (err) {
       console.error(`[amlDocGenService] Failed to generate ${tmpl.templateKey} for client ${clientId}:`, err.message);
     }
   }
+
+  return { generated, total: templates.length, reason: null };
 }
 
 module.exports = { generateAMLDocsForClient, buildRenderPayload, fetchLatestRiskRegister };

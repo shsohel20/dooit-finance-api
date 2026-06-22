@@ -548,8 +548,8 @@ const RISK_QUESTIONS_SCHEMA = [
       },
       { key: "abn", label: "ABN", type: "text", placeholder: "XX XXX XXX XXX" },
       { key: "assessDate", label: "Assessment Date", type: "date" },
-      { key: "documentDate", label: "Document Date", type: "text", placeholder: "e.g. 15 June 2026" },
-      { key: "effectiveDate", label: "Program Effective Date", type: "text", placeholder: "e.g. 1 July 2026" },
+      { key: "documentDate", label: "Document Date", type: "date" },
+      { key: "effectiveDate", label: "Program Effective Date", type: "date" },
       { key: "austracEnrolmentRef", label: "AUSTRAC Enrolment Reference", type: "text", placeholder: "e.g. ENR-20260001" },
       {
         key: "austrac_enrolled", label: "AUSTRAC Enrolment Status", type: "single-select",
