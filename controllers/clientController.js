@@ -59,12 +59,12 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     documents,
     status,
     settings,
-    metadata,
-    userName,
+    metadata
   } = req.body;
 
   let user = null;
 
+  const userName= email;
   user = await User.findOne({
     email,
     userName,
@@ -74,7 +74,7 @@ exports.createClient = asyncHandler(async (req, res, next) => {
       name,
       email,
       userType: "client",
-      password: "123456", // TODO: replace with random password
+      password: "DooiT@123456", // TODO: replace with random password
       role: "admin",
       isActive: true,
       userName,

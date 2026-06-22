@@ -19,7 +19,9 @@ const PolicyHubTemplateSchema = new Schema(
     },
     name: { type: String, required: true, trim: true },
     description: { type: String, default: "" },
-    docs: { type: String, default: "" }, // rich text HTML
+    docs: { type: String, default: "" }, // rich text HTML (body)
+    headerHtml: { type: String, default: "" }, // page header HTML (round-tripped to DOCX header)
+    footerHtml: { type: String, default: "" }, // page footer HTML (round-tripped to DOCX footer)
     metadata: { type: Schema.Types.Mixed, default: {} },
     tags: { type: [String], default: [] },
     // ── Source references ─────────────────────────────────────────────────────

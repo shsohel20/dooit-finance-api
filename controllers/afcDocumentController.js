@@ -5,17 +5,8 @@ const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
 const puppeteer = require("puppeteer");
 const { marked } = require("marked");
-const HTMLtoDOCX = require("html-to-docx");
-const mammoth = require("mammoth");
-const sanitizeHtml = require("sanitize-html");
-
-const SANITIZE_OPTIONS = {
-  allowedTags: sanitizeHtml.defaults.allowedTags.concat(["h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td"]),
-  allowedAttributes: {
-    a: ["href", "name", "target"],
-    img: ["src", "alt", "width", "height"],
-  },
-};
+const { importDocxToHtml, sanitizeForEditor } = require("../utils/docxImportService");
+const { convertHtmlToDocx } = require("../utils/docxExportService");
 
 const normalizeMetadata = (metadata = {}) => ({
   company: metadata.company || "",
@@ -198,13 +189,11 @@ exports.exportAfcDocumentDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`AFC document not found with id ${req.params.id}`, 404));
   }
 
+  // Imported docs store HTML; AI docs store markdown — marked.parse passes HTML
+  // through and converts markdown, so it is safe for both.
   const htmlBody = marked.parse(resolveContent(doc));
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${htmlBody}</body></html>`;
-
-  const docxBuffer = await HTMLtoDOCX(html, null, {
-    table: { row: { cantSplit: true } },
-    footer: true,
-    pageNumber: true,
+  const { buffer: docxBuffer } = await convertHtmlToDocx(htmlBody, {
+    title: doc.metadata?.documentType || "AFC Document",
   });
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -220,8 +209,9 @@ exports.importAfcDocumentDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No .docx file uploaded", 400));
   }
 
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const htmlContent = sanitizeHtml(result.value, SANITIZE_OPTIONS);
+  // Fidelity-preserving conversion (keeps tables/merged cells, alignment,
+  // underline, inline images) for TinyMCE preview/editing.
+  const { html: htmlContent } = await importDocxToHtml(req.file.buffer);
 
   const metadata = req.body.metadata
     ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)
@@ -280,7 +270,7 @@ exports.afcDocumentToPolicyHub = asyncHandler(async (req, res, next) => {
   }
 
   const rawHtml = marked.parse(resolveContent(afcDoc));
-  const htmlContent = sanitizeHtml(rawHtml, SANITIZE_OPTIONS);
+  const htmlContent = sanitizeForEditor(rawHtml);
 
   const {
     isActive = false,

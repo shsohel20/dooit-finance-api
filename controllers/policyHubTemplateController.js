@@ -3,9 +3,10 @@ const PolicyHubTemplate = require("../models/PolicyHubTemplate");
 const PolicyHub = require("../models/PolicyHub");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
-const mammoth = require("mammoth");
-const HTMLtoDOCX = require("html-to-docx");
 const puppeteer = require("puppeteer");
+const { importDocxToHtml } = require("../utils/docxImportService");
+const { convertHtmlToDocx } = require("../utils/docxExportService");
+const { extractHeaderFooter } = require("../utils/docxSectionService");
 
 /**
  * Filter helper for POST search on templates
@@ -186,11 +187,13 @@ exports.updateTemplate = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Template not found with id ${req.params.id}`, 404));
   }
 
-  const { name, description, docs, metadata, tags, isGlobal } = req.body;
+  const { name, description, docs, headerHtml, footerHtml, metadata, tags, isGlobal } = req.body;
 
   if (name !== undefined) template.name = name;
   if (description !== undefined) template.description = description;
   if (docs !== undefined) template.docs = docs;
+  if (headerHtml !== undefined) template.headerHtml = headerHtml;
+  if (footerHtml !== undefined) template.footerHtml = footerHtml;
   if (metadata !== undefined) template.metadata = { ...template.metadata, ...metadata };
   if (tags !== undefined) template.tags = tags;
   if (isGlobal !== undefined) template.isGlobal = isGlobal;
@@ -235,9 +238,11 @@ exports.importFromDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Template name is required", 400));
   }
 
-  // Convert .docx buffer → HTML
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const htmlContent = result.value; // converted HTML
+  // Convert .docx buffer → fidelity-preserving HTML (headings, tables, lists,
+  // bold/italic/underline, alignment, inline images) for TinyMCE editing.
+  const { html: htmlContent } = await importDocxToHtml(req.file.buffer);
+  // Page header/footer live in separate OOXML parts — extract them for editing.
+  const { headerHtml, footerHtml } = extractHeaderFooter(req.file.buffer);
 
   const template = await PolicyHubTemplate.create({
     client,
@@ -245,6 +250,8 @@ exports.importFromDocx = asyncHandler(async (req, res, next) => {
     name,
     description,
     docs: htmlContent,
+    headerHtml,
+    footerHtml,
     metadata: typeof metadata === "string" ? JSON.parse(metadata) : metadata,
     tags: typeof tags === "string" ? JSON.parse(tags) : tags,
     isGlobal: isGlobal === "true" || isGlobal === true,
@@ -263,12 +270,13 @@ exports.exportToDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Template not found with id ${req.params.id}`, 404));
   }
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${template.docs}</body></html>`;
-
-  const docxBuffer = await HTMLtoDOCX(html, null, {
-    table: { row: { cantSplit: true } },
-    footer: true,
-    pageNumber: true,
+  // LibreOffice round-trips the stored HTML (incl. <style>/fonts/tables) into a
+  // clean .docx; falls back to html-to-docx (style-stripped) if unavailable.
+  // Header/footer are re-injected as real Word header/footer parts.
+  const { buffer: docxBuffer } = await convertHtmlToDocx(template.docs, {
+    title: template.name,
+    headerHtml: template.headerHtml,
+    footerHtml: template.footerHtml,
   });
 
   const filename = `template-${template._id}.docx`;
@@ -292,12 +300,25 @@ exports.exportToPdf = asyncHandler(async (req, res, next) => {
         <meta charset="utf-8">
         <title>${template.name}</title>
         <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          h1 { text-align: center; }
+          body{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#1F2937;line-height:1.65;padding:32px;max-width:820px;margin:0 auto}
+          h1{font-size:16pt;font-weight:700;color:#1B3A5C;border-bottom:2px solid #1B3A5C;padding-bottom:6px;margin:24px 0 12px}
+          h2{font-size:13pt;font-weight:700;color:#1B3A5C;margin:18px 0 8px}
+          h3{font-size:11pt;font-weight:600;color:#2B5496;margin:14px 0 6px}
+          h4,h5,h6{font-weight:600;color:#2B5496;margin:12px 0 6px}
+          p{margin:0 0 8px}
+          strong,b{color:#1B3A5C;font-weight:700}
+          table{border-collapse:collapse;width:100%;margin:12px 0}
+          th{background:#1B3A5C;color:#fff;padding:8px 10px;font-weight:600;text-align:left;border:1px solid #1B3A5C}
+          td{padding:7px 10px;border:1px solid #D1D5DB;vertical-align:top}
+          tr:nth-child(even) td{background:#F3F6FA}
+          ul,ol{margin:0 0 8px;padding-left:24px}
+          li{margin-bottom:4px}
+          a{color:#2B5496;text-decoration:underline}
+          .doc-title{font-size:18pt;font-weight:700;color:#1B3A5C;text-align:center;margin:0 0 28px;padding-bottom:10px;border-bottom:3px solid #1B3A5C}
         </style>
       </head>
       <body>
-        <h1>${template.name}</h1>
+        <div class="doc-title">${template.name}</div>
         <div>${template.docs}</div>
       </body>
     </html>

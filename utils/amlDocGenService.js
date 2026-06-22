@@ -15,6 +15,28 @@ const PolicyHubTemplate  = require("../models/PolicyHubTemplate");
 const RiskRegister       = require("../models/RiskRegister");
 const fileVaultService   = require("./fileVaultService");
 const { generateDocument } = require("./docxTemplateService");
+const { convertDocxToHtml } = require("./docxImportService");
+
+// AML/CTF compliance document color scheme — matches the .docx template design:
+//   Primary navy #1B3A5C for headings/table-headers, steel blue #2B5496 for h3,
+//   alternating table rows #F3F6FA, light borders #D1D5DB.
+// Stored inside `docs` so the HTML is self-contained for PDF/DOCX export.
+const AML_DOC_STYLES = `<style>
+.aml-doc{font-family:Arial,Helvetica,sans-serif;font-size:11pt;color:#1F2937;line-height:1.65}
+.aml-doc h1{font-size:16pt;font-weight:700;color:#1B3A5C;border-bottom:2px solid #1B3A5C;padding-bottom:6px;margin:24px 0 12px}
+.aml-doc h2{font-size:13pt;font-weight:700;color:#1B3A5C;margin:18px 0 8px}
+.aml-doc h3{font-size:11pt;font-weight:600;color:#2B5496;margin:14px 0 6px}
+.aml-doc h4,.aml-doc h5,.aml-doc h6{font-weight:600;color:#2B5496;margin:12px 0 6px}
+.aml-doc p{margin:0 0 8px}
+.aml-doc strong,.aml-doc b{color:#1B3A5C;font-weight:700}
+.aml-doc table{border-collapse:collapse;width:100%;margin:12px 0}
+.aml-doc th{background:#1B3A5C;color:#fff;padding:8px 10px;font-weight:600;text-align:left;border:1px solid #1B3A5C}
+.aml-doc td{padding:7px 10px;border:1px solid #D1D5DB;vertical-align:top}
+.aml-doc tr:nth-child(even) td{background:#F3F6FA}
+.aml-doc ul,.aml-doc ol{margin:0 0 8px;padding-left:24px}
+.aml-doc li{margin-bottom:4px}
+.aml-doc a{color:#2B5496;text-decoration:underline}
+</style>`;
 
 // ── Render payload ────────────────────────────────────────────────────────────
 
@@ -146,7 +168,22 @@ async function generateAMLDocsForClient(clientId, userId = null) {
 
   for (const tmpl of templates) {
     try {
-      const docBuffer    = await generateDocument(payload, tmpl);
+      const docBuffer = await generateDocument(payload, tmpl);
+
+      // Convert the rendered .docx to HTML so the docs field is populated
+      // for Editor.js rendering in PolicyHub.  HTML is the canonical storage
+      // format (schema comment: "rich text HTML"; export functions expect HTML).
+      let htmlContent = "";
+      try {
+        // Our own generated .docx is trusted — convert with full fidelity
+        // (style map + inline images) without re-sanitizing.
+        const { html } = await convertDocxToHtml(docBuffer);
+        // Wrap with AML color scheme so docs is self-contained for PDF/DOCX export
+        htmlContent = html ? `${AML_DOC_STYLES}<div class="aml-doc">${html}</div>` : "";
+      } catch (convErr) {
+        console.warn(`[amlDocGenService] docx→HTML conversion failed for ${tmpl.templateKey}:`, convErr.message);
+      }
+
       const fileName     = `${safeName}_${tmpl.templateKey}.docx`;
       const uploadResult = await fileVaultService.uploadFile(
         docBuffer,
@@ -158,6 +195,7 @@ async function generateAMLDocsForClient(clientId, userId = null) {
         client:                clientId,
         sourceTemplateConfig:  tmpl._id,
         name:                  `${tmpl.label} — ${client.name}`,
+        docs:                  htmlContent,
         generatedFileVaultId:  uploadResult?.file?.id  || uploadResult?.file?._id  || null,
         generatedFileUrl:      uploadResult?.file?.publicUrl || null,
         generatedSnapshotData: payload,

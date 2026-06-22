@@ -7,9 +7,8 @@ const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
-const sanitizeHtml = require("sanitize-html");
-const mammoth = require("mammoth");
-const HTMLtoDOCX = require("html-to-docx");
+const { importDocxToHtml, sanitizeForEditor } = require("../utils/docxImportService");
+const { convertHtmlToDocx } = require("../utils/docxExportService");
 
 /**
  * Filter helper for POST search
@@ -176,26 +175,9 @@ exports.generatePolicyHubWebHook = asyncHandler(async (req, res, next) => {
     );
   }
 
-  // Convert Markdown → sanitized HTML
+  // Convert Markdown → sanitized HTML (shared formatting-preserving sanitizer)
   const unsafeHtml = marked.parse(content_md);
-  const htmlContent = sanitizeHtml(unsafeHtml, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      "h1",
-      "h2",
-      "h3",
-      "img",
-      "table",
-      "thead",
-      "tbody",
-      "tr",
-      "th",
-      "td",
-    ]),
-    allowedAttributes: {
-      a: ["href", "name", "target"],
-      img: ["src", "alt", "width", "height"],
-    },
-  });
+  const htmlContent = sanitizeForEditor(unsafeHtml);
 
   // Create a version document for the generated content
   const versionDoc = await PolicyHubVersion.create({
@@ -477,12 +459,8 @@ exports.exportPolicyHubDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404));
   }
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>${policyHub.docs}</body></html>`;
-
-  const docxBuffer = await HTMLtoDOCX(html, null, {
-    table: { row: { cantSplit: true } },
-    footer: true,
-    pageNumber: true,
+  const { buffer: docxBuffer } = await convertHtmlToDocx(policyHub.docs, {
+    title: policyHub.metadata?.name || "Policy",
   });
 
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -505,18 +483,8 @@ exports.importPolicyHubDocx = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No .docx file uploaded", 400));
   }
 
-  // Convert .docx buffer → sanitized HTML
-  const result = await mammoth.convertToHtml({ buffer: req.file.buffer });
-  const unsafeHtml = result.value;
-  const htmlContent = sanitizeHtml(unsafeHtml, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      "h1", "h2", "h3", "img", "table", "thead", "tbody", "tr", "th", "td",
-    ]),
-    allowedAttributes: {
-      a: ["href", "name", "target"],
-      img: ["src", "alt", "width", "height"],
-    },
-  });
+  // Convert .docx buffer → fidelity-preserving HTML (shared import pipeline)
+  const { html: htmlContent } = await importDocxToHtml(req.file.buffer);
 
   const metadata = req.body.metadata
     ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)
