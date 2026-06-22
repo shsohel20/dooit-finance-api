@@ -317,12 +317,32 @@ exports.getMe = asyncHandler(async (req, res, next) => {
     console.error("[getMe] encryptionStatus failed:", err.message);
   }
 
+  // req.user is loaded (lean) by the protect middleware BEFORE the decrypt
+  // context is set, so its encrypted fields (name/email/phone/userName) come
+  // back masked as "***". The caller may always see their own data, so re-load
+  // the user as a document and force-decrypt those fields, overlaying them onto
+  // req.user (keeping the populated client/branch/qr/permissions intact).
+  let data = req.user;
+  try {
+    const userDoc = await User.findById(req.user.id);
+    if (userDoc && typeof userDoc.decryptForRole === "function") {
+      const decrypted = userDoc.decryptForRole();
+      const secretPaths =
+        typeof User.getEncryptedPaths === "function" ? User.getEncryptedPaths() : [];
+      data = { ...req.user };
+      secretPaths.forEach((path) => {
+        if (decrypted[path] !== undefined) data[path] = decrypted[path];
+      });
+    }
+  } catch (err) {
+    console.error("[getMe] self-decrypt failed:", err.message);
+  }
+
   res.status(200).json({
     success: true,
     encryptionData,
     encryptionStatus,
-    data: req.user,
-
+    data,
   });
 });
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {

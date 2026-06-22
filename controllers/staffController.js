@@ -359,10 +359,17 @@ exports.reviewStaff = asyncHandler(async (req, res, next) => {
 exports.getStaffByRoleId = asyncHandler(async (req, res, next) => {
   const { roleId } = req.params;
 
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
   const role = await Role.findById(roleId);
   if (!role) return next(new ErrorResponse("Role not found", 404));
 
-  const users = await User.find({ role: role.name }).select("_id");
+  const userFilter = { role: role.name };
+  if (client) userFilter.clientBelongs = client;
+  if (branch) userFilter.branchBelongs = branch;
+
+  const users = await User.find(userFilter).select("_id");
   const userIds = users.map((u) => u._id);
 
   const page = parseInt(req.query.page, 10) || 1;

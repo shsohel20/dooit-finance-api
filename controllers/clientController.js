@@ -1,7 +1,9 @@
 // controllers/client.controller.js
+const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const Client = require("../models/Client");
 const User = require("../models/User");
+const EntityType = require("../models/EntityType");
 const { validateClientCreation, markOnboardingStep } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
@@ -61,6 +63,8 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     settings,
     metadata
   } = req.body;
+
+  console.log(req.body)
 
   let user = null;
 
@@ -837,14 +841,33 @@ exports.getRiskQuestionsSchema = asyncHandler(async (req, res, next) => {
   const riskAnswers = client ? client.riskQuestions : {};
   const mappedKeys = new Set(Object.keys(CLIENT_FIELD_MAP));
 
+  // entity_type maps to Client.clientType, which stores the EntityType _id.
+  // Resolve it to the canonical EntityType name so the schema returns the
+  // human-readable label (which matches the field's options) rather than an id.
+  let entityTypeName = null;
+  if (client?.clientType) {
+    if (mongoose.isValidObjectId(client.clientType)) {
+      const et = await EntityType.findById(client.clientType).select("name").lean();
+      entityTypeName = et?.name || null;
+    } else {
+      // Legacy data: clientType already stored as a plain name string.
+      entityTypeName = client.clientType;
+    }
+  }
+
   const enrichedSections = RISK_QUESTIONS_SCHEMA.map(section => ({
     ...section,
     fields: section.fields.map(field => {
       const clientMapped = mappedKeys.has(field.key);
+      let value = resolveFieldValue(field, riskAnswers, client);
+      // Never expose the raw clientType id for entity_type — use the name.
+      if (field.key === "entity_type" && entityTypeName && mongoose.isValidObjectId(value)) {
+        value = entityTypeName;
+      }
       return {
         ...field,
         default: getTypeDefault(field),
-        value: resolveFieldValue(field, riskAnswers, client),
+        value,
         clientMapped,
         ...(clientMapped ? { clientPath: CLIENT_FIELD_MAP[field.key] } : {}),
       };
@@ -898,19 +921,38 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   // Merge individual keys so a partial update only overwrites supplied fields
   Object.assign(client.riskQuestions, questions);
 
+  // entity_type is stored as a name in riskQuestions, but client.clientType holds
+  // the EntityType _id. Resolve the name → _id so the clientType sync below keeps
+  // clientType as an id (the client edit form keys its select by _id).
+  let clientTypeId = null;
+  if (questions.entity_type !== undefined) {
+    if (mongoose.isValidObjectId(questions.entity_type)) {
+      clientTypeId = questions.entity_type;
+    } else {
+      const et = await EntityType.findOne({ name: questions.entity_type }).select("_id").lean();
+      clientTypeId = et?._id ? String(et._id) : null;
+    }
+  }
+
   // ── Bidirectional sync: write mapped answers back to client profile ──────
   const syncedKeys = [];
   Object.entries(CLIENT_FIELD_MAP).forEach(([qKey, clientPath]) => {
     if (questions[qKey] === undefined) return;
+    let valueToSync = questions[qKey];
+    if (qKey === "entity_type") {
+      // Skip if we couldn't resolve a valid id — don't clobber clientType.
+      if (!clientTypeId) return;
+      valueToSync = clientTypeId;
+    }
     const parts = clientPath.split(".");
     if (parts.length === 1) {
-      client[parts[0]] = questions[qKey];
+      client[parts[0]] = valueToSync;
     } else {
       // Ensure the parent object exists before setting a nested property
       if (!client[parts[0]] || typeof client[parts[0]] !== "object") {
         client[parts[0]] = {};
       }
-      client[parts[0]][parts[1]] = questions[qKey];
+      client[parts[0]][parts[1]] = valueToSync;
       client.markModified(parts[0]);
     }
     syncedKeys.push(qKey);

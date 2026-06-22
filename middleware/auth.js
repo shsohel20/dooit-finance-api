@@ -53,6 +53,8 @@ exports.protect = asyncHandler(async (req, res, next) => {
       ])
       .lean();
 
+      // console.log(u)
+
     const branchData = u.branch ?? u.branchBelongs ?? {}
 
 

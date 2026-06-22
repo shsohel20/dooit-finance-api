@@ -15,7 +15,8 @@ const PolicyHubTemplate  = require("../models/PolicyHubTemplate");
 const RiskRegister       = require("../models/RiskRegister");
 const fileVaultService   = require("./fileVaultService");
 const { generateDocument } = require("./docxTemplateService");
-const { convertDocxToHtml } = require("./docxImportService");
+const { importDocxToHtml } = require("./docxImportService");
+const { extractHeaderFooter } = require("./docxSectionService");
 
 // AML/CTF compliance document color scheme — matches the .docx template design:
 //   Primary navy #1B3A5C for headings/table-headers, steel blue #2B5496 for h3,
@@ -170,16 +171,21 @@ async function generateAMLDocsForClient(clientId, userId = null) {
     try {
       const docBuffer = await generateDocument(payload, tmpl);
 
-      // Convert the rendered .docx to HTML so the docs field is populated
-      // for Editor.js rendering in PolicyHub.  HTML is the canonical storage
-      // format (schema comment: "rich text HTML"; export functions expect HTML).
+      // Convert the rendered .docx to HTML for the body, and pull header/footer
+      // separately — same high-fidelity pipeline as a manual import, so
+      // auto-generated templates open in the 3-region TinyMCE editor and export
+      // with real Word header/footer parts (incl. firm name + page numbers).
       let htmlContent = "";
+      let headerHtml = "";
+      let footerHtml = "";
       try {
-        // Our own generated .docx is trusted — convert with full fidelity
-        // (style map + inline images) without re-sanitizing.
-        const { html } = await convertDocxToHtml(docBuffer);
-        // Wrap with AML color scheme so docs is self-contained for PDF/DOCX export
-        htmlContent = html ? `${AML_DOC_STYLES}<div class="aml-doc">${html}</div>` : "";
+        const { html, engine } = await importDocxToHtml(docBuffer);
+        // LibreOffice output already carries full styling; only the bare mammoth
+        // fallback needs the AML colour-scheme wrapper to be self-contained.
+        htmlContent = engine === "libreoffice"
+          ? html
+          : (html ? `${AML_DOC_STYLES}<div class="aml-doc">${html}</div>` : "");
+        ({ headerHtml, footerHtml } = extractHeaderFooter(docBuffer));
       } catch (convErr) {
         console.warn(`[amlDocGenService] docx→HTML conversion failed for ${tmpl.templateKey}:`, convErr.message);
       }
@@ -196,6 +202,8 @@ async function generateAMLDocsForClient(clientId, userId = null) {
         sourceTemplateConfig:  tmpl._id,
         name:                  `${tmpl.label} — ${client.name}`,
         docs:                  htmlContent,
+        headerHtml,
+        footerHtml,
         generatedFileVaultId:  uploadResult?.file?.id  || uploadResult?.file?._id  || null,
         generatedFileUrl:      uploadResult?.file?.publicUrl || null,
         generatedSnapshotData: payload,

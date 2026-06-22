@@ -90,7 +90,7 @@ const validateClientCreation = async (data, next) => {
   } = data;
 
   // Basic required field checks
-  if (!name || !email || !userName) {
+  if (!name || !email) {
     return next(
       new ErrorResponse("Name, email, and username are required!", 400)
     );
