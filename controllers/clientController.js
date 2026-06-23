@@ -477,7 +477,7 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
 // Maps a riskQuestions question key to the dot-path on the Client document.
 // Priority for value resolution: riskQuestion answer → client profile field → type default.
 const CLIENT_FIELD_MAP = {
-  entity_type: "clientType",
+  entity_type: "clientTypeId",
   abn: "registrationNumber",
   co_name: "legalRepresentative.name",
   co_email: "legalRepresentative.email",
@@ -900,6 +900,22 @@ exports.getRiskQuestionsSchema = asyncHandler(async (req, res, next) => {
  *
  * @route  PUT /api/v1/client/:id/risk-questions
  */
+/**
+ * Upsert / merge riskQuestions on a client.
+ * Merges the incoming questions object into the existing riskQuestions so
+ * partial updates only overwrite the supplied keys.
+ *
+ * Bidirectional sync: any answer whose key appears in CLIENT_FIELD_MAP is
+ * written back to the corresponding client profile field so both sources
+ * stay consistent.
+ *
+ * entity_type sync (dual-write):
+ *   riskQuestions.entity_type → name string  (always the human-readable label)
+ *   client.clientType         → name string  (e.g. "Accountants")
+ *   client.clientTypeId       → ObjectId str (EntityType._id as String)
+ *
+ * @route  PUT /api/v1/clients/:id/risk-questions
+ */
 exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   const questions = req.body;
 
@@ -907,45 +923,57 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Body must contain a 'questions' object", 400));
   }
 
-  // Client-role users may only update their own risk questions
-  // if ((req.user?.role ?? "").toLowerCase() === "client") {
-  //   const userClientId = req?.user?.client?._id?.toString();
-  //   if (!userClientId || userClientId !== req.params.id) {
-  //     return next(new ErrorResponse("Not authorized to update this client's risk questions", 403));
-  //   }
-  // }
-
   const client = await Client.findById(req.params.id);
   if (!client) {
     return next(new ErrorResponse(`Client not found with id of ${req.params.id}`, 404));
   }
 
-  // Merge individual keys so a partial update only overwrites supplied fields
-  Object.assign(client.riskQuestions, questions);
+  // ── Resolve entity_type → both name string and ObjectId ──────────────────
+  // Incoming value may be either a plain name ("Accountants") or an ObjectId string.
+  let resolvedEntityName = null;   // → client.clientType  (name string)
+  let resolvedEntityId   = null;   // → client.clientTypeId (ObjectId as String)
 
-  // entity_type is stored as a name in riskQuestions, but client.clientType holds
-  // the EntityType _id. Resolve the name → _id so the clientType sync below keeps
-  // clientType as an id (the client edit form keys its select by _id).
-  let clientTypeId = null;
   if (questions.entity_type !== undefined) {
     if (mongoose.isValidObjectId(questions.entity_type)) {
-      clientTypeId = questions.entity_type;
+      // Incoming is an ObjectId — look up the name
+      const et = await EntityType.findById(questions.entity_type).select("name").lean();
+      if (et) {
+        resolvedEntityId   = String(et._id);
+        resolvedEntityName = et.name;
+      }
     } else {
+      // Incoming is a plain name string — look up the ObjectId
       const et = await EntityType.findOne({ name: questions.entity_type }).select("_id").lean();
-      clientTypeId = et?._id ? String(et._id) : null;
+      resolvedEntityName = questions.entity_type;         // trust the name as-is
+      resolvedEntityId   = et?._id ? String(et._id) : null;
+    }
+
+    // Normalise what gets stored in riskQuestions.entity_type → always the name
+    if (resolvedEntityName) {
+      questions.entity_type = resolvedEntityName;
     }
   }
 
-  // ── Bidirectional sync: write mapped answers back to client profile ──────
+  // ── Merge answers into riskQuestions (partial update) ────────────────────
+  Object.assign(client.riskQuestions, questions);
+
+  // ── Bidirectional sync: write mapped answers back to client profile ───────
+  // CLIENT_FIELD_MAP entry for entity_type now points to "clientTypeId"
+  // (the ObjectId string field). clientType (name) is handled separately below.
   const syncedKeys = [];
+
   Object.entries(CLIENT_FIELD_MAP).forEach(([qKey, clientPath]) => {
     if (questions[qKey] === undefined) return;
+
     let valueToSync = questions[qKey];
+
     if (qKey === "entity_type") {
-      // Skip if we couldn't resolve a valid id — don't clobber clientType.
-      if (!clientTypeId) return;
-      valueToSync = clientTypeId;
+      // CLIENT_FIELD_MAP["entity_type"] === "clientTypeId"
+      // Only sync if we successfully resolved an ObjectId
+      if (!resolvedEntityId) return;
+      valueToSync = resolvedEntityId;
     }
+
     const parts = clientPath.split(".");
     if (parts.length === 1) {
       client[parts[0]] = valueToSync;
@@ -957,8 +985,19 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
       client[parts[0]][parts[1]] = valueToSync;
       client.markModified(parts[0]);
     }
+
     syncedKeys.push(qKey);
   });
+
+  // ── Dual-write for entity_type: also keep clientType (name) in sync ───────
+  if (questions.entity_type !== undefined) {
+    if (resolvedEntityName) {
+      client.clientType   = resolvedEntityName;   // name string
+    }
+    if (resolvedEntityId) {
+      client.clientTypeId = resolvedEntityId;     // ObjectId as String
+    }
+  }
 
   await client.save();
 
@@ -976,7 +1015,6 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
     await generateAMLDocsForClient(client._id, req.user?.id);
   });
 });
-
 /**
  * Optional: update client status (Active/Pending/Inactive/Blocked)
  * @route PUT /api/v1/clients/:id/status
