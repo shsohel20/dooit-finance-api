@@ -103,9 +103,23 @@ function roleEncryptionPlugin(schema, options = {}) {
 
   const hasEncryptedFlag = !!schema.path("isDataEncrypted");
 
-  // ── Encrypt before every .save() ──────────────────────────────────────────
+  // ── Encrypt before .save() — OPT-IN, OFF BY DEFAULT ───────────────────────
+  // Documents (User, Customer, …) are stored as PLAINTEXT when created. Encryption
+  // is an explicit, admin-driven operation owned by the Privacy module
+  // (privacyController: per-doc / bulk encrypt + decrypt, with PrivacySnapshot
+  // rollback) — it must NOT happen automatically just because a record is created.
+  //
+  // Reads still mask/decrypt correctly: autoDecryptDoc keys off the actual stored
+  // value format (looksEncrypted), so plaintext is returned as-is and anything the
+  // Privacy module encrypted is still role-gated. NOTE: role-based "***" masking
+  // only applies once data is actually encrypted via the Privacy module.
+  //
+  // Set ENCRYPT_ON_SAVE=true to restore the legacy auto-encrypt-on-save behaviour.
+  const encryptOnSave = process.env.ENCRYPT_ON_SAVE === "true";
+
   schema.pre("save", function (next) {
     try {
+      if (!encryptOnSave) return next();                 // plaintext-on-create (default)
       if (hasEncryptedFlag && this.isDataEncrypted) return next();
 
       let didEncrypt = false;

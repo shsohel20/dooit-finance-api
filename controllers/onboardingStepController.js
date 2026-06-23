@@ -18,6 +18,8 @@ const resolveEntityFilter = (req, next, source = "query") => {
   const clientId = req.user?.client?._id ?? req.user?.client ?? null;
   const branchId = req.user?.branch?._id ?? req.user?.branch ?? null;
 
+  console.log(clientId)
+
   if (clientId) return { client: clientId };
   if (branchId) return { branch: branchId };
 
