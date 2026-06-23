@@ -515,7 +515,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   //   'host'
   // )}/auth/reset-password/${resetToken}`;
 
-  const resetUrl = `${req.body.clientUrl}/auth/reset-password/${resetToken}`;
+  const resetUrl = `${req.body.clientUrl}/auth/reset-password?${resetToken}`;
 
   const message = passwordResetHtml(resetUrl, await getRawName(user._id));
 
