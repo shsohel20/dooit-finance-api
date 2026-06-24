@@ -1,5 +1,7 @@
 // routes/transactions.js
 const express = require("express");
+const multer  = require("multer");
+
 const {
   createTransaction,
   getTransaction,
@@ -9,37 +11,53 @@ const {
   createDummyTransaction,
   changeTransactionStatus,
   bulkChangeTransactionStatus,
+  exportTransactionsCsv,
+  importTransactionsCsv,
+  downloadTransactionPdf,
 } = require("../controllers/transactionController");
 
-const { protect, authorize } = require("../middleware/auth"); // reuse your auth
+const { protect } = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
-const advancedResults = require("../middleware/advancedResults");
+const transactionFilter = require("../middleware/transactionFilter");
 
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-// Protect all transaction routes (adjust authorize roles as needed)
+// multer — memory storage, CSV only, 5 MB max
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok = file.mimetype === "text/csv" || file.originalname.toLowerCase().endsWith(".csv");
+    cb(ok ? null : new Error("Only .csv files are accepted"), ok);
+  },
+});
+
+// Protect all transaction routes
 router.use(protect);
 
-// List + create
+// ── Collection endpoints ──────────────────────────────────────────────────────
 router
   .route("/")
-  .post(advancedResults(Transaction), getTransactions)
-  .get(advancedResults(Transaction, "customer"), getTransactions);
+  .get(transactionFilter(Transaction), getTransactions)
+  .post(createTransaction);
 
 router.route("/new").post(createTransaction);
 router.route("/dummy").post(createDummyTransaction);
 
-// stats
+// ── Stats ─────────────────────────────────────────────────────────────────────
 router.route("/stats").get(getTransactionStats);
 
-// single tx
-router.route("/:id").get(getTransaction).put(updateTransaction);
+// ── Export / Import CSV (must be before /:id to avoid "export"/"import" as id)
+router.route("/export/csv").get(exportTransactionsCsv);
+router.route("/import/csv").post(upload.single("file"), importTransactionsCsv);
 
-// status change endpoint (single)
-router.route("/:id/status").put(changeTransactionStatus);
-
-// bulk status update
+// ── Bulk status (before /:id for same reason) ────────────────────────────────
 router.route("/status").put(bulkChangeTransactionStatus);
+
+// ── Single transaction ────────────────────────────────────────────────────────
+router.route("/:id").get(getTransaction).put(updateTransaction);
+router.route("/:id/status").put(changeTransactionStatus);
+router.route("/:id/pdf").get(downloadTransactionPdf);
 
 module.exports = router;

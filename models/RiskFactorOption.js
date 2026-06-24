@@ -4,7 +4,6 @@ const RiskFactorOptionSchema = new mongoose.Schema({
     factor: {
         type: String,
         required: true,
-        index: true,
         // product, channel, occupation, industry, customerType, retention
     },
 
