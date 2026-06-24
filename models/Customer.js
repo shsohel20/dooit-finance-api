@@ -54,7 +54,7 @@ const PersonalFormSchema = new Schema(
       type: String,
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const Authorization = new Schema(
@@ -66,7 +66,7 @@ const Authorization = new Schema(
     agent_date: Date,
     documents_attested: { type: Boolean, default: false },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const PersonalKycSchema = new Schema(
@@ -94,7 +94,7 @@ const PersonalKycSchema = new Schema(
       },
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const DocumentMetaSchema = new Schema(
@@ -106,13 +106,15 @@ const DocumentMetaSchema = new Schema(
     docType: String,
     uploadedAt: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: false },
 );
 
 const CustomerSchema = new Schema(
   {
     uid: String,
     sequence: { type: Number, index: true }, // auto incremented
+    sumsubApplicantId: { type: String, default: null },
+    sumsubInspectionId: { type: String, default: null },
     user: {
       type: Schema.Types.ObjectId,
       ref: "Users",
@@ -197,9 +199,35 @@ const CustomerSchema = new Schema(
     isPep: { type: Boolean, default: false },
     sanction: { type: Boolean, default: false },
 
+    // ── KYC extended (Sumsub) ────────────────────────────────────────────────
+    kycVerifiedAt: { type: Date, default: null },
+    kycRejectReason: { type: String, default: null },
+    kycRawResult: { type: Schema.Types.Mixed, default: null },
+
+    // ── AML / PEP / Sanctions Screening (Sumsub) ─────────────────────────────
+    amlStatus: {
+      type: String,
+      enum: ["pending", "clear", "flagged", "yellow"],
+      default: null,
+    },
+    amlRiskLabels: { type: [String], default: [] },  // e.g. ["pep","sanctions","adverseMedia"]
+    amlHits: { type: [Schema.Types.Mixed], default: [] }, // raw Sumsub hit objects
+    amlCheckedAt: { type: Date, default: null },
+    amlVendor: { type: String, default: null }, // "Powered by ComplyAdvantage CSOM"
+
     // soft delete / archived
     consentToScreen: { type: Boolean, default: false }, //Agreement for ongoing screening.
     isActive: { type: Boolean, default: false },
+
+    // ── Lifecycle / offboarding (CRA ECDD gate — decline → 'Offboarded') ─────
+    status: {
+      type: String,
+      enum: ["", "Active", "Offboarded"],
+      default: "",
+    },
+    offboardedAt: { type: Date, default: null },
+    offboardedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
+    offboardReason: { type: String, default: "" },
 
     // generic metadata
     metadata: { type: Schema.Types.Mixed, default: {} },
@@ -214,17 +242,13 @@ const CustomerSchema = new Schema(
 
     // 🔐 controls READ behavior only
     isDataEncrypted: { type: Boolean, default: false },
-
- 
-
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
-
 
 // CustomerSchema.set("toJSON", {
 //   transform: function (doc, ret) {
@@ -238,7 +262,7 @@ const CustomerSchema = new Schema(
  * Generate and assign an invite token.
  */
 CustomerSchema.methods.generateInviteToken = function (
-  expiresInMinutes = 60 * 24 * 7
+  expiresInMinutes = 60 * 24 * 7,
 ) {
   const plain = crypto.randomBytes(20).toString("hex");
   const hashed = crypto.createHash("sha256").update(plain).digest("hex");
@@ -261,7 +285,7 @@ CustomerSchema.methods.generateInviteToken = function (
 
 CustomerSchema.methods.setRelationInvite = function (
   relIndex,
-  expiresInMinutes = 60 * 24 * 7
+  expiresInMinutes = 60 * 24 * 7,
 ) {
   const plain = crypto.randomBytes(20).toString("hex");
   const hashed = crypto.createHash("sha256").update(plain).digest("hex");
@@ -305,7 +329,7 @@ CustomerSchema.methods.findRelationByHashedToken = function (hashed) {
 
 CustomerSchema.index(
   { _id: 1, "relations.client": 1, "relations.branch": 1 },
-  { unique: true, sparse: true, name: "customer_relation_unique" }
+  { unique: true, sparse: true, name: "customer_relation_unique" },
 );
 
 CustomerSchema.index({
@@ -341,7 +365,6 @@ CustomerSchema.pre("save", function (next) {
   }
 });
 
-
 // function autoDecrypt(doc) {
 //   if (!doc) return;
 
@@ -353,7 +376,6 @@ CustomerSchema.pre("save", function (next) {
 //   }
 // }
 
-
 /* =========================
    Read Middleware
 ========================= */
@@ -362,12 +384,11 @@ CustomerSchema.pre("save", function (next) {
 // CustomerSchema.post("find", (docs) => docs.forEach(autoDecrypt));
 // CustomerSchema.post("findOne", autoDecrypt);
 
-
 CustomerSchema.methods.clearInviteToken = function () {
   this.inviteToken = undefined;
   this.inviteTokenExpire = undefined;
   this.inviteTokenPlain = undefined;
-  (this.metadata.client = undefined), (this.metadata.branch = undefined);
+  ((this.metadata.client = undefined), (this.metadata.branch = undefined));
 };
 
 CustomerSchema.virtual("isInviteActive").get(function () {
@@ -417,6 +438,5 @@ CustomerSchema.virtual("riskLabel").get(function () {
 //   fields: ["personalKyc", "documents", "declaration"],
 //   secret: process.env.DATA_ENCRYPTION_KEY,
 // });
-
 
 module.exports = mongoose.model("Customer", CustomerSchema);

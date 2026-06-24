@@ -1,7 +1,23 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "Bash(mongosh --eval \"rs.status\\(\\)\" --quiet)",
+      "PowerShell(mongosh --eval \"rs.status\\(\\)\" --quiet 2>&1)",
+      "Bash(Get-ChildItem -Path \"f:\\\\Fintech\\\\dooit-api\" -Force)",
+      "Bash(Select-Object Name, PSIsContainer)",
+      "PowerShell(Get-ChildItem \"f:\\\\Fintech\\\\dooit-api\" | Where-Object { $_.Name -ne \"node_modules\" } | Format-Table Name, PSIsContainer, Length)",
+      "WebFetch(domain:31.97.71.194)",
+      "Bash(mkdir -p \"f:/Fintech/dooit-api/.claude/skills/run-dooit-api\")",
+      "Bash(bash .claude/skills/run-dooit-api/smoke.sh)",
+      "PowerShell(node --check services/sumsubService.js)",
+      "PowerShell(node --check controllers/onboardingJourneyController.js)",
+      "PowerShell(node --check models/SumsubSyncAudit.js)",
+      "PowerShell(Remove-Item models\\\\SumsubSyncAudit.js -Confirm:$false)",
+      "PowerShell(node --check models/AuditLog.js)"
+    ],
+    "additionalDirectories": [
+      "f:\\Fintech\\dooit-api\\.claude\\skills"
     ]
   }
 }

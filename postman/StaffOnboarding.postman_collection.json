@@ -1,0 +1,314 @@
+{
+  "info": {
+    "name": "Staff Onboarding",
+    "description": "Full staff onboarding API — CRUD, review, Sumsub KYC/AML, and document OCR.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "staffId",
+      "value": "",
+      "type": "string",
+      "description": "Staff ObjectId — auto-set by Create Staff request"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Staff CRUD",
+      "item": [
+        {
+          "name": "Create Staff",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?.staff?._id) {",
+                  "  pm.collectionVariables.set('staffId', res.data.staff._id);",
+                  "  console.log('staffId set:', res.data.staff._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"personal\": {\n    \"role\": \"client\",\n    \"firstName\": \"John\",\n    \"lastName\": \"Doe\",\n    \"dateOfBirth\": \"1990-06-15\",\n    \"nationality\": \"Bangladesh\"\n  },\n  \"contact\": {\n    \"workEmail\": \"john.doe@company.com\",\n    \"phone\": \"+8801700000000\",\n    \"residentialAddress\": \"123 Main St, Dhaka, Bangladesh\"\n  },\n  \"employment\": {\n    \"startDate\": \"2024-01-01\",\n    \"department\": \"compliance\",\n    \"jobTitle\": \"aml_analyst\",\n    \"employmentType\": \"full_time\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff"]
+            },
+            "description": "Creates a User account (random password emailed to workEmail) and the linked Staff record."
+          },
+          "response": []
+        },
+        {
+          "name": "List Staff",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/staff?page=1&limit=25",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff"],
+              "query": [
+                { "key": "page",           "value": "1" },
+                { "key": "limit",          "value": "25" },
+                { "key": "sort",           "value": "-createdAt",  "disabled": true },
+                { "key": "q",              "value": "john",        "disabled": true, "description": "Search by name / workEmail / referenceCode" },
+                { "key": "status",         "value": "approved",    "disabled": true, "description": "draft | submitted | under_review | approved | rejected | pending_docs" },
+                { "key": "kycStatus",      "value": "verified",    "disabled": true, "description": "pending | in_review | verified | rejected" },
+                { "key": "amlStatus",      "value": "clear",       "disabled": true, "description": "pending | clear | flagged | yellow" },
+                { "key": "department",     "value": "compliance",  "disabled": true },
+                { "key": "jobTitle",       "value": "aml_analyst", "disabled": true },
+                { "key": "employmentType", "value": "full_time",   "disabled": true },
+                { "key": "isActive",       "value": "true",        "disabled": true },
+                { "key": "isPep",          "value": "false",       "disabled": true },
+                { "key": "sanction",       "value": "false",       "disabled": true },
+                { "key": "client",         "value": "",            "disabled": true, "description": "Client ObjectId" },
+                { "key": "branch",         "value": "",            "disabled": true, "description": "Branch ObjectId" }
+              ]
+            },
+            "description": "Paginated list with optional filters. Enable/disable query params as needed."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Staff",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Staff",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"personal\": {\n    \"firstName\": \"John\",\n    \"lastName\": \"Smith\",\n    \"nationality\": \"Bangladesh\"\n  },\n  \"contact\": {\n    \"phone\": \"+8801711111111\",\n    \"residentialAddress\": \"456 New St, Dhaka, Bangladesh\"\n  },\n  \"employment\": {\n    \"department\": \"risk\",\n    \"jobTitle\": \"risk_analyst\"\n  },\n  \"declarations\": {\n    \"amlPolicyAgreement\": true,\n    \"accuracyDeclaration\": true\n  },\n  \"additionalNotes\": \"Updated after document review.\",\n  \"isActive\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}"]
+            },
+            "description": "Partial update — only sent fields are overwritten. Relevant User fields (name, email, phone, role) are synced automatically."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Review",
+      "item": [
+        {
+          "name": "Approve Staff",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"approved\",\n  \"note\": \"All documents verified and background check passed.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/review",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "review"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Reject Staff",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"rejected\",\n  \"rejectionReason\": \"ID document is expired.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/review",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "review"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Request More Docs",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"pending_docs\",\n  \"note\": \"Awaiting certified copy of passport.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/review",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "review"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Mark Under Review",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"under_review\",\n  \"note\": \"Compliance team is reviewing the application.\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/review",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "review"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Sumsub KYC / AML",
+      "item": [
+        {
+          "name": "Init Sumsub Applicant",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/sumsub/applicant",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "sumsub", "applicant"]
+            },
+            "description": "Idempotent — creates a Sumsub applicant if one does not exist, otherwise returns the existing one."
+          },
+          "response": []
+        },
+        {
+          "name": "Sync Sumsub Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/staff/{{staffId}}/sumsub/status",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "staff", "{{staffId}}", "sumsub", "status"]
+            },
+            "description": "Fetches live KYC + AML status from Sumsub and syncs all related fields (kycStatus, amlStatus, isPep, sanction, screening.*) into the Staff record."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "OCR",
+      "item": [
+        {
+          "name": "OCR Document (NID front + back)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documents\": [\n    {\n      \"url\": \"https://example.com/nid-front.jpg\",\n      \"docType\": \"national_id\"\n    },\n    {\n      \"url\": \"https://example.com/nid-back.jpg\",\n      \"docType\": \"national_id\"\n    }\n  ],\n  \"cardType\": \"NID\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/ocr/document",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "ocr", "document"]
+            },
+            "description": "NID front + back — fields from both sides are merged in the response."
+          },
+          "response": []
+        },
+        {
+          "name": "OCR Document (Passport)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documents\": [\n    {\n      \"url\": \"https://example.com/passport.jpg\",\n      \"docType\": \"passport\"\n    }\n  ],\n  \"cardType\": \"Passport\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/ocr/document",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "ocr", "document"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "OCR Document (Driving Licence)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documents\": [\n    {\n      \"url\": \"https://example.com/driving-licence.jpg\",\n      \"docType\": \"driving_license\"\n    }\n  ],\n  \"cardType\": \"Driving License\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/ocr/document",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "ocr", "document"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

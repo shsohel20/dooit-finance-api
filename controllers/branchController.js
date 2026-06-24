@@ -6,9 +6,12 @@ const {
   validateBranchUpdate,
   validateBranchCreation,
   generateRandomPassword,
+  initialPassword,
 } = require("../utils");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Client = require("../models/Client");
+const { hashForSearch } = require("../utils/encryption");
 
 /**
  * Basic filter helper for client-side searching by name
@@ -105,31 +108,23 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
   );
 
   let createdUser = null;
-  let initialPassword = null;
+
 
   if (shouldCreateUser) {
     const userName1 =
       userName || (email ? email.split("@")[0] : `${branchCode}`);
 
-    console.log(userName1);
-    createdUser = await User.findOne({
-      email,
-      userName: userName1,
-    });
+    // Use emailHash for dedupe — plaintext email may be AES-encrypted at rest.
+    createdUser = await User.findOne({ emailHash: hashForSearch(email) });
 
     if (!createdUser) {
-      // build user payload
-      // initialPassword = generateRandomPassword(10);
-      initialPassword = "123456";
+
       const uPayload = {
         name: name,
         email: email.toLowerCase(),
         userName: userName1,
         phone,
-        password: initialPassword, // assume User model handles hashing in pre-save
-        // role: "branch", // role for branch login
-        userType: "branch", // custom field if you use it
-        role: "admin", // custom field if you use it
+        password: initialPassword,
         isActive: true,
       };
 
@@ -162,10 +157,13 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
 
   const branch = await Branch.create(branchPayload);
 
-  // Optionally: set branch reference on user (if you want reverse link)
+  // Seed UserType membership after branch is created so we know the clientBelongs.
   if (createdUser) {
-    createdUser.branch = branch._id; // requires User schema to have branch field (optional)
-    await createdUser.save();
+    await UserType.findOneAndUpdate(
+      { user: createdUser._id, userType: "branch", role: "admin", clientBelongs: client ?? null, branchBelongs: branch._id },
+      { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
   }
 
   res.status(201).json({
@@ -232,30 +230,23 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
   );
 
   let createdUser = null;
-  let initialPassword = null;
+
 
   if (shouldCreateUser) {
     const userName1 =
       userName || (email ? email.split("@")[0] : `${branchCode}`);
 
-    createdUser = await User.findOne({
-      email,
-      userName: userName1,
-    });
+    // Use emailHash for dedupe — plaintext email may be AES-encrypted at rest.
+    createdUser = await User.findOne({ emailHash: hashForSearch(email) });
 
     if (!createdUser) {
-      // build user payload
-      // initialPassword = generateRandomPassword(10);
-      initialPassword = "123456";
+
       const uPayload = {
         name: name,
         email: email.toLowerCase(),
         userName: userName1,
         phone,
-        password: initialPassword, // assume User model handles hashing in pre-save
-        // role: "branch", // role for branch login
-        userType: "branch", // custom field if you use it
-        role: "admin", // custom field if you use it
+        password: initialPassword,
         isActive: true,
       };
 
@@ -288,10 +279,13 @@ exports.createDummyBranch = asyncHandler(async (req, res, next) => {
 
   const branch = await Branch.create(branchPayload);
 
-  // Optionally: set branch reference on user (if you want reverse link)
+  // Seed UserType membership after branch is created.
   if (createdUser) {
-    createdUser.branch = branch._id; // requires User schema to have branch field (optional)
-    await createdUser.save();
+    await UserType.findOneAndUpdate(
+      { user: createdUser._id, userType: "branch", role: "admin", clientBelongs: client ?? null, branchBelongs: branch._id },
+      { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
   }
 
   if (!branch) {
@@ -411,10 +405,14 @@ exports.updateBranch = asyncHandler(async (req, res, next) => {
         email: (userEmail || branch.email || "").toLowerCase(),
         userName: userName || (userEmail || branch.email || "").split("@")[0],
         password: newPassword,
-        role: "branch",
-        userType: "branch",
         isActive: true,
       });
+      // Seed UserType membership for this branch user.
+      await UserType.findOneAndUpdate(
+        { user: newUser._id, userType: "branch", role: "branch", clientBelongs: branch.client ?? null, branchBelongs: branch._id },
+        { $setOnInsert: { isActive: true } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
       branch.user = newUser._id;
       await branch.save();
 

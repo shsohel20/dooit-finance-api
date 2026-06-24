@@ -8,8 +8,12 @@ const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
 const ModuleAssignment = require("../models/ModuleAssignment");
 const TrainingModuleAccess = require("../models/TrainingModuleAccess");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Roles = require("../models/Role");
 const axios = require("axios");
+const Client = require("../models/Client");
+const Branch = require("../models/Branch");
+const _ = require("lodash");
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -38,27 +42,86 @@ exports.createModule = asyncHandler(async (req, res, next) => {
   res.status(201).json({ success: true, data: module });
 });
 
-// @desc  Admin assigns module to client / branch / role scope(s)
-// @route POST /api/v1/training-modules/:moduleId/access
-exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
+exports.assignAccess = asyncHandler(async (req, res, next) => {
   const { moduleId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(moduleId))
-    return next(new ErrorResponse("Invalid module id", 400));
 
   const mod = await TrainingModule.findById(moduleId);
   if (!mod) return next(new ErrorResponse("Module not found", 404));
-
-  // Accept a single object or an array of scope objects
   const scopes = Array.isArray(req.body) ? req.body : [req.body];
 
+  console.log(scopes);
+
+  const allRoles = await Roles.find({}).select("_id name").lean();
+  const roleIdToName = {};
+  const roleNameToId = {};
+  for (const r of allRoles) {
+    roleIdToName[String(r._id)] = r.name.toLowerCase();
+    roleNameToId[r.name.toLowerCase()] = String(r._id);
+  }
+
   const docs = scopes.map(({ client, branch, roles }) => ({
+    // uid: `TMACSS_${new mongoose.Types.ObjectId()}`,
     module: moduleId,
-    client: client || undefined,
-    branch: branch || undefined,
+    client: client || null,
+    branch: branch || null,
     roles: Array.isArray(roles) ? roles : roles ? [roles] : [],
     assignedBy: req.user._id,
   }));
+  let clientUsers = [];
+  for (const doc of docs) {
+    const query = {
+      module: moduleId,
+      client: doc.client,
+      branch: doc.branch,
+    };
+    // Resolve tenant-scoped users via UserType (role/tenant now live there, not on User).
+    const membershipFilter = { isActive: true };
+    if (doc.client) membershipFilter.clientBelongs = doc.client;
+    if (doc.branch) membershipFilter.branchBelongs = doc.branch;
+
+    // Collect user IDs from UserType memberships that match any of the target roles.
+    const targetRoleNames = Object.entries(roleNameToId)
+      .filter(([, id]) => doc.roles.includes(id))
+      .map(([name]) => name.toLowerCase());
+
+    const membershipUserIds = targetRoleNames.length
+      ? await UserType.distinct("user", {
+          ...membershipFilter,
+          role: { $in: targetRoleNames.map((n) => new RegExp(`^${n}$`, "i")) },
+        })
+      : [];
+
+    // Also include the client/branch linked users (owner accounts).
+    const client = await Client.findById(doc.client).populate({ path: "user", select: "_id" }).lean();
+    const branch = await Branch.findById(doc.branch).populate({ path: "user", select: "_id" }).lean();
+
+    const extraIds = [client?.user?._id, branch?.user?._id].filter(Boolean);
+    const allIds = [...new Set([...membershipUserIds.map(String), ...extraIds.map(String)])];
+
+    // Build enriched user objects with role info from UserType for the assignDocs step.
+    const memberships = await UserType.find({
+      user: { $in: allIds },
+      isActive: true,
+    }).select("user role").lean();
+
+    // Deduplicate by user — pick first active membership per user.
+    const userToRole = {};
+    for (const m of memberships) {
+      const uid = String(m.user);
+      if (!userToRole[uid]) userToRole[uid] = m.role;
+    }
+
+    const tenantUsers = allIds.map((id) => ({ _id: id, role: userToRole[String(id)] }));
+
+    clientUsers = [
+      ...clientUsers,
+      ...tenantUsers,
+    ];
+
+    clientUsers = clientUsers.filter(
+      (u) => u && doc.roles.includes(roleNameToId[u.role?.toLowerCase()]),
+    );
+  }
 
   let inserted = 0;
   try {
@@ -74,82 +137,99 @@ exports.assignModuleAccess = asyncHandler(async (req, res, next) => {
       return next(err);
     }
   }
+  const uniqueUsers = _.uniqBy(
+    clientUsers.filter((u) => u?._id),
+    (u) => String(u._id),
+  );
 
-  // ── Auto-assign matching learners ──────────────────────────────────────────
-  // Fetch all Roles once (small collection) to build both direction maps
-  const allRoles = await Roles.find({}).select("_id name").lean();
-  const roleIdToName = {};
-  const roleNameToId = {};
-  for (const r of allRoles) {
-    roleIdToName[String(r._id)] = r.name;
-    roleNameToId[r.name] = String(r._id);
-  }
+  const learnerIds = uniqueUsers.map((u) => u._id);
 
-  let autoAssigned = 0;
+  const assignDocs = uniqueUsers.map((u) => ({
+    module: moduleId,
+    learner: u._id,
+    assignedBy: req.user._id,
 
-  for (const scope of docs) {
-    // Build the user filter matching this scope
-    const userFilter = { isActive: true };
-    if (scope.client)  userFilter.clientBelongs = scope.client;
-    if (scope.branch)  userFilter.branchBelongs = scope.branch;
+    roleId: roleNameToId[u.role?.toLowerCase()]
+      ? new mongoose.Types.ObjectId(roleNameToId[u.role.toLowerCase()])
+      : undefined,
+  }));
 
-    if (scope.roles && scope.roles.length > 0) {
-      const roleNames = scope.roles
-        .map((rid) => roleIdToName[String(rid)])
-        .filter(Boolean);
-      if (roleNames.length) userFilter.role = { $in: roleNames };
-    }
-    // roles: [] means open to all roles within this client/branch — no role filter
+  await ModuleAssignment.bulkWrite([
+    // CREATE + UPDATE
+    ...assignDocs.map((doc) => ({
+      updateOne: {
+        filter: {
+          module: doc.module,
+          learner: doc.learner,
+        },
 
-    const matchedUsers = await User.find(userFilter).select("_id role").lean();
-    if (!matchedUsers.length) continue;
+        update: {
+          $set: {
+            assignedBy: doc.assignedBy,
+            roleId: doc.roleId,
+          },
 
-    const assignDocs = matchedUsers.map((u) => ({
-      module: moduleId,
-      learner: u._id,
-      assignedBy: req.user._id,
-      status: "pending",
-      roleId: roleNameToId[u.role] ? new mongoose.Types.ObjectId(roleNameToId[u.role]) : undefined,
-    }));
+          // only when creating
+          $setOnInsert: {
+            uid: `MODASS_${new mongoose.Types.ObjectId()}`,
+            module: doc.module,
+            learner: doc.learner,
+            status: "pending",
+          },
+        },
 
-    try {
-      const ar = await ModuleAssignment.insertMany(assignDocs, {
-        ordered: false,
-        rawResult: true,
-      });
-      autoAssigned += ar.insertedCount ?? 0;
-    } catch (err) {
-      if (err.name === "MongoBulkWriteError" || err.result) {
-        autoAssigned += err.result?.insertedCount ?? err.insertedCount ?? 0;
-      }
-      // silently skip duplicate assignments
-    }
-  }
+        upsert: true,
+      },
+    })),
 
-  if (autoAssigned > 0) {
-    await TrainingModule.findByIdAndUpdate(moduleId, {
-      $inc: { "stats.assignedCount": autoAssigned },
-    });
-  }
-  // ─────────────────────────────────────────────────────────────────────────
+    // DELETE removed learners
+    {
+      deleteMany: {
+        filter: {
+          module: moduleId,
+          learner: {
+            $nin: learnerIds,
+          },
+        },
+      },
+    },
+  ]);
 
   res.status(201).json({
     success: true,
+    moduleId,
     inserted,
     skipped: docs.length - inserted,
-    autoAssigned,
   });
 });
 
 // @desc  Get all access rules for a module
 // @route GET /api/v1/training-modules/:moduleId/access
 exports.getModuleAccess = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
   const { moduleId } = req.params;
+
+  const query = {
+    client,
+    branch,
+    module: moduleId,
+  };
+
+  Object.keys(query).forEach((key) => {
+    if (
+      query[key] == null ||
+      query[key] == undefined ||
+      query[key]?.length == 0
+    ) {
+      delete query[key];
+    }
+  });
 
   if (!mongoose.Types.ObjectId.isValid(moduleId))
     return next(new ErrorResponse("Invalid module id", 400));
 
-  const access = await TrainingModuleAccess.find({ module: moduleId });
+  const access = await TrainingModuleAccess.find(query);
 
   res.status(200).json({ success: true, count: access.length, data: access });
 });
@@ -179,6 +259,8 @@ exports.getModules = asyncHandler(async (req, res, next) => {
 exports.getModule = asyncHandler(async (req, res, next) => {
   if (!isValidId(req.params.id))
     return next(new ErrorResponse("Invalid module id", 400));
+
+  console.log(req.params.id);
 
   const mod = await TrainingModule.findById(req.params.id);
 
@@ -215,7 +297,6 @@ exports.deleteModule = asyncHandler(async (req, res, next) => {
 // PARTS
 //
 
-
 function convertISO8601(duration) {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return 0;
@@ -235,7 +316,7 @@ async function getVideoMetadata(url) {
     provider = "youtube";
 
     const match = url.match(
-      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/
+      /(?:youtube\.com\/(?:watch\?v=|embed\/)|youtu\.be\/)([^&?/]+)/,
     );
 
     videoId = match ? match[1] : null;
@@ -257,7 +338,7 @@ async function getVideoMetadata(url) {
     videoId = match ? match[1] : null;
 
     const res = await axios.get(
-      `https://vimeo.com/api/v2/video/${videoId}.json`
+      `https://vimeo.com/api/v2/video/${videoId}.json`,
     );
 
     durationSec = res.data[0].duration;
@@ -292,8 +373,7 @@ exports.createPart = asyncHandler(async (req, res, next) => {
   const mod = await TrainingModule.findById(moduleId);
   if (!mod) return next(new ErrorResponse("Module not found", 404));
 
-
-  const videoMetaData = await getVideoMetadata(video?.url ?? "")
+  const videoMetaData = await getVideoMetadata(video?.url ?? "");
 
   const part = await TrainingModulePart.create({
     ...req.body,
@@ -333,13 +413,12 @@ exports.updatePart = asyncHandler(async (req, res, next) => {
 
   const { video } = req.body;
 
-  const videoMetaData = await getVideoMetadata(video?.url ?? "")
+  const videoMetaData = await getVideoMetadata(video?.url ?? "");
 
   const reqBody = {
     ...req.body,
     video: videoMetaData,
-  }
-
+  };
 
   const part = await TrainingModulePart.findByIdAndUpdate(
     req.params.partId,
@@ -421,4 +500,3 @@ exports.deleteQuestion = asyncHandler(async (req, res, next) => {
 
   res.status(200).json({ success: true });
 });
-

@@ -1,0 +1,344 @@
+{
+  "info": {
+    "name": "Policy Hub Templates",
+    "description": "Endpoints for creating, managing, importing, and exporting PolicyHub templates.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "templateId",
+      "value": "",
+      "type": "string",
+      "description": "PolicyHubTemplate ObjectId — auto-set by Create / Import requests"
+    },
+    {
+      "key": "policyHubId",
+      "value": "",
+      "type": "string",
+      "description": "Existing PolicyHub ObjectId — used for Save As Template"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Templates",
+      "item": [
+        {
+          "name": "Create Template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('templateId', res.data._id);",
+                  "  console.log('templateId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"AML Policy Template\",\n  \"description\": \"Standard AML policy for financial institutions\",\n  \"docs\": \"<h1>AML Policy</h1><p>This policy outlines...</p>\",\n  \"metadata\": {\n    \"document_type\": \"policy\",\n    \"industry\": \"fintech\",\n    \"jurisdiction\": \"AU\"\n  },\n  \"tags\": [\"aml\", \"policy\", \"compliance\"],\n  \"isGlobal\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/new",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "new"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Import from DOCX",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('templateId', res.data._id);",
+                  "  console.log('templateId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "Select a .docx file to import"
+                },
+                {
+                  "key": "name",
+                  "value": "Imported AML Policy",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "Imported from Word document",
+                  "type": "text"
+                },
+                {
+                  "key": "tags",
+                  "value": "[\"aml\",\"imported\"]",
+                  "type": "text",
+                  "description": "JSON array string"
+                },
+                {
+                  "key": "metadata",
+                  "value": "{\"document_type\":\"policy\",\"industry\":\"fintech\"}",
+                  "type": "text",
+                  "description": "JSON object string"
+                },
+                {
+                  "key": "isGlobal",
+                  "value": "false",
+                  "type": "text"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/import-docx",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "import-docx"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Templates (GET)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates?page=1&limit=20",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" },
+                { "key": "select", "value": "", "disabled": true },
+                { "key": "sort", "value": "-createdAt", "disabled": true }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Templates (POST filter)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"AML\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates?page=1&limit=20",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "20" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Template",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Template",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated AML Policy Template\",\n  \"description\": \"Revised description\",\n  \"docs\": \"<h1>Updated AML Policy</h1><p>Revised content...</p>\",\n  \"tags\": [\"aml\", \"policy\", \"updated\"],\n  \"metadata\": {\n    \"version\": \"2.0\"\n  },\n  \"isGlobal\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Template",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Import / Export",
+      "item": [
+        {
+          "name": "Export Template as DOCX",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}/export-docx",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}", "export-docx"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Export Template as PDF",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}/export-pdf",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}", "export-pdf"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Template Actions",
+      "item": [
+        {
+          "name": "Use Template (Create PolicyHub from Template)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('policyHubId', res.data._id);",
+                  "  console.log('policyHubId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"metadata\": {\n    \"name\": \"My Company AML Policy\",\n    \"industry\": \"fintech\",\n    \"jurisdiction\": \"AU\"\n  }\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub-templates/{{templateId}}/use",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub-templates", "{{templateId}}", "use"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Save PolicyHub as Template",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data?._id) {",
+                  "  pm.collectionVariables.set('templateId', res.data._id);",
+                  "  console.log('templateId set:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"AML Policy — Saved from PolicyHub\",\n  \"description\": \"Snapshot of the approved AML policy\",\n  \"tags\": [\"aml\", \"approved\"],\n  \"isGlobal\": false\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/policy-hub/{{policyHubId}}/save-as-template",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "policy-hub", "{{policyHubId}}", "save-as-template"]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

@@ -42,7 +42,7 @@ app.use(
   }),
 );
 
-// app.use(express.json({ limit: "10kb" }));
+// app.use(express.json({ limit: "10mb" })); no need at moment, we are using inside route level
 app.use(express.urlencoded({ extended: true }));
 // app.use(mongoSanitize());
 
@@ -88,6 +88,10 @@ const server = app.listen(
     `Serer running in ${process.env.NODE_ENV} mode on port ${PORT}`.yellow,
   ),
 );
+
+// CRA periodic-review reminders (N_020 due-soon / N_021 overdue daily)
+const { startCraReviewNotificationJob } = require("./utils/craReviewNotifications");
+startCraReviewNotificationJob();
 
 //Handle unhandled promise rejection
 process.on("unhandledRejection", (err, promise) => {

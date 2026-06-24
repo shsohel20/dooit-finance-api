@@ -3,6 +3,9 @@ const CountryRisk = require("../models/CountryRisk");
 const Customer = require("../models/Customer");
 const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 const RiskFactorOption = require("../models/RiskFactorOption");
+const AuditLog = require("../models/AuditLog");
+const { logCraEvent } = require("../utils/craAudit");
+const { deriveClientEntityTypes } = require("../utils/craEntityType");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
 
@@ -97,29 +100,50 @@ async function buildCountryRiskListFromDB() {
 // });
 
 exports.getRiskFactors = asyncHandler(async (req, res) => {
+  // ?entityType=Banks & ADIs — narrows the product catalogue to one entity type
+  const { entityType } = req.query;
+
   const rows = await RiskFactorOption.find({})
-    .select("factor value score risk industry")
+    .select("factor value score risk industry entityType ecddOverride notes")
     .lean();
 
   // group by factor
   const grouped = {};
+  const entityTypes = new Set();
 
   for (const r of rows) {
+    if (r.factor === "product" && r.entityType) entityTypes.add(r.entityType);
+    if (
+      r.factor === "product" &&
+      entityType &&
+      (r.entityType || "").toLowerCase() !== entityType.toLowerCase()
+    )
+      continue;
+
     if (!grouped[r.factor]) grouped[r.factor] = [];
     grouped[r.factor].push({
       value: r.value,
       score: r.score,
       risk: r.risk || null,
       industry: r.industry || null,
+      entityType: r.entityType || null,
+      ecddOverride: !!r.ecddOverride,
+      notes: r.notes || null,
     });
   }
 
   const countries = await buildCountryRiskListFromDB();
 
+  // entity type(s) registered on the requesting client's EntityProfile(s) —
+  // lets the wizard preselect instead of asking
+  const derivedEntityTypes = await deriveClientEntityTypes(req.user?.client?._id);
+
   res.json({
     success: true,
     data: {
       ...grouped,
+      entityTypes: [...entityTypes].sort(),
+      derivedEntityTypes,
       countries,
     },
   });
@@ -159,70 +183,75 @@ function buildCustomerName(c) {
  *   ?client=clientId (optional filter by relation.client)
  */
 exports.getCustomerDropdown = asyncHandler(async (req, res) => {
+  const mongoose = require("mongoose");
+  const { decrypt } = require("../utils/encryption");
   const { q = "", limit = 50, client } = req.query;
 
-  const filter = {
-    isActive: true,
+  // Customer name/email fields are AES-256-GCM encrypted at rest
+  // (roleEncryptionPlugin), so they CANNOT be regex-searched in Mongo — the
+  // old query only ever matched `uid`. We read raw ciphertext via the native
+  // collection (bypasses the masking hook → context-independent), decrypt the
+  // searchable fields, and filter in app.
+  const looksEncrypted = (v) => {
+    if (!v || typeof v !== "string") return false;
+    const p = v.split(":");
+    return p.length === 3 && p[0].length === 32 && p[1].length === 32;
+  };
+  const dec = (v) => {
+    if (!looksEncrypted(v)) return v || "";
+    try {
+      return decrypt(v);
+    } catch {
+      return "";
+    }
   };
 
-  // filter by client relation if provided
-  if (client) {
-    filter["relations.client"] = client;
+  const lim = Math.min(Number(limit) || 50, 50);
+  const tokens = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+
+  const mongoFilter = { isActive: true };
+  const clientId = client || req.user?.client?._id || req.user?.clientBelongs;
+  if (clientId && mongoose.isValidObjectId(clientId)) {
+    mongoFilter["relations.client"] = new mongoose.Types.ObjectId(clientId);
   }
 
-  // basic search
-  if (q) {
-    const tokens = q.trim().split(/\s+/);
+  // bounded candidate pool, newest first; only scan more when searching
+  const POOL = tokens.length ? 1000 : lim;
+  const docs = await Customer.collection
+    .find(mongoFilter)
+    .sort({ createdAt: -1 })
+    .limit(POOL)
+    .toArray();
 
-    filter.$and = tokens.map((word) => ({
-      $or: [
-        { uid: new RegExp(word, "i") },
-        {
-          "personalKyc.personal_form.customer_details.given_name":
-            new RegExp(word, "i"),
-        },
-        {
-          "personalKyc.personal_form.customer_details.surname":
-            new RegExp(word, "i"),
-        },
-        {
-          "personalKyc.personal_form.contact_details.email":
-            new RegExp(word, "i"),
-        },
-      ],
-    }));
-  }
+  const data = [];
+  for (const c of docs) {
+    const det = c.personalKyc?.personal_form?.customer_details || {};
+    const contact = c.personalKyc?.personal_form?.contact_details || {};
+    const given = dec(det.given_name);
+    const middle = dec(det.middle_name);
+    const surname = dec(det.surname);
+    const email = dec(contact.email);
+    const name = [given, middle, surname].filter(Boolean).join(" ").trim();
 
-  const customers = await Customer.find(filter)
+    if (tokens.length) {
+      const haystack = `${c.uid || ""} ${name} ${email}`.toLowerCase();
+      // AND semantics — every token must appear somewhere
+      if (!tokens.every((t) => haystack.includes(t))) continue;
+    }
 
-
-    .limit(Number(limit))
-    .sort({ createdAt: -1 });
-  // IMPORTANT → enables your risk virtuals
-
-  // console.log(customers[0])
-
-  const data = customers.map((c) => {
     const rel = c.relations?.[0];
-
-
-
-    return {
+    data.push({
       id: c._id,
       uid: c.uid,
-      // sequence: c.sequence,
-
-      name: buildCustomerName(c),
+      name: name || c.uid || "Unnamed",
       type: rel?.type || "individual",
-
       kycStatus: c.kycStatus,
       country: c.country,
-
-      riskAssessment: c.riskAssessment,
-
+      email: email || undefined,
       createdAt: c.createdAt,
-    };
-  });
+    });
+    if (data.length >= lim) break;
+  }
 
   res.json({
     success: true,
@@ -237,6 +266,35 @@ exports.getCustomerDropdown = asyncHandler(async (req, res) => {
  * Returns: { riskAssessment, riskScore, riskLabel } from buildRiskAssessmentFromCustomer
  */
 
+/**
+ * Reporting entity type vs the client's registered EntityProfile(s):
+ *  • payload has no entityType → derive it when unambiguous (exactly one type)
+ *  • payload entityType outside the registered types → allowed, but returns a
+ *    mismatch warning that the caller records on the assessment's overrides
+ *    (and therefore in the audit trail)
+ *  • client with no entity profiles → no restriction (legacy behaviour)
+ * Returns { mismatch: string|null }.
+ */
+async function applyDerivedEntityType(payload, req) {
+  const derived = await deriveClientEntityTypes(req.user?.client?._id);
+
+  const submitted = payload.entityType || payload.metadata?.entityType || "";
+  if (submitted) {
+    if (derived.length && !derived.includes(submitted)) {
+      return {
+        mismatch: `Entity type '${submitted}' differs from the registered entity profile (${derived.join(", ")}) — scored against another sector's product catalogue`,
+      };
+    }
+    return { mismatch: null };
+  }
+
+  if (derived.length === 1) {
+    payload.entityType = derived[0];
+    if (payload.metadata) payload.metadata.entityType = derived[0];
+  }
+  return { mismatch: null };
+}
+
 exports.assessFromBody = asyncHandler(async (req, res) => {
   const payload = req.body;
 
@@ -247,8 +305,11 @@ exports.assessFromBody = asyncHandler(async (req, res) => {
     });
   }
 
+  const { mismatch } = await applyDerivedEntityType(payload, req);
+
   // 1️⃣ compute
   const result = buildRiskAssessmentFromCustomer(payload);
+  if (mismatch) result.overrides = [...(result.overrides || []), mismatch];
   const { summary } = buildRiskAssessmentPerRelation(payload);
   // const { relationRisks } = buildRiskAssessmentPerRelation(payload);
 
@@ -275,8 +336,11 @@ exports.assessFromBodySave = asyncHandler(async (req, res) => {
     });
   }
 
+  const { mismatch } = await applyDerivedEntityType(payload, req);
+
   // 1️⃣ compute
   const result = buildRiskAssessmentFromCustomer(payload);
+  if (mismatch) result.overrides = [...(result.overrides || []), mismatch];
 
   // 2️⃣ optional — try link real customer
   let customerDoc = null;
@@ -293,6 +357,17 @@ exports.assessFromBodySave = asyncHandler(async (req, res) => {
     customerDoc?.personalKyc?.personal_form?.customer_details?.given_name ||
     "Unknown";
 
+  // ECDD gate (Section 4): High/Unacceptable or any override blocks service
+  // delivery until the CO approves or declines
+  const ecddRequired = !!result.ecddRequired;
+
+  // Review schedule (Section 4): next_review_date = today + 3y/2y/1y by band
+  let nextReviewDate = null;
+  if (result.reviewYears) {
+    nextReviewDate = new Date();
+    nextReviewDate.setFullYear(nextReviewDate.getFullYear() + result.reviewYears);
+  }
+
   // 4️⃣ store snapshot
   const saved = await IndividualRiskAssessment.create({
     client,
@@ -306,12 +381,49 @@ exports.assessFromBodySave = asyncHandler(async (req, res) => {
     assessment: result.riskAssessment,
     riskScore: result.riskScore,
     riskLabel: result.riskLabel,
+    entityType: payload.entityType || payload.metadata?.entityType || "",
+    overrides: result.overrides || [],
+    serviceBlocked: !!result.serviceBlocked,
+
+    ecddRequired,
+    cddGate: ecddRequired,
+    ecddStatus: ecddRequired ? "Pending" : "",
+    nextReviewDate,
 
     assessedBy: req.user?._id || null,
     source: "api",
+    version: 2, // CRA V2 scoring scale (1–5; bands 17/20/99/100)
   });
 
-  // 5️⃣ return saved doc
+  // 5️⃣ audit trail (Section 4 — every CRA score/status change)
+  await logCraEvent({
+    req,
+    assessment: saved,
+    action: "CRA_CREATED",
+    after: {
+      riskScore: saved.riskScore,
+      riskLabel: saved.riskLabel,
+      ecddRequired: saved.ecddRequired,
+      cddGate: saved.cddGate,
+      nextReviewDate: saved.nextReviewDate,
+      overrides: saved.overrides,
+    },
+    target: saved.customerName,
+  });
+  if (saved.serviceBlocked) {
+    await logCraEvent({
+      req,
+      assessment: saved,
+      action: "ESCALATION_RAISED",
+      after: {
+        riskLabel: saved.riskLabel,
+        reason: "Service blocked — Unacceptable risk. Do not alert client. Contact ASO + AFP. SMR assessment.",
+      },
+      target: saved.customerName,
+    });
+  }
+
+  // 6️⃣ return saved doc
   res.json({
     success: true,
     data: saved,
@@ -349,6 +461,51 @@ exports.assessCustomerById = asyncHandler(async (req, res) => {
 exports.getIndividualRiskAssessments = asyncHandler(async (req, res, next) => {
   // assumes advancedResults middleware populates res.advancedResults
   res.status(200).json(res.advancedResults);
+});
+
+exports.getIndividualRiskAssessment = asyncHandler(async (req, res) => {
+  const doc = await IndividualRiskAssessment.findById(req.params.id)
+    .populate("customer", "uid personalKyc")
+    .populate("assessedBy", "name email")
+    .populate("ecddReport", "uid analystName status recommendation date")
+    .lean();
+  if (!doc) return res.status(404).json({ success: false, message: "Assessment not found" });
+
+  // Score display (spec Section 4): previous score + trend for re-assessed customers
+  let previousAssessment = null;
+  if (doc.customer) {
+    previousAssessment = await IndividualRiskAssessment.findOne({
+      customer: doc.customer._id || doc.customer,
+      createdAt: { $lt: doc.createdAt },
+      _id: { $ne: doc._id },
+    })
+      .sort({ createdAt: -1 })
+      .select("uid riskScore riskLabel createdAt assessedBy")
+      .populate("assessedBy", "name")
+      .lean();
+  }
+
+  res.json({ success: true, data: { ...doc, previousAssessment } });
+});
+
+exports.updateIndividualRiskAssessment = asyncHandler(async (req, res) => {
+  const existing = await IndividualRiskAssessment.findById(req.params.id).select("notes customer client branch customerName").lean();
+  if (!existing) return res.status(404).json({ success: false, message: "Assessment not found" });
+
+  const allowed = { notes: req.body.notes };
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, allowed, { new: true });
+
+  if ((existing.notes || "") !== (doc.notes || "")) {
+    await logCraEvent({
+      req,
+      assessment: doc,
+      action: "CRA_NOTES_UPDATED",
+      before: { notes: existing.notes || "" },
+      after: { notes: doc.notes || "" },
+      target: doc.customerName,
+    });
+  }
+  res.json({ success: true, data: doc });
 });
 
 
@@ -711,4 +868,257 @@ exports.importRiskFactorsCsv = asyncHandler(async (req, res) => {
     success: true,
     inserted: rows.length,
   });
+});
+
+// ── ECDD Gate ──────────────────────────────────────────────────────────────────
+
+// @route POST /api/v1/risk-assessment/:id/ecdd-approve
+/**
+ * Resolve an optional ECDD report reference (Mongo _id or ECDD uid) supplied
+ * with a gate decision. Returns the report (lean) or null; throws 404 via
+ * ErrorResponse when an id was supplied but nothing matches.
+ */
+async function resolveEcddReport(ecddReportId) {
+  if (!ecddReportId) return null;
+  const EcddReport = require("../models/EcddReport");
+  const mongoose = require("mongoose");
+  const report = mongoose.isValidObjectId(ecddReportId)
+    ? await EcddReport.findById(ecddReportId).select("uid riskAssessment").lean()
+    : await EcddReport.findOne({ uid: ecddReportId }).select("uid riskAssessment").lean();
+  if (!report) {
+    const ErrorResponse = require("../utils/errorResponse");
+    throw new ErrorResponse(`ECDD report not found: ${ecddReportId}`, 404);
+  }
+  return report;
+}
+
+exports.ecddApprove = asyncHandler(async (req, res, next) => {
+  const { ecddReviewDate, ecddReportId } = req.body;
+  // UI clients historically send `decision`; accept both keys
+  const ecddDecision = req.body.ecddDecision ?? req.body.decision ?? "";
+  const ErrorResponse = require("../utils/errorResponse");
+
+  const existing = await IndividualRiskAssessment.findById(req.params.id)
+    .select("ecddStatus cddGate ecddDecision customer client branch customerName").lean();
+  if (!existing) return next(new ErrorResponse("CRA record not found", 404));
+
+  const ecddReport = await resolveEcddReport(ecddReportId);
+
+  const update = {
+    ecddStatus: "Approved",
+    cddGate: false,
+    ecddDecision,
+    ecddDecidedBy: req.user?.id || null,
+    ecddDecidedAt: new Date(),
+    ecddReviewDate: ecddReviewDate ? new Date(ecddReviewDate) : null,
+  };
+  if (ecddReport) update.ecddReport = ecddReport._id;
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, update, { new: true });
+
+  if (ecddReport && !ecddReport.riskAssessment) {
+    const EcddReport = require("../models/EcddReport");
+    await EcddReport.updateOne({ _id: ecddReport._id }, { $set: { riskAssessment: doc._id } });
+  }
+
+  await logCraEvent({
+    req,
+    assessment: doc,
+    action: "ECDD_APPROVED",
+    before: { ecddStatus: existing.ecddStatus, cddGate: existing.cddGate },
+    after: {
+      ecddStatus: doc.ecddStatus,
+      cddGate: doc.cddGate,
+      ecddDecision: doc.ecddDecision,
+      ...(ecddReport ? { ecddReport: ecddReport.uid } : {}),
+    },
+    target: doc.customerName,
+  });
+
+  res.status(200).json({ success: true, data: doc });
+});
+
+// @route POST /api/v1/risk-assessment/:id/ecdd-decline
+exports.ecddDecline = asyncHandler(async (req, res, next) => {
+  const { ecddReportId } = req.body;
+  // UI clients historically send `decision`; accept both keys
+  const ecddDecision = req.body.ecddDecision ?? req.body.decision ?? "";
+  const ErrorResponse = require("../utils/errorResponse");
+
+  const existing = await IndividualRiskAssessment.findById(req.params.id)
+    .select("ecddStatus cddGate ecddDecision customer client branch customerName").lean();
+  if (!existing) return next(new ErrorResponse("CRA record not found", 404));
+
+  const ecddReport = await resolveEcddReport(ecddReportId);
+
+  const update = {
+    ecddStatus: "Declined",
+    cddGate: true,
+    ecddDecision,
+    ecddDecidedBy: req.user?.id || null,
+    ecddDecidedAt: new Date(),
+  };
+  if (ecddReport) update.ecddReport = ecddReport._id;
+  const doc = await IndividualRiskAssessment.findByIdAndUpdate(req.params.id, update, { new: true });
+
+  if (ecddReport && !ecddReport.riskAssessment) {
+    const EcddReport = require("../models/EcddReport");
+    await EcddReport.updateOne({ _id: ecddReport._id }, { $set: { riskAssessment: doc._id } });
+  }
+
+  await logCraEvent({
+    req,
+    assessment: doc,
+    action: "ECDD_DECLINED",
+    before: { ecddStatus: existing.ecddStatus, cddGate: existing.cddGate },
+    after: {
+      ecddStatus: doc.ecddStatus,
+      cddGate: doc.cddGate,
+      ecddDecision: doc.ecddDecision,
+      ...(ecddReport ? { ecddReport: ecddReport.uid } : {}),
+    },
+    target: doc.customerName,
+  });
+
+  // Offboard the linked customer (spec Section 4 ECDD gate:
+  // "If CO clicks 'Decline': client status = 'Offboarded'.
+  //  Audit log: CLIENT_OFFBOARDED with reason.")
+  let customerOffboarded = false;
+  if (doc.customer) {
+    const customerBefore = await Customer.findById(doc.customer)
+      .select("status isActive").lean();
+    if (customerBefore) {
+      const reason = ecddDecision || "ECDD declined by Compliance Officer";
+      await Customer.updateOne(
+        { _id: doc.customer },
+        {
+          $set: {
+            status: "Offboarded",
+            isActive: false, // drops out of customer dropdowns / active flows
+            offboardedAt: new Date(),
+            offboardedBy: req.user?.id || null,
+            offboardReason: reason,
+          },
+        },
+      );
+      customerOffboarded = true;
+      await logCraEvent({
+        req,
+        assessment: doc,
+        action: "CLIENT_OFFBOARDED",
+        before: { status: customerBefore.status || "", isActive: customerBefore.isActive },
+        after: { status: "Offboarded", isActive: false, reason },
+        target: doc.customerName,
+      });
+    }
+  }
+
+  res.status(200).json({ success: true, data: doc, customerOffboarded });
+});
+
+// ── CRA Activity Audit Trail (Section 4) ─────────────────────────────────────
+
+// @route GET /api/v1/risk-assessment/:id/audit
+exports.getCraAuditTrail = asyncHandler(async (req, res) => {
+  const entries = await AuditLog.find({ service: "cra", assessment: req.params.id })
+    .select("action actorName actorRole beforeValue afterValue target linkedMatterId createdAt")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  res.json({ success: true, count: entries.length, data: entries });
+});
+
+// @route GET /api/v1/risk-assessment/:id/audit/export
+// InfoTrack-style Activity Audit Trail PDF
+exports.exportCraAuditPdf = asyncHandler(async (req, res, next) => {
+  const ErrorResponse = require("../utils/errorResponse");
+  const puppeteer = require("puppeteer");
+
+  const assessment = await IndividualRiskAssessment.findById(req.params.id).lean();
+  if (!assessment) return next(new ErrorResponse("CRA record not found", 404));
+
+  const entries = await AuditLog.find({ service: "cra", assessment: req.params.id })
+    .sort({ createdAt: 1 })
+    .lean();
+
+  const esc = (s) =>
+    String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]),
+    );
+  const fmtJson = (v) =>
+    v == null ? "—" : esc(typeof v === "string" ? v : JSON.stringify(v, null, 1));
+  const fmtDate = (d) =>
+    new Date(d).toLocaleString("en-AU", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    });
+
+  const rows = entries
+    .map(
+      (e) => `
+      <tr>
+        <td>${fmtDate(e.createdAt)}</td>
+        <td>${esc(e.actorName)}<br/><span class="muted">${esc(e.actorRole)}</span></td>
+        <td><span class="chip">${esc(e.action)}</span></td>
+        <td class="json">${fmtJson(e.beforeValue)}</td>
+        <td class="json">${fmtJson(e.afterValue)}</td>
+      </tr>`,
+    )
+    .join("");
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 10px; color: #1a1a1a; margin: 28px; }
+  h1 { font-size: 16px; margin: 0 0 2px; color: #1F3864; }
+  .sub { color: #666; margin-bottom: 14px; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .meta td { padding: 4px 8px; border: 1px solid #DCE6F1; }
+  .meta td:first-child { background: #DCE6F1; color: #1F3864; font-weight: bold; width: 130px; }
+  table.trail { width: 100%; border-collapse: collapse; }
+  table.trail th { background: #1F3864; color: #fff; text-align: left; padding: 5px 7px; font-size: 9px; }
+  table.trail td { border: 1px solid #ddd; padding: 5px 7px; vertical-align: top; }
+  table.trail tr:nth-child(even) td { background: #F2F7FD; }
+  .chip { background: #EAF1FB; color: #1F3864; padding: 1px 6px; border-radius: 8px; font-weight: bold; font-size: 9px; }
+  .muted { color: #888; font-size: 9px; }
+  .json { font-family: Consolas, monospace; font-size: 8.5px; white-space: pre-wrap; word-break: break-word; max-width: 180px; }
+  .footer { margin-top: 14px; color: #888; font-size: 8.5px; }
+</style></head><body>
+  <h1>Activity Audit Trail — Customer Risk Assessment</h1>
+  <div class="sub">dooit.ai compliance record · generated ${fmtDate(new Date())}</div>
+  <table class="meta">
+    <tr><td>Customer</td><td>${esc(assessment.customerName || "—")}</td></tr>
+    <tr><td>Assessment UID</td><td>${esc(assessment.uid || assessment._id)}</td></tr>
+    <tr><td>Risk Score / Label</td><td>${esc(assessment.riskScore)} / 100 — ${esc(assessment.riskLabel)}</td></tr>
+    <tr><td>ECDD Status</td><td>${esc(assessment.ecddStatus || "Not required")}</td></tr>
+    <tr><td>Entity Type</td><td>${esc(assessment.entityType || "—")}</td></tr>
+    <tr><td>Audit Entries</td><td>${entries.length}</td></tr>
+  </table>
+  <table class="trail">
+    <thead><tr>
+      <th style="width:110px">Timestamp</th><th style="width:95px">Actor</th>
+      <th style="width:120px">Action</th><th>Before</th><th>After</th>
+    </tr></thead>
+    <tbody>${rows || '<tr><td colspan="5">No audit entries recorded.</td></tr>'}</tbody>
+  </table>
+  <div class="footer">This document is a system-generated compliance audit trail (CRA_Scoring_Method.md §4). All times local server time.</div>
+</body></html>`;
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="CRA_Audit_Trail_${assessment.uid || assessment._id}.pdf"`,
+    );
+    res.send(Buffer.from(pdfBuffer));
+  } finally {
+    if (browser) await browser.close();
+  }
 });

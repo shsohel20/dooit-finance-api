@@ -33,7 +33,7 @@ const NonIndividualKyc = require("../models/NonIndividualKyc");
 
 router.route("/").get(
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorize("admin", "client", "branch", "manager", "officer"),
   advancedCustomerResultsQueryOnly({
     model: Customer,
     populate: [
@@ -73,8 +73,8 @@ router.get(
 
 
 router
-  .route("/:id", protect, authorize("admin", "client", "branch"))
-  .get(getCustomer);
+  .route("/:id")
+  .get(protect, authorize("admin", "client", "branch"), getCustomer);
 // .put(updateClient)
 // .delete(deleteClient);
 

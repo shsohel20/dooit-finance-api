@@ -13,6 +13,7 @@ const File = require("../models/File");
 
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
+router.use(express.urlencoded({ extended: true, limit: "3gb" }));
 
 router.route("/").get(advancedResults(File), getAllFiles);
 

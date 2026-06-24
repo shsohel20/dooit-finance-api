@@ -1,0 +1,555 @@
+{
+  "info": {
+    "name": "Entity Type",
+    "description": "CRUD for EntityType — the 10 AUSTRAC-regulated entity types across Tranche 1 and Tranche 2. Includes matchKeywords management for the dynamic entity type resolver.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "PASTE_YOUR_JWT_TOKEN_HERE",
+      "type": "string"
+    },
+    {
+      "key": "entityTypeId",
+      "value": "",
+      "type": "string",
+      "description": "Auto-set by any Create request test script, or paste a real ObjectId"
+    }
+  ],
+  "item": [
+    {
+      "name": "List & Get",
+      "item": [
+        {
+          "name": "Get All Entity Types",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            },
+            "description": "Returns all active entity types sorted by category then name."
+          },
+          "response": []
+        },
+        {
+          "name": "Get All — Tranche 1 Only",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type?category=Tranche 1",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"],
+              "query": [
+                { "key": "category", "value": "Tranche 1", "description": "Banks, Remittance, VASP, Gambling, Insurance" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get All — Tranche 2 Only",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type?category=Tranche 2",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"],
+              "query": [
+                { "key": "category", "value": "Tranche 2", "description": "Lawyers, Accountants, Real Estate, PMD, TCSPs — obligations commence 1 July 2026" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get Single Entity Type",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type/{{entityTypeId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type", "{{entityTypeId}}"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Create — Tranche 1",
+      "item": [
+        {
+          "name": "Create — Banks & ADIs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "  console.log('entityTypeId set to:', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Banks & ADIs\",\n  \"category\": \"Tranche 1\",\n  \"description\": \"Authorised Deposit-taking Institutions — banks, credit unions, building societies, mutual banks, and neobanks regulated under the Banking Act 1959.\",\n  \"riskModelRef\": \"RISK_MODEL_BANK\",\n  \"matchKeywords\": [\"bank\", \"adi\", \"adis\", \"credit union\", \"building society\", \"mutual bank\", \"financial institution\", \"financial\", \"neobank\", \"authorised deposit\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            },
+            "description": "matchKeywords includes 'financial' so clientType values like 'Financial', 'Financial Institution', or 'Financial Services' all resolve to this entity type."
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Remittance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Remittance\",\n  \"category\": \"Tranche 1\",\n  \"description\": \"Remittance service providers and money transfer businesses, including informal value transfer systems (IVTS) and hawala operators.\",\n  \"riskModelRef\": \"RISK_MODEL_REMITTANCE\",\n  \"matchKeywords\": [\"remittance\", \"money transfer\", \"forex\", \"foreign exchange\", \"wire transfer\", \"ivts\", \"hawala\", \"currency exchange\", \"money service\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — VASP/DCEP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VASP/DCEP\",\n  \"category\": \"Tranche 1\",\n  \"description\": \"Virtual Asset Service Providers and Digital Currency Exchange Providers — crypto exchanges, NFT platforms, DeFi services, and digital asset custodians.\",\n  \"riskModelRef\": \"RISK_MODEL_VASP\",\n  \"matchKeywords\": [\"vasp\", \"crypto\", \"cryptocurrency\", \"dcep\", \"digital asset\", \"digital currency\", \"nft\", \"defi\", \"blockchain\", \"virtual asset\", \"crypto exchange\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Gambling/Casino",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Gambling/Casino\",\n  \"category\": \"Tranche 1\",\n  \"description\": \"Casino operators, wagering service providers, lottery operators, and online gambling platforms regulated under state gaming legislation.\",\n  \"riskModelRef\": \"RISK_MODEL_GAMBLING\",\n  \"matchKeywords\": [\"gambling\", \"casino\", \"betting\", \"wagering\", \"lottery\", \"gaming\", \"pokies\", \"online gambling\", \"sportsbet\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Insurance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Insurance\",\n  \"category\": \"Tranche 1\",\n  \"description\": \"Life insurers, general insurers, and insurance intermediaries providing designated services under the AML/CTF Act.\",\n  \"riskModelRef\": \"RISK_MODEL_INSURANCE\",\n  \"matchKeywords\": [\"insurance\", \"insurer\", \"underwriter\", \"life insurance\", \"general insurance\", \"insurance broker\", \"insurance intermediary\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Create — Tranche 2",
+      "item": [
+        {
+          "name": "Create — Lawyers/Conveyancers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Lawyers/Conveyancers\",\n  \"category\": \"Tranche 2\",\n  \"description\": \"Law firms, barristers, solicitors, and licensed conveyancers providing designated legal or conveyancing services. Obligations commence 1 July 2026.\",\n  \"riskModelRef\": \"RISK_MODEL_LAW\",\n  \"matchKeywords\": [\"lawyer\", \"conveyancer\", \"law firm\", \"solicitor\", \"barrister\", \"legal\", \"conveyancing\", \"settlement agent\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Accountants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Accountants\",\n  \"category\": \"Tranche 2\",\n  \"description\": \"Public accounting firms, tax agents, and bookkeeping services providing designated accounting services. Obligations commence 1 July 2026.\",\n  \"riskModelRef\": \"RISK_MODEL_ACCOUNTING\",\n  \"matchKeywords\": [\"accountant\", \"accounting\", \"cpa\", \"tax agent\", \"bookkeeper\", \"bookkeeping\", \"auditor\", \"audit firm\", \"chartered accountant\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Real Estate Agents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Real Estate Agents\",\n  \"category\": \"Tranche 2\",\n  \"description\": \"Licensed real estate agencies buying or selling residential or commercial property. Obligations commence 1 July 2026.\",\n  \"riskModelRef\": \"RISK_MODEL_REALESTATE\",\n  \"matchKeywords\": [\"real estate\", \"realestate\", \"property agent\", \"real estate agent\", \"property manager\", \"buyer agent\", \"buyer's agent\", \"property\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — Precious Metal Dealers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Precious Metal Dealers\",\n  \"category\": \"Tranche 2\",\n  \"description\": \"Dealers in precious metals (gold, silver, platinum) and precious stones, including jewellers and bullion dealers. Obligations commence 1 July 2026.\",\n  \"riskModelRef\": \"RISK_MODEL_PMD\",\n  \"matchKeywords\": [\"precious metal\", \"jeweller\", \"jeweler\", \"gold dealer\", \"silver dealer\", \"bullion\", \"gemstone\", \"diamond\", \"pawn\", \"pawnbroker\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create — TCSPs",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success && res.data && res.data._id) {",
+                  "  pm.collectionVariables.set('entityTypeId', res.data._id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"TCSPs\",\n  \"category\": \"Tranche 2\",\n  \"description\": \"Trust and Company Service Providers — company formation agents, registered agents, nominee directors/shareholders, and trust administrators. Obligations commence 1 July 2026.\",\n  \"riskModelRef\": \"RISK_MODEL_TCSP\",\n  \"matchKeywords\": [\"tcsp\", \"trust company\", \"trust service\", \"company formation\", \"registered agent\", \"nominee director\", \"nominee shareholder\", \"trust administrator\", \"corporate trustee\"],\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type"]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Update",
+      "item": [
+        {
+          "name": "Update — Name & Description",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Banks & ADIs\",\n  \"description\": \"Updated description.\",\n  \"riskModelRef\": \"RISK_MODEL_BANK_V2\"\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type/{{entityTypeId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type", "{{entityTypeId}}"]
+            },
+            "description": "Cache is automatically invalidated after update."
+          },
+          "response": []
+        },
+        {
+          "name": "Update — matchKeywords (Banks & ADIs example)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchKeywords\": [\"bank\", \"adi\", \"adis\", \"credit union\", \"building society\", \"mutual bank\", \"financial institution\", \"financial\", \"neobank\", \"authorised deposit\"]\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type/{{entityTypeId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type", "{{entityTypeId}}"]
+            },
+            "description": "Replace the matchKeywords array. 'financial' is included so clientType values like 'Financial', 'Financial Institution', or 'Financial Services' all resolve to Banks & ADIs. Cache is automatically cleared."
+          },
+          "response": []
+        },
+        {
+          "name": "Update — Deactivate",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": false\n}"
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type/{{entityTypeId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type", "{{entityTypeId}}"]
+            },
+            "description": "Deactivated types are excluded from GET responses and from the resolver cache."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Delete",
+      "item": [
+        {
+          "name": "Delete Entity Type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const res = pm.response.json();",
+                  "if (res.success) {",
+                  "  pm.collectionVariables.set('entityTypeId', '');",
+                  "  console.log('entityTypeId cleared after delete');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{token}}" }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/entity-type/{{entityTypeId}}",
+              "host": ["{{URL}}"],
+              "path": ["api", "v1", "entity-type", "{{entityTypeId}}"]
+            },
+            "description": "Permanently deletes and clears {{entityTypeId}}. Cache is automatically invalidated."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

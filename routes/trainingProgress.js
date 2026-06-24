@@ -12,6 +12,8 @@ const {
     grantRetake,
     getProgressReport,
     getModuleLearnerProgress,
+    getLearnerPartProgress,
+    getMyPartProgress,
 } = require("../controllers/trainingProgressController");
 
 router.use(express.json({ limit: "100kb" }));
@@ -35,6 +37,7 @@ router.post("/:moduleId/start", startModule);
 router.post("/:moduleId/attempts", submitAttempts);
 router.put("/:moduleId/watch", updateWatchProgress);
 router.post("/:moduleId/complete", completeModule);
+router.get("/parts/:partId", getMyPartProgress);
 
 // ── Manager / Admin routes ────────────────────────────────────────────────────
 
@@ -49,6 +52,11 @@ router.get(
     "/:moduleId/learners",
     authorize("admin", "manager"),
     getModuleLearnerProgress
+);
+router.get(
+    "/:moduleId/learners/:learnerId",
+    authorize("admin", "manager"),
+    getLearnerPartProgress
 );
 
 module.exports = router;

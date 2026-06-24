@@ -6,3 +6,9 @@ config/*.env
 
 public/uploads/*
 *.env
+/.claude/*
+
+ai.json
+SKILL.md
+
+config/config.env

@@ -244,20 +244,23 @@ const { isObjEmpty } = require("../utils");
 //     }
 //   };
 const advancedResults =
-  (model, populate = null, filterSection = null) =>
+  (model, populate = null, filterSection = null, options = {}) =>
     async (req, res, next) => {
-      const client = req?.user?.client?._id || req?.user?.clientBelongs || null;
+      const skipClientFilter = options.skipClientFilter === true;
 
+      const client = skipClientFilter ? null : (req?.user?.client?._id || req?.user?.clientBelongs || req.query?.client || null);
+      const branch = skipClientFilter ? null : (req?.user?.branch?._id || req?.user?.branchBelongs || req.query?.branch || null);
 
-      const branch = req?.user?.branch?._id || req?.user?.branchBelongs || null;;
       try {
         // Copy req.query
         const reqQuery = {
           ...req.query,
-          clientBelongs: client,
-          branchBelongs: branch,
-          client,
-          branch
+          ...(skipClientFilter ? {} : {
+            clientBelongs: client,
+            branchBelongs: branch,
+            client,
+            branch,
+          }),
         };
         Object.keys(reqQuery).forEach((key) => {
           if (reqQuery[key] == null) {

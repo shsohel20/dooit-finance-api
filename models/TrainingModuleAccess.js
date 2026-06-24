@@ -9,6 +9,8 @@ const autopopulate = require("mongoose-autopopulate");
  */
 const TrainingModuleAccessSchema = new Schema(
   {
+    uid: { type: String, unique: true, index: true },
+
     module: {
       type: Schema.Types.ObjectId,
       ref: "TrainingModule",
@@ -22,6 +24,7 @@ const TrainingModuleAccessSchema = new Schema(
       ref: "Client",
       index: true,
       autopopulate: { select: "name" },
+      default: null,
     },
 
     branch: {
@@ -29,6 +32,7 @@ const TrainingModuleAccessSchema = new Schema(
       ref: "Branch",
       index: true,
       autopopulate: { select: "name" },
+      default: null,
     },
 
     // Optional role filters within the client/branch
@@ -64,15 +68,26 @@ const TrainingModuleAccessSchema = new Schema(
     timestamps: true,
     toJSON: { virtuals: true },
     toObject: { virtuals: true },
-  }
+  },
 );
 
 // Prevent duplicate scope per module+client+branch combination
 TrainingModuleAccessSchema.index(
   { module: 1, client: 1, branch: 1 },
-  { unique: true, sparse: true }
+  { unique: true, sparse: true },
 );
 
 TrainingModuleAccessSchema.plugin(autopopulate);
 
-module.exports = mongoose.model("TrainingModuleAccess", TrainingModuleAccessSchema);
+TrainingModuleAccessSchema.pre("save", async function (next) {
+  if (this.isNew && !this.uid) {
+    this.uid = `TMACSS_${Date.now()}`;
+  }
+
+  next();
+});
+
+module.exports = mongoose.model(
+  "TrainingModuleAccess",
+  TrainingModuleAccessSchema,
+);

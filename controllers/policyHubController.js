@@ -2,12 +2,13 @@ const { default: axios } = require("axios");
 const asyncHandler = require("../middleware/async");
 const PolicyHub = require("../models/PolicyHub");
 const ErrorResponse = require("../utils/errorResponse");
-const htmlPdf = require("html-pdf");
+const puppeteer = require("puppeteer");
 const fs = require("fs/promises");
 const { marked } = require("marked");
 const Diff = require("diff");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
-const sanitizeHtml = require("sanitize-html");
+const { importDocxToHtml, sanitizeForEditor } = require("../utils/docxImportService");
+const { convertHtmlToDocx } = require("../utils/docxExportService");
 
 /**
  * Filter helper for POST search
@@ -85,12 +86,11 @@ exports.createPolicyHub = asyncHandler(async (req, res, next) => {
   res.status(201).json({ success: true, data: policyHub });
 });
 
-// @desc    Generate policy hub
+// @desc    Trigger AI document generation, returns a pending PolicyHub immediately
 // @route   POST /api/v1/policy-hub/generate
 // @access  Private (Admin)
 exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
   const policyAMLApi = process.env.REPORT_AI_API_AML;
-
   const client = req?.user?.client?._id || null;
   const branch = req?.user?.branch?._id || null;
 
@@ -98,108 +98,109 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Unauthorized client", 401));
   }
 
-  const payload = { ...req.body };
-  const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document/demo`;
+  // Return existing pending record if one already exists for the same client + key fields
+  const duplicateFilter = { client, status: "pending" };
+  if (req.body.document_type) duplicateFilter["metadata.document_type"] = req.body.document_type;
+  if (req.body.name)          duplicateFilter["metadata.name"]          = req.body.name;
+  if (req.body.industry)      duplicateFilter["metadata.industry"]      = req.body.industry;
+  const existing = await PolicyHub.findOne(duplicateFilter);
+  if (existing) {
+    return res
+      .status(200)
+      .json({ success: true, data: existing, pending: true });
+  }
 
-  let response;
+  // Create a pending record so the client has an ID to poll/track
+  const policyHub = await PolicyHub.create({
+    client,
+    branch,
+    docs: "",
+    filePath: "",
+    generatedBy: req.user?._id,
+    metadata: {
+      source: "ai",
+      promptVersion: "v1",
+      requestedBy: req.user?._id,
+      generatedAt: new Date(),
+      ...req.body,
+    },
+    status: "pending",
+    isActive: false,
+    versionNumber: 1,
+    versions: [],
+  });
+
+  // Build webhook callback URL so the AI service can POST results back
+  const webhookUrl = `${process.env.BASE_URL}/api/v1/policy-hub/${policyHub._id}/webhook`;
+  const policyAiEndPoint = `${policyAMLApi}/api/v1/generate-document`;
+
   try {
-    response = await axios.post(policyAiEndPoint, payload, { timeout: 10000 });
+    await axios.post(
+      policyAiEndPoint,
+      { ...req.body, webhook_url: webhookUrl },
+      { timeout: 15000 },
+    );
   } catch (err) {
+    policyHub.status = "failed";
+    await policyHub.save();
     return next(
       new ErrorResponse("Error calling document generation API", 500),
     );
   }
 
-  const data =
-    typeof response.data === "string"
-      ? JSON.parse(response.data)
-      : response.data || {};
+  res.status(201).json({ success: true, data: policyHub });
+});
 
-  let filePath = data?.file_path || data?.filePath || null;
-  if (!filePath) {
+// @desc    Receive AI-generated document via webhook and update the PolicyHub
+// @route   POST /api/v1/policy-hub/:id/webhook
+// @access  Public (webhook secret required)
+exports.generatePolicyHubWebHook = asyncHandler(async (req, res, next) => {
+  // Validate webhook secret to ensure the call is from the AI service
+  // const secret =
+  //   req.headers["x-webhook-secret"] || req.query.token;
+  // if (process.env.WEBHOOK_SECRET && secret !== process.env.WEBHOOK_SECRET) {
+  //   return next(new ErrorResponse("Unauthorized webhook request", 401));
+  // }
+
+  const policyHub = await PolicyHub.findById(req.params.id);
+  if (!policyHub) {
+    return next(new ErrorResponse("PolicyHub not found", 404));
+  }
+
+  const { file_path, content_md, metadata } = req.body;
+
+  if (!content_md) {
     return next(
-      new ErrorResponse("Generated file path not found in AI response", 500),
+      new ErrorResponse("Missing content_md in webhook payload", 400),
     );
   }
 
-  // Replace root path with safer relative path (only if present)
-  filePath = filePath.replace(
-    "/root/strikeo/strikeo-afc-ai/afc-document-generation/app/output",
-    "/app/output",
-  );
+  // Convert Markdown → sanitized HTML (shared formatting-preserving sanitizer)
+  const unsafeHtml = marked.parse(content_md);
+  const htmlContent = sanitizeForEditor(unsafeHtml);
 
-  // Read Markdown file
-  let markdownContent;
-  try {
-    markdownContent = await fs.readFile(filePath, "utf8");
-  } catch (err) {
-    return next(new ErrorResponse("Failed to read generated file", 500));
-  }
-
-  const unsafeHtml = marked.parse(markdownContent);
-
-  // Convert Markdown → sanitized HTML
-  const htmlContent = sanitizeHtml(unsafeHtml, {
-    allowedTags: sanitizeHtml.defaults.allowedTags.concat([
-      "h1",
-      "h2",
-      "h3",
-      "img",
-      "table",
-      "thead",
-      "tbody",
-      "tr",
-      "th",
-      "td",
-    ]),
-    allowedAttributes: {
-      a: ["href", "name", "target"],
-      img: ["src", "alt", "width", "height"],
-    },
-  });
-
-  // Build metadata for the policyHub
-  const combinedMetadata = {
-    source: "ai",
-    model: data?.model || "unknown",
-    promptVersion: "v1",
-    requestedBy: req.user?._id,
-    generatedAt: new Date(),
-    ...req.body,
-    ...data,
-  };
-
-  // Create the main PolicyHub document (versions kept empty — version stored separately)
-  const policyHub = await PolicyHub.create({
-    client,
-    branch,
-    docs: htmlContent,
-    filePath,
-    generatedBy: req.user?._id,
-    metadata: combinedMetadata,
-    isActive: true,
-    versionNumber: 1,
-    versions: [], // will store ObjectId ref to PolicyHubVersion
-  });
-
-  // Create the separate PolicyHubVersion document for version 1
+  // Create a version document for the generated content
   const versionDoc = await PolicyHubVersion.create({
     policyHub: policyHub._id,
-    versionNumber: 1,
+    versionNumber: policyHub.versionNumber || 1,
     docs: htmlContent,
-    filePath,
-    metadata: data,
+    filePath: file_path || "",
+    metadata: metadata || {},
     isActive: true,
-    editedBy: req.user?._id,
+    editedBy: policyHub.generatedBy,
     editReason: "ai-generation",
   });
 
-  // Attach version ref to main doc and save
+  // Update the PolicyHub with the generated content
+  policyHub.docs = htmlContent;
+  policyHub.filePath = file_path || "";
+  policyHub.metadata = { ...policyHub.metadata, ...(metadata || {}) };
+  policyHub.status = "completed";
+  policyHub.isActive = true;
   policyHub.versions = policyHub.versions || [];
   policyHub.versions.push(versionDoc._id);
   await policyHub.save();
 
-  // Return populated PolicyHub (with the new version populated)
   const populated = await PolicyHub.findById(policyHub._id)
     .populate({
       path: "versions",
@@ -207,7 +208,7 @@ exports.generatePolicyHub = asyncHandler(async (req, res, next) => {
     })
     .populate("generatedBy", "name email");
 
-  res.status(201).json({ success: true, data: populated });
+  res.status(200).json({ success: true, data: populated });
 });
 
 // @desc    Get single policy hub
@@ -232,6 +233,14 @@ exports.getPolicyHub = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/policy-hub/:id
 // @access  Private (Admin)
 // controllers/policyHubController.js (updated updatePolicyHub)
+const nextVersionNumberFor = async (policyHubId) => {
+  const latest = await PolicyHubVersion.findOne({ policyHub: policyHubId })
+    .sort({ versionNumber: -1 })
+    .select("versionNumber")
+    .lean();
+  return (latest?.versionNumber || 0) + 1;
+};
+
 exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
   const policyHub = await PolicyHub.findById(req.params.id);
   if (!policyHub)
@@ -239,10 +248,12 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404),
     );
 
-  // Snapshot current state to new version document
+  // Use the actual next available version to avoid duplicate key on the unique index
+  const nextVN = await nextVersionNumberFor(policyHub._id);
+
   const snapshot = await PolicyHubVersion.create({
     policyHub: policyHub._id,
-    versionNumber: policyHub.versionNumber || 1,
+    versionNumber: nextVN,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
@@ -251,11 +262,9 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
     editReason: req.body.editReason || "update-snapshot",
   });
 
-  // push snapshot id
   policyHub.versions = policyHub.versions || [];
   policyHub.versions.push(snapshot._id);
 
-  // Apply incoming updates
   const { docs, filePath, metadata, isActive } = req.body;
   if (docs !== undefined) policyHub.docs = docs;
   if (filePath !== undefined) policyHub.filePath = filePath;
@@ -267,8 +276,7 @@ exports.updatePolicyHub = asyncHandler(async (req, res, next) => {
     };
   if (isActive !== undefined) policyHub.isActive = isActive;
 
-  // increment version number for the changed main doc
-  policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
+  policyHub.versionNumber = nextVN;
 
   await policyHub.save();
 
@@ -319,9 +327,11 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
   if (!version) return next(new ErrorResponse("Version not found", 404));
 
   // snapshot current state
+  const nextVN = await nextVersionNumberFor(policyHub._id);
+
   const snapshot = await PolicyHubVersion.create({
     policyHub: policyHub._id,
-    versionNumber: policyHub.versionNumber || 1,
+    versionNumber: nextVN,
     docs: policyHub.docs,
     filePath: policyHub.filePath,
     metadata: policyHub.metadata,
@@ -337,7 +347,7 @@ exports.restorePolicyHubVersion = asyncHandler(async (req, res, next) => {
   policyHub.filePath = version.filePath;
   policyHub.metadata = version.metadata;
   policyHub.isActive = version.isActive;
-  policyHub.versionNumber = (policyHub.versionNumber || 1) + 1;
+  policyHub.versionNumber = nextVN;
 
   await policyHub.save();
 
@@ -417,19 +427,95 @@ exports.downloadPolicyHubPDF = asyncHandler(async (req, res, next) => {
       </html>
     `;
 
-  const options = { format: "A4" };
-
-  htmlPdf.create(htmlContent, options).toStream((err, pdfStream) => {
-    if (err) {
-      return next(new ErrorResponse("Error generating PDF", 500));
-    }
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    const page = await browser.newPage();
+    await page.setContent(htmlContent, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({ format: "A4" });
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
       `attachment; filename=policyhub-${policyHub._id}.pdf`,
     );
+    res.send(pdfBuffer);
+  } catch (err) {
+    return next(new ErrorResponse("Error generating PDF", 500));
+  } finally {
+    if (browser) await browser.close();
+  }
+});
 
-    pdfStream.pipe(res);
+// @desc    Export PolicyHub docs as a .docx file
+// @route   GET /api/v1/policy-hub/:id/export-docx
+// @access  Private (Admin)
+exports.exportPolicyHubDocx = asyncHandler(async (req, res, next) => {
+  const policyHub = await PolicyHub.findById(req.params.id);
+  if (!policyHub) {
+    return next(new ErrorResponse(`PolicyHub not found with id ${req.params.id}`, 404));
+  }
+
+  const { buffer: docxBuffer } = await convertHtmlToDocx(policyHub.docs, {
+    title: policyHub.metadata?.name || "Policy",
   });
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  res.setHeader("Content-Disposition", `attachment; filename=policyhub-${policyHub._id}.docx`);
+  res.send(docxBuffer);
+});
+
+// @desc    Import a .docx file and create a new PolicyHub from it
+// @route   POST /api/v1/policy-hub/import-docx
+// @access  Private (Admin)
+exports.importPolicyHubDocx = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
+  if (!client) {
+    return next(new ErrorResponse("Unauthorized client", 401));
+  }
+
+  if (!req.file) {
+    return next(new ErrorResponse("No .docx file uploaded", 400));
+  }
+
+  // Convert .docx buffer → fidelity-preserving HTML (shared import pipeline)
+  const { html: htmlContent } = await importDocxToHtml(req.file.buffer);
+
+  const metadata = req.body.metadata
+    ? (typeof req.body.metadata === "string" ? JSON.parse(req.body.metadata) : req.body.metadata)
+    : {};
+
+  const policyHub = await PolicyHub.create({
+    client,
+    branch,
+    docs: htmlContent,
+    filePath: "",
+    generatedBy: req.user?._id,
+    metadata: { source: "docx-import", ...metadata },
+    isActive: false,
+    status: "completed",
+    versionNumber: 1,
+    versions: [],
+  });
+
+  const versionDoc = await PolicyHubVersion.create({
+    policyHub: policyHub._id,
+    versionNumber: 1,
+    docs: htmlContent,
+    filePath: "",
+    metadata: policyHub.metadata,
+    isActive: false,
+    editedBy: req.user?._id,
+    editReason: "docx-import",
+  });
+
+  policyHub.versions.push(versionDoc._id);
+  await policyHub.save();
+
+  res.status(201).json({ success: true, data: policyHub });
 });

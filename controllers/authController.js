@@ -1,5 +1,6 @@
 const asyncHandler = require("../middleware/async");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Customer = require("../models/Customer");
 const bcrypt = require("bcryptjs");
 const Otp = require("../models/Otp");
@@ -7,11 +8,16 @@ const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
 const { hashForSearch } = require("../utils/encryption");
+const { resolveMembership } = require("../utils/resolveMembership");
+const { otpVerificationHtml, passwordResetHtml } = require("../utils/email-template/otpEmailTemplate");
+const { getRawEmail, getRawName } = require("../utils/rawUserFields");
 
-const sendTokenResponse = (user, statusCode, res) => {
-  const token = user.getSignedJwtToken();
+// ─── Token response ───────────────────────────────────────────────────────────
+// membership = the resolved UserType row (active hat); pass {} when unknown.
+const sendTokenResponse = (user, membership, statusCode, res) => {
+  const token = user.getSignedJwtToken(membership ?? {});
 
-  let options = {
+  const options = {
     expires: new Date(
       Date.now() + process.env.JWT_COOKIE_EXPIRE * 24 * 60 * 60 * 1000
     ),
@@ -19,7 +25,6 @@ const sendTokenResponse = (user, statusCode, res) => {
     secure: true,
     path: "/",
     sameSite: "None",
-    // domain: 'http://localhost:3000',
   };
 
   res.status(statusCode).cookie("token", token, options).json({
@@ -28,22 +33,19 @@ const sendTokenResponse = (user, statusCode, res) => {
     token,
   });
 };
+
+// ─── Email helpers ─────────────────────────────────────────────────────────────
 const emailSend = async (user, resetToken, clientUrl, res, next) => {
   const resetUrl = `${clientUrl}confirm-user/${resetToken}`;
-
   const message = `You are receiving this email because you has requested the reset
   of a password, Please make a PUT request to: \n\n ${resetUrl}`;
-
   try {
     await sendEmail({
-      email: user.email,
+      email: await getRawEmail(user._id),
       subject: "Confirmation Token token",
       message,
     });
-    res.status(200).json({
-      success: true,
-      message: "Email Send Successfully",
-    });
+    res.status(200).json({ success: true, message: "Email Send Successfully" });
   } catch (error) {
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
@@ -54,23 +56,19 @@ const emailSend = async (user, resetToken, clientUrl, res, next) => {
 const optSend = async (user, message, subject, res, next) => {
   try {
     await sendEmail({
-      email: user.email,
+      email: await getRawEmail(user._id),
       subject,
       message,
     });
-    res.status(200).json({
-      success: true,
-      message: "Email Send Successfully",
-    });
+    res.status(200).json({ success: true, message: "Email Send Successfully" });
   } catch (error) {
     return next(new ErrorResponse("Email could not be sent", 500));
   }
 };
 
-// @desc   Create a user
-// @route   /api/v1/auth/register
-// @access   Public
-
+// ─── Register ─────────────────────────────────────────────────────────────────
+// @route  POST /api/v1/auth/register
+// @access Public
 exports.register = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -81,120 +79,47 @@ exports.register = asyncHandler(async (req, res, next) => {
   #swagger.responses[400] = { description: 'Validation error', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
-  const { name, email, password, role, userName } = req.body;
-  let clientUrl;
-  if (req.body.clientUrl) {
-    clientUrl = req.body.clientUrl;
-  } else {
-    clientUrl = req.header("Referer");
-  }
-  const exitingUser = await User.findOne({ emailHash: hashForSearch(email) });
-  if (exitingUser) {
+  const { name, email, password, role, userName, userType = null } = req.body;
+  let clientUrl = req.body.clientUrl || req.header("Referer");
+
+  const existingUser = await User.findOne({ emailHash: hashForSearch(email) });
+  if (existingUser) {
     return next(new ErrorResponse("The e-mail address used previous!", 400));
   }
 
-  //Create a new user
-  // const user = await User.create({
-  //   name,
-  //   email,
-  //   password,
-  //   role,
-  //   userName,
-  //   // resetPasswordToken,
-  //   // resetPasswordExpire,
-  // }).populate([
-  //   {
-  //     path: "client", // virtual on User
-  //     // select: "name _id",
-  //   },
-  //   {
-  //     path: "customer", // virtual on User
-  //     // select: "name _id",
-  //   },
-  //   {
-  //     path: "branch", // virtual on User
-  //     // select: "name _id",
-  //     populate: { path: "client" },
-  //   },
-  // ])
-  //   .lean()
+  const newUser = await User.create({ name, email, password, userName });
 
-  const newUser = await User.create({
-    name,
-    email,
-    password,
-    role,
-    userName,
-  });
+  // Seed the first UserType membership (idempotent upsert handles re-runs).
+  const roleName = role || "user";
+  const membership = await UserType.findOneAndUpdate(
+    {
+      user: newUser._id,
+      userType: userType ?? "user",
+      role: roleName,
+      clientBelongs: null,
+      branchBelongs: null,
+    },
+    { $setOnInsert: { isActive: true } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
-  const user = await User.findById(newUser._id)
-    .populate([
-      { path: "client" },
-      { path: "customer" },
-      {
-        path: "branch",
-        populate: { path: "client" },
-      },
-    ])
-
+  const user = await User.findById(newUser._id);
 
   const code = Math.floor(100000 + Math.random() * 900000);
-
-  const otp = await Otp.create({
-    code,
-    user: user._id,
-  });
-
+  const otp = await Otp.create({ code, user: user._id });
   if (!otp) {
-    return next(new ErrorResponse(`Otp Created Failed`), 404);
+    return next(new ErrorResponse("Otp Created Failed", 404));
   }
-  const subject = "Confirmation Token";
-  const message = `You need to confirm your account through the <strong>OTP</strong>, \n\n ${code}`;
-  sendTokenResponse(user, 200, res);
+
+  const subject = "Verify Your Account – Confirmation Code";
+  const message = otpVerificationHtml(code, user.name);
+  sendTokenResponse(user, membership, 200, res);
   optSend(user, message, subject, res, next);
-
-  ///Generate Token
-  // const resetToken = crypto.randomBytes(20).toString("hex");
-
-  ///Hash Token and set resetPasswordToken field
-  // const resetPasswordToken = crypto
-  //   .createHash("sha256")
-  //   .update(resetToken)
-  //   .digest("hex");
-
-  ///Set Expires
-  // resetPasswordExpire = Date.now() + 10 * 60 * 1000;
-
-  // emailSend(user, code, clientUrl, res, next);
-
-  // const resetUrl = `${req.body.clientUrl}/auth/reset-password/${resetToken}`;
-
-  // const message = `You are receiving this email because you has requested the reset
-  // of a password, Please make a PUT request to: \n\n ${resetUrl}`;
-
-  // try {
-  //   await sendEmail({
-  //     email: user.email,
-  //     subject: 'Confirmation Token token',
-  //     message,
-  //   });
-  //   res.status(200).json({
-  //     success: true,
-  //     message: 'Email Send Successfully',
-  //   });
-  // } catch (error) {
-  //   user.resetPasswordToken = undefined;
-  //   user.resetPasswordExpire = undefined;
-
-  //   return next(new ErrorResponse('Email could not be sent', 500));
-  // }
-
-  // sendTokenResponse(user, 200, res);
 });
-// @desc   Create a user
-// @route   /api/v1/auth/login
-// @access   Public
 
+// ─── Login ────────────────────────────────────────────────────────────────────
+// @route  POST /api/v1/auth/login
+// @access Public
 exports.login = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -205,6 +130,13 @@ exports.login = asyncHandler(async (req, res, next) => {
   #swagger.responses[400] = { description: 'Invalid credentials', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
+
+  const requestedType = req.headers["x-user-type"] || req.body.userType || null;
+
+  if (!requestedType) {
+    return next(new ErrorResponse(`Invalid request or either contact the support team`, 401));
+  }
+
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -213,25 +145,16 @@ exports.login = asyncHandler(async (req, res, next) => {
     );
   }
 
-  const populateOptions = [
-    { path: "client" },
-    { path: "customer" },
-    { path: "branch", populate: { path: "client" } },
-  ];
-
   // Primary lookup — works for all users once emailHash is set
-  let user = await User.findOne({ emailHash: hashForSearch(email) })
-    .select("+password +emailHash")
-    .populate(populateOptions);
+  let user = await User.findOne({ emailHash: hashForSearch(email) }).select(
+    "+password +emailHash"
+  );
 
   // Fallback for existing users who pre-date emailHash (lazy migration).
-  // Only works when data is not encrypted — fine for legacy plain-text users.
   if (!user) {
-    user = await User.findOne({ email, isDataEncrypted: { $ne: true } })
-      .select("+password +emailHash")
-      .populate(populateOptions);
-
-    // Backfill emailHash so this fallback is only needed once per user
+    user = await User.findOne({ email, isDataEncrypted: { $ne: true } }).select(
+      "+password +emailHash"
+    );
     if (user) {
       await User.updateOne({ _id: user._id }, { emailHash: hashForSearch(email) });
     }
@@ -240,38 +163,47 @@ exports.login = asyncHandler(async (req, res, next) => {
   if (!user) {
     return next(new ErrorResponse("Invalid Credential.", 401));
   }
-  // if (!user.isActive) {
-  //   return next(new ErrorResponse("You are not confirmed user", 401));
-  // }
 
-  //Check password
-  const isMath = await user.mathPassword(password);
-
-  if (!isMath) {
+  const isMatch = await user.mathPassword(password);
+  if (!isMatch) {
     return next(new ErrorResponse("Invalid Credential.", 401));
   }
-  sendTokenResponse(user, 200, res);
+
+  // Resolve the membership for the requested userType (from header or body).
+  const membership = await resolveMembership(user._id, requestedType);
+
+  // No membership found at all — account exists but has no active hat.
+  if (!membership) {
+    return next(new ErrorResponse("Please provide valid credential or either contact the support team", 401));
+  }
+
+  // A specific userType was requested but resolveMembership fell back to a
+  // different type — that means the requested hat doesn't exist for this user.
+  if (requestedType && membership.userType !== requestedType) {
+    return next(new ErrorResponse(`Please provide valid credential or either contact the support team`, 401));
+  }
+
+  sendTokenResponse(user, membership, 200, res);
 });
 
-// @desc   get me
-// @route   /api/v1/auth/me
-// @access   Private
+// ─── Get Me ───────────────────────────────────────────────────────────────────
+// @route  GET /api/v1/auth/me
+// @access Private
 exports.getMe = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
   #swagger.summary = 'Get current user'
-  #swagger.description = 'Returns currently authenticated user'
+  #swagger.description = 'Returns currently authenticated user + membership list'
   #swagger.responses[200] = { description: 'Current user', schema: { success: true, data: {  } } }
   #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
   const clientId = req.user.client?._id ?? null;
   const branchId = req.user.branch?._id ?? null;
 
-  // Build scope conditions (same logic as privacyController.buildFilter)
+  // Build scope conditions
   const userScope = [];
   const customerScope = [];
   if (clientId) {
-    userScope.push({ clientBelongs: clientId });
     customerScope.push({ "relations.client": clientId });
   }
   if (branchId) {
@@ -279,62 +211,91 @@ exports.getMe = asyncHandler(async (req, res, next) => {
     customerScope.push({ "relations.branch": branchId });
   }
 
-  const userFilter = userScope.length ? { $or: userScope } : {};
   const customerFilter = customerScope.length ? { $or: customerScope } : {};
+  const customerUserIds = await Customer.distinct("user", {
+    ...customerFilter,
+    user: { $ne: null },
+  });
+  if (customerUserIds.length) {
+    userScope.push({ _id: { $in: customerUserIds } });
+  }
+
+  const userFilter = userScope.length ? { $or: userScope } : {};
 
   let encryptionStatus = false;
+  let encryptionData = {};
   try {
-    const [totalUsers, encryptedUsers, totalCustomers, encryptedCustomers] = await Promise.all([
-      User.countDocuments(userFilter),
-      User.countDocuments({ ...userFilter, isDataEncrypted: true }),
-      Customer.countDocuments(customerFilter),
-      Customer.countDocuments({ ...customerFilter, isDataEncrypted: true }),
-    ]);
+    const [totalUsers, encryptedUsers, totalCustomers, encryptedCustomers] =
+      await Promise.all([
+        User.countDocuments(userFilter),
+        User.countDocuments({ ...userFilter, isDataEncrypted: true }),
+        Customer.countDocuments(customerFilter),
+        Customer.countDocuments({ ...customerFilter, isDataEncrypted: true }),
+      ]);
 
-    const allEncrypted =
-      totalUsers > 0 && encryptedUsers === totalUsers &&
-      totalCustomers > 0 && encryptedCustomers === totalCustomers;
+    encryptionStatus =
+      totalUsers > 0 &&
+      encryptedUsers === totalUsers &&
+      totalCustomers > 0 &&
+      encryptedCustomers === totalCustomers;
 
-    encryptionStatus = allEncrypted;
+    encryptionData = { totalUsers, encryptedUsers, totalCustomers, encryptedCustomers };
   } catch (err) {
     console.error("[getMe] encryptionStatus failed:", err.message);
   }
 
+  // Self-decrypt PII — req.user comes from .lean() so fields may be masked.
+  let data = req.user;
+  try {
+    const userDoc = await User.findById(req.user.id);
+    if (userDoc && typeof userDoc.decryptForRole === "function") {
+      const decrypted = userDoc.decryptForRole();
+      const secretPaths =
+        typeof User.getEncryptedPaths === "function" ? User.getEncryptedPaths() : [];
+      data = { ...req.user };
+      secretPaths.forEach((path) => {
+        if (decrypted[path] !== undefined) data[path] = decrypted[path];
+      });
+    }
+  } catch (err) {
+    console.error("[getMe] self-decrypt failed:", err.message);
+  }
+
+  // Return all active memberships so the UI can show a role switcher.
+  let memberships = [];
+  try {
+    memberships = await UserType.find({ user: req.user.id, isActive: true })
+      .populate("roleId", "name description")
+      .lean();
+  } catch (err) {
+    console.error("[getMe] memberships fetch failed:", err.message);
+  }
+
   res.status(200).json({
     success: true,
-    data: req.user,
+    encryptionData,
     encryptionStatus,
+    data: { ...data, memberships },
   });
 });
+
+// ─── Get Me (Customer view) ───────────────────────────────────────────────────
+// @route  GET /api/v1/auth/me/customer
+// @access Private
 exports.getMeCustomer = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
   #swagger.summary = 'Get current user (customer view)'
   #swagger.description = 'Returns user + linked customer record and metadata'
-  #swagger.responses[200] = { description: 'User+customer data', schema: {
-      success: true,
-      data: {
-        customer: {},
-        email: 'shsohel20@gmail.com',
-        phone: null,
-        userExists: true,
-        userId: '673d9as91sad81',
-        linkedToCustomer: false,
-        isInviteActive: false,
-        user: {}
-      }
-  } }
+  #swagger.responses[200] = { description: 'User+customer data', schema: { success: true, data: {} } }
   #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
-  // req.user must exist (protect middleware)
-  const userId = req.user && req.user.id ? req.user.id : null;
+  const userId = req.user?.id ?? null;
   if (!userId) return next(new ErrorResponse("Authentication required", 401));
 
-  // load user (exclude password)
   const user = await User.findById(userId).select("-password").lean();
   if (!user) return next(new ErrorResponse("User not found", 404));
 
-  // try: 1) customer linked to this user, 2) fallback: customer by email/phone
   let customer = await Customer.findOne({ user: user._id })
     .populate("relations.client relations.branch")
     .lean();
@@ -342,16 +303,12 @@ exports.getMeCustomer = asyncHandler(async (req, res, next) => {
   let linkedToCustomer = false;
   let email = user.email ?? null;
   let phone = user.phone ?? null;
-  const userExists = true; // since we found the user above
 
   if (customer) {
     linkedToCustomer = true;
-    // prefer contact info from customer metadata/personalKyc if present
     email = customer.metadata?.email;
-
     phone = customer.metadata?.phone;
   } else {
-    // attempt to find a customer by email/phone if not directly linked
     const or = [];
     if (email) {
       or.push({ "metadata.email": email });
@@ -361,17 +318,11 @@ exports.getMeCustomer = asyncHandler(async (req, res, next) => {
       or.push({ "metadata.phone": phone });
       or.push({ "personalKyc.personal_form.contact_details.phone": phone });
     }
-
     if (or.length) {
-      customer = await Customer.findOne({ $or: or })
-        // .populate("relations.client relations.branch")
-        .lean();
-
+      customer = await Customer.findOne({ $or: or }).lean();
       if (customer) {
-        // if customer.user matches this user, it's effectively linked
         linkedToCustomer =
           !!customer.user && customer.user.toString() === user._id.toString();
-
         email =
           customer.metadata?.email ??
           customer.personalKyc?.personal_form?.contact_details?.email ??
@@ -384,37 +335,34 @@ exports.getMeCustomer = asyncHandler(async (req, res, next) => {
     }
   }
 
-  // compute invite active flag (if a customer exists)
   const isInviteActive = !!(
-    customer &&
-    customer.inviteToken &&
-    customer.inviteTokenExpire &&
+    customer?.inviteToken &&
+    customer?.inviteTokenExpire &&
     new Date(customer.inviteTokenExpire).getTime() > Date.now()
   );
-  let latestCustomer = null;
-  if (customer) {
-    latestCustomer = {
-      id: customer?._id,
-      personalKyc: customer?.personalKyc ?? null,
-      country: customer?.country,
-      kycStatus: customer?.kycStatus,
-      kycNotes: customer?.kycNotes,
-      metadata: customer?.metadata,
-      consentToScreen: customer?.consentToScreen,
-      declaration: customer?.declaration,
-      authorized: customer?.authorized,
-      documents: customer?.documents,
-    };
-  }
+
+  const latestCustomer = customer
+    ? {
+      id: customer._id,
+      personalKyc: customer.personalKyc ?? null,
+      country: customer.country,
+      kycStatus: customer.kycStatus,
+      kycNotes: customer.kycNotes,
+      metadata: customer.metadata,
+      consentToScreen: customer.consentToScreen,
+      declaration: customer.declaration,
+      authorized: customer.authorized,
+      documents: customer.documents,
+    }
+    : null;
 
   return res.status(200).json({
     success: true,
     data: {
       customer: latestCustomer,
-      // relations: customer ? customer.relations : [], // optional if you want
       email,
       phone,
-      userExists,
+      userExists: true,
       userId: user._id,
       linkedToCustomer,
       isInviteActive,
@@ -423,9 +371,9 @@ exports.getMeCustomer = asyncHandler(async (req, res, next) => {
   });
 });
 
-// @desc   logout an clear the cookie
-// @route   /api/v1/auth/logout
-// @access   Private
+// ─── Logout ───────────────────────────────────────────────────────────────────
+// @route  GET /api/v1/auth/logout
+// @access Private
 exports.logout = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -433,19 +381,13 @@ exports.logout = asyncHandler(async (req, res, next) => {
   #swagger.description = 'Clears cookie token'
   #swagger.responses[200] = { description: 'Logged out', schema: { $ref: '#/definitions/GenericSuccess' } }
 */
-  res.cookie("token", "none", {
-    expires: new Date(Date.now() + 0),
-    httpOnly: true,
-  });
-
-  res.status(200).json({
-    success: true,
-    data: {},
-  });
+  res.cookie("token", "none", { expires: new Date(Date.now()), httpOnly: true });
+  res.status(200).json({ success: true, data: {} });
 });
-// @desc   get me
-// @route   /api/v1/auth/forgot-password
-// @access   public
+
+// ─── Forgot Password ──────────────────────────────────────────────────────────
+// @route  POST /api/v1/auth/forgot-password
+// @access Public
 exports.forgotPassword = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -457,50 +399,38 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   #swagger.security = [] // public
 */
   const user = await User.findOne({ emailHash: hashForSearch(req.body.email) });
-
   if (!user) {
     return next(new ErrorResponse("The email address is not valid", 404));
   }
 
-  //get reset token
   const resetToken = user.getResetPasswordToken();
+  await User.updateOne(
+    { _id: user._id },
+    { resetPasswordToken: user.resetPasswordToken, resetPasswordExpire: user.resetPasswordExpire }
+  );
 
-  await user.save({ validateBeforeSave: false });
-  ///Create URL
-  // const resetUrl = `http://localhost:3000/auth/reset-password/${resetToken}`;
-
-  // const resetUrl = `${req.protocol}://${req.get(
-  //   'host'
-  // )}/auth/reset-password/${resetToken}`;
-
-  const resetUrl = `${req.body.clientUrl}/auth/reset-password/${resetToken}`;
-
-  const message = `You are receiving this email because you has requested the reset
-  of a password, Please make a PUT request to: \n\n ${resetUrl}`;
+  const resetUrl = `${req.body.clientUrl}/auth/reset-password?${resetToken}`;
+  const message = passwordResetHtml(resetUrl, await getRawName(user._id));
 
   try {
     await sendEmail({
-      email: user.email,
-      subject: "Password reset token",
+      email: await getRawEmail(user._id),
+      subject: "Reset Your Password – Dooit",
       message,
     });
-    res.status(200).json({
-      success: true,
-      message: "Email Send Successfully",
-    });
+    res.status(200).json({ success: true, message: "Email Send Successfully" });
   } catch (error) {
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpire = undefined;
-
-    await user.save({ validateBeforeSave: false });
-
+    await User.updateOne(
+      { _id: user._id },
+      { resetPasswordToken: undefined, resetPasswordExpire: undefined }
+    );
     return next(new ErrorResponse("Email could not be sent", 500));
   }
 });
 
-// @desc   get me
-// @route   /api/v1/auth/reset-password/:resettoken
-// @access   Private
+// ─── Reset Password ───────────────────────────────────────────────────────────
+// @route  PUT /api/v1/auth/reset-password/:resettoken
+// @access Public (token in URL)
 exports.resetPassword = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -510,10 +440,8 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResetPasswordBody' } }
   #swagger.responses[200] = { description: 'Password reset + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
   #swagger.responses[401] = { description: 'Invalid or expired token', schema: { $ref: '#/definitions/ErrorResponse' } }
-  #swagger.security = [] // usually public (token in URL)
+  #swagger.security = []
 */
-
-  //Get Hashed token
   const resetPasswordToken = crypto
     .createHash("sha256")
     .update(req.params.resettoken)
@@ -528,17 +456,20 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid Token.", 401));
   }
 
-  //Set New Password
-  user.password = req.body.password;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-  await user.save();
-  sendTokenResponse(user, 200, res);
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(req.body.password, salt);
+  await User.updateOne(
+    { _id: user._id },
+    { password: hashedPassword, resetPasswordToken: undefined, resetPasswordExpire: undefined }
+  );
+
+  const membership = await resolveMembership(user._id, null);
+  sendTokenResponse(user, membership ?? {}, 200, res);
 });
 
-// @desc   update user detail by user
-// @route   /api/v1/auth/update-me
-// @access   Private
+// ─── Update Me ────────────────────────────────────────────────────────────────
+// @route  PUT /api/v1/auth/update-me
+// @access Private
 exports.updateMe = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -548,7 +479,6 @@ exports.updateMe = asyncHandler(async (req, res, next) => {
   #swagger.responses[200] = { description: 'Profile updated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
   #swagger.responses[401] = { description: 'Unauthorized', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
-
   const updateField = {
     name: req.body.name,
     email: req.body.email,
@@ -560,11 +490,17 @@ exports.updateMe = asyncHandler(async (req, res, next) => {
     runValidators: true,
   });
 
-  sendTokenResponse(user, 200, res);
+  // Re-issue the token keeping the user's current active hat.
+  const activeMembership = req.user.userTypeId
+    ? await UserType.findById(req.user.userTypeId).lean()
+    : await resolveMembership(req.user.id, req.user.userType);
+
+  sendTokenResponse(user, activeMembership ?? {}, 200, res);
 });
-// @desc   update user Password by user
-// @route   /api/v1/auth/update-password
-// @access   Private
+
+// ─── Update Password ──────────────────────────────────────────────────────────
+// @route  PUT /api/v1/auth/update-password
+// @access Private
 exports.updatePassword = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -574,41 +510,42 @@ exports.updatePassword = asyncHandler(async (req, res, next) => {
   #swagger.responses[200] = { description: 'Password updated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
   #swagger.responses[401] = { description: 'Current password mismatch', schema: { $ref: '#/definitions/ErrorResponse' } }
 */
-
   const user = await User.findById(req.user.id).select("+password");
-
-  //Check current password
   if (!(await user.mathPassword(req.body.currentPassword))) {
     return next(new ErrorResponse("Current Password not match.", 401));
   }
 
-  user.password = req.body.newPassword;
+  const salt = await bcrypt.genSalt(10);
+  const hashedPassword = await bcrypt.hash(req.body.newPassword, salt);
+  await User.updateOne({ _id: user._id }, { password: hashedPassword });
 
-  await user.save();
-  sendTokenResponse(user, 200, res);
+  const freshUser = await User.findById(user._id);
+  const activeMembership = req.user.userTypeId
+    ? await UserType.findById(req.user.userTypeId).lean()
+    : await resolveMembership(req.user.id, req.user.userType);
+
+  sendTokenResponse(freshUser, activeMembership ?? {}, 200, res);
 });
 
-// @desc   Create a user
-// @route   /api/v1/auth/register
-// @access   Public
-
+// ─── Customer Register ────────────────────────────────────────────────────────
 exports.customerRegister = asyncHandler(async (req, res, next) => {
   const { name, email, password } = req.body;
 
-  //Create a new user
-  const user = await User.create({
-    name,
-    email,
-    password,
-    role: "customer",
-  });
+  const newUser = await User.create({ name, email, password });
 
-  sendTokenResponse(user, 200, res);
+  const membership = await UserType.findOneAndUpdate(
+    { user: newUser._id, userType: "customer", role: "customer", clientBelongs: null, branchBelongs: null },
+    { $setOnInsert: { isActive: true } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const user = await User.findById(newUser._id);
+  sendTokenResponse(user, membership, 200, res);
 });
 
-// @desc   get me
-// @route   /api/v1/auth/confirm-user/:resettoken
-// @access   Private
+// ─── Confirm User (email token) ───────────────────────────────────────────────
+// @route  PUT /api/v1/auth/confirm-user/:resettoken
+// @access Public (token in URL)
 exports.confirmUser = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -617,10 +554,8 @@ exports.confirmUser = asyncHandler(async (req, res, next) => {
   #swagger.parameters['resettoken'] = { in: 'path', required: true, type: 'string', description: 'Confirmation token' }
   #swagger.responses[200] = { description: 'User activated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
   #swagger.responses[401] = { description: 'Invalid token', schema: { $ref: '#/definitions/ErrorResponse' } }
-  #swagger.security = [] // public via URL token
+  #swagger.security = []
 */
-
-  //Get Hashed token
   const resetPasswordToken = crypto
     .createHash("sha256")
     .update(req.params.resettoken)
@@ -635,17 +570,18 @@ exports.confirmUser = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Invalid Token.", 401));
   }
 
-  //Set New Password
-  user.isActive = true;
-  user.resetPasswordToken = undefined;
-  user.resetPasswordExpire = undefined;
-  await user.save();
-  sendTokenResponse(user, 200, res);
+  await User.updateOne(
+    { _id: user._id },
+    { isActive: true, resetPasswordToken: undefined, resetPasswordExpire: undefined }
+  );
+
+  const membership = await resolveMembership(user._id, null);
+  sendTokenResponse(user, membership ?? {}, 200, res);
 });
 
-// @desc   get me
-// @route   /api/v1/auth/confirm-user/:resettoken
-// @access   Private
+// ─── Confirm User by OTP ──────────────────────────────────────────────────────
+// @route  PUT /api/v1/auth/confirm-user-by-otp
+// @access Public
 exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
@@ -654,12 +590,9 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
   #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ConfirmOtpBody' } }
   #swagger.responses[200] = { description: 'User activated + token', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
   #swagger.responses[400] = { description: 'OTP expired or invalid', schema: { $ref: '#/definitions/ErrorResponse' } }
-  #swagger.security = [] // public
+  #swagger.security = []
 */
-
-  const otp = await Otp.find({
-    expire: { $gt: Date.now() },
-  });
+  const otp = await Otp.find({ expire: { $gt: Date.now() } });
 
   if (!otp || otp.length === 0) {
     return next(new ErrorResponse("The OTP is Expired!.", 400));
@@ -676,13 +609,13 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
       if (!user) {
         return next(new ErrorResponse("Invalid Token.", 401));
       }
-      // active user
-      user.isActive = true;
 
-      await user.save();
+      await User.updateOne({ _id: user._id }, { isActive: true });
+
       userActivated = true;
-      sendTokenResponse(user, 200, res);
-      break; // Break out of the loop once the user is activated
+      const membership = await resolveMembership(user._id, null);
+      sendTokenResponse(user, membership ?? {}, 200, res);
+      break;
     }
   }
 
@@ -691,29 +624,14 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
   }
 });
 
-// new helper: create & send OTP (hash before storing)
+// ─── Resend OTP ───────────────────────────────────────────────────────────────
 const createAndSendOtp = async (user, res, next) => {
-  /*
-  #swagger.tags = ['Auth']
-  #swagger.summary = 'Resend OTP'
-  #swagger.description = 'Create & send a new OTP to user'
-  #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResendOtpBody' } }
-  #swagger.responses[200] = { description: 'OTP sent', schema: { success: true, message: 'OTP Sent' } }
-  #swagger.responses[429] = { description: 'Too many requests', schema: { $ref: '#/definitions/ErrorResponse' } }
-  #swagger.security = [] // public
-*/
-
-  // Delete any old OTPs for the user first (cleanup)
   await Otp.deleteMany({ user: user._id });
 
-  // generate 6-digit numeric code (string)
   const code = Math.floor(100000 + Math.random() * 900000);
-
-  // hash the code before saving (confirmUserByOtp uses bcrypt.compare)
-
-  const otpExpireMs = 10 * 60 * 1000; // 10 minutes
+  const otpExpireMs = 10 * 60 * 1000;
   const otpDoc = await Otp.create({
-    code: code,
+    code,
     user: user._id,
     expire: Date.now() + otpExpireMs,
   });
@@ -722,27 +640,23 @@ const createAndSendOtp = async (user, res, next) => {
     return next(new ErrorResponse("Otp Creation Failed", 500));
   }
 
-  const subject = "Confirmation Token";
-  const message = `You need to confirm your account through the <strong>OTP</strong>: \n\n ${code}`;
-
-  // use your existing optSend which sends the HTTP response
+  const subject = "Verify Your Account – Confirmation Code";
+  const message = otpVerificationHtml(code, user.name);
   return optSend(user, message, subject, res, next);
 };
-// New endpoint: resend OTP
-// @route  POST /api/v1/auth/resend-otp
-// @access Public (or require auth if you prefer)
+
+// @route  POST /api/v1/auth/re-send-opt
+// @access Public
 exports.resendOtp = asyncHandler(async (req, res, next) => {
   /*
   #swagger.tags = ['Auth']
   #swagger.summary = 'Resend OTP'
   #swagger.description = 'Create & send a new OTP to user'
   #swagger.parameters['body'] = { in: 'body', required: true, schema: { $ref: '#/definitions/ResendOtpBody' } }
-  #swagger.responses[200] = { description: 'OTP sent', schema: { success: true, message: 'OTP Sent' } }
+  #swagger.responses[200] = { description: 'OTP sent', schema: { success: true, message: 'Email Send Successfully' } }
   #swagger.responses[429] = { description: 'Too many requests', schema: { $ref: '#/definitions/ErrorResponse' } }
-  #swagger.security = [] // public
+  #swagger.security = []
 */
-
-  // Accept email in body (or whichever identifier you prefer)
   const { email } = req.body;
   if (!email) {
     return next(new ErrorResponse("Please provide an email.", 400));
@@ -757,14 +671,10 @@ exports.resendOtp = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("User already confirmed.", 400));
   }
 
-  // Rate limit: check latest OTP for this user
   const latest = await Otp.findOne({ user: user._id }).sort({ createdAt: -1 });
-
-  // If there's a recent OTP created < 60s ago, block
-  const resendThrottleMs = 60 * 1000; // 60 seconds
+  const resendThrottleMs = 60 * 1000;
   if (
-    latest &&
-    latest.createdAt &&
+    latest?.createdAt &&
     Date.now() - latest.createdAt.getTime() < resendThrottleMs
   ) {
     return next(
@@ -772,9 +682,33 @@ exports.resendOtp = asyncHandler(async (req, res, next) => {
     );
   }
 
-  // If there's a still-valid OTP (not expired), you can either:
-  // - refuse to create a new one (encourage using existing), or
-  // - create a new OTP and delete old ones.
-  // Here we just create a fresh one (we already deleted old ones inside helper).
-  await createAndSendOtp(user, res, next);
+  return createAndSendOtp(user, res, next);
+});
+
+// ─── Switch Context ───────────────────────────────────────────────────────────
+// Re-issues a JWT for a different membership (no user document mutation).
+// @route  POST /api/v1/auth/switch-context/:userTypeId
+// @access Private
+exports.switchContext = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Auth']
+  #swagger.summary = 'Switch active membership context'
+  #swagger.description = 'Re-issue JWT for a different UserType membership (no server-side state change)'
+  #swagger.parameters['userTypeId'] = { in: 'path', required: true, type: 'string', description: 'UserType row _id' }
+  #swagger.responses[200] = { description: 'New JWT for the selected membership', schema: { $ref: '#/definitions/AuthSuccessResponse' } }
+  #swagger.responses[404] = { description: 'Membership not found or inactive' }
+*/
+  const target = await UserType.findOne({
+    _id: req.params.userTypeId,
+    user: req.user.id,
+    isActive: true,
+  }).lean();
+
+  if (!target) {
+    return next(new ErrorResponse("Membership not found or inactive", 404));
+  }
+
+  const user = await User.findById(req.user.id);
+  // No user.save() — token-bound context means nothing is mutated server-side.
+  sendTokenResponse(user, target, 200, res);
 });

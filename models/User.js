@@ -47,45 +47,7 @@ const UserSchema = new mongoose.Schema(
       sparse: true,
     },
     isDataEncrypted: { type: Boolean, default: false },
-    userType: {
-      type: String,
-      trim: true,
-      // unique: true,
-      required: [true, "Please add a  userType"],
-      default: "user", // user, customer, client, branch, dooit 
-    },
-
-    role: {
-      type: String,
-      // enum: [
-      //   "user",
-      //   "collector",
-      //   "approval",
-      //   "admin",
-      //   "customer",
-      //   "analyst",
-      //   "client",
-      //   "client-admin",
-      // ],
-      default: "user",
-    },
-
-    clientBelongs: {
-      type: Schema.Types.ObjectId,
-      ref: "Client",
-      //  required: true,
-      index: true,
-      default: null,
-      // autopopulate: true,
-    },
-    branchBelongs: {
-      type: Schema.Types.ObjectId,
-      ref: "Branch",
-      default: null,
-      index: true,
-      // autopopulate: true,
-
-    },
+   
 
 
     password: {
@@ -133,6 +95,13 @@ const UserSchema = new mongoose.Schema(
 //   foreignField: "author",
 //   justOne: false,
 // });
+
+
+UserSchema.virtual("memberships",
+   { ref: "UserType", 
+    localField: "_id", 
+    foreignField: "user" 
+  });
 
 // 🔥 Virtual populate for customers linked to this user
 UserSchema.virtual("customer", {
@@ -190,18 +159,28 @@ UserSchema.pre("save", async function (next) {
 // };
 
 
-UserSchema.methods.getSignedJwtToken = function () {
+// Accepts the resolved UserType membership row (chosen at login / switch-context).
+// Users is now identity-only — userType/role/tenant live in UserType, not User.
+// Caller is responsible for passing the right membership; see resolveMembership.js.
+UserSchema.methods.getSignedJwtToken = function (m = {}) {
+  // name/email may be AES-256-GCM encrypted at rest. Force-decrypt so the JWT
+  // always carries real plaintext values.
+  const decrypted =
+    typeof this.decryptForRole === "function" ? this.decryptForRole() : this;
+
   return jwt.sign(
     {
       id: this._id,
-      email: this.email,
-      userType: this.userType,
-      name: this.name,
-      role: this.role,
+      email: decrypted.email,
+      name: decrypted.name,
       photoUrl: this.photoUrl,
       isActive: this.isActive,
-      clientType: this.branch?.client?.clientType ?? this.client?.clientType,
-      isClient: this.client ? true : false,
+      // active context — from the membership chosen at login
+      userTypeId: m._id ?? null,
+      userType: m.userType ?? "user",
+      role: m.role ?? "user",
+      clientBelongs: m.clientBelongs ?? null,
+      branchBelongs: m.branchBelongs ?? null,
     },
     process.env.JWT_SECRET,
     { expiresIn: process.env.JWT_EXPIRE }

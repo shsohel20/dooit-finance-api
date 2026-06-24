@@ -16,9 +16,10 @@ const {
   updatePart,
   getQuestion,
   deletePart,
-  assignModuleAccess,
+  // assignModuleAccess,
   getModuleAccess,
   deleteModuleAccess,
+  assignAccess,
 } = require("../controllers/trainingModuleController");
 
 const {
@@ -79,22 +80,15 @@ router
 // ── Module Access (admin assigns module to client/branch/role scopes) ─────────
 router
   .route("/:moduleId/access")
-  .post(authorize("admin"), assignModuleAccess)
+  .post(authorize("admin"), assignAccess)
+  // .put(authorize("admin"), assignModuleAccess)
   .get(authorize("admin", "manager"), getModuleAccess);
 
-router.delete(
-  "/access/:accessId",
-  authorize("admin"),
-  deleteModuleAccess
-);
+router.delete("/access/:accessId", authorize("admin"), deleteModuleAccess);
 
 // ── Assignments (module-scoped) ────────────────────────────────────────────────
 // POST /api/v1/training-modules/:moduleId/assign
-router.post(
-  "/:moduleId/assign",
-  authorize("admin", "manager"),
-  assignModule
-);
+router.post("/:moduleId/assign", authorize("admin", "manager"), assignModule);
 
 // ── Progress (module-scoped) ───────────────────────────────────────────────────
 // GET  /api/v1/training-modules/:moduleId/learners  → per-learner progress breakdown
@@ -102,12 +96,8 @@ router.post(
 router.get(
   "/:moduleId/learners",
   authorize("admin", "manager"),
-  getModuleLearnerProgress
+  getModuleLearnerProgress,
 );
-router.post(
-  "/:moduleId/retake",
-  authorize("admin", "manager"),
-  grantRetake
-);
+router.post("/:moduleId/retake", authorize("admin", "manager"), grantRetake);
 
 module.exports = router;

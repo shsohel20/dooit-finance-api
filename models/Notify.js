@@ -81,8 +81,6 @@ NotifySchema.plugin(AutoIncrement, {
 NotifySchema.index({
   notes: "text",
   "documents.name": "text",
-  uid: 1,
-  sequence: 1,
 });
 
 module.exports = mongoose.model("Notify", NotifySchema);
