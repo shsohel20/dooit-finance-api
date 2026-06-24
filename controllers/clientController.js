@@ -3,13 +3,15 @@ const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const Client = require("../models/Client");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const EntityType = require("../models/EntityType");
-const { validateClientCreation, markOnboardingStep } = require("../utils");
+const { validateClientCreation, markOnboardingStep, initialPassword } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
 const { createRiskRegisterFromClient } = require("./riskRegisterController");
 const { runInBackground } = require("../utils/backgroundJob");
 const { generateAMLDocsForClient } = require("../utils/amlDocGenService");
+const { hashForSearch } = require("../utils/encryption");
 
 /**
  * Simple filter helper similar to filterUserSection
@@ -69,23 +71,18 @@ exports.createClient = asyncHandler(async (req, res, next) => {
 
   let user = null;
 
-  const userName= email;
-  user = await User.findOne({
-    email,
-    userName,
-  });
+  const userName = email;
+  // Use emailHash for dedupe — plaintext email may be AES-encrypted at rest.
+  user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user) {
     user = await User.create({
       name,
       email,
-      userType: "client",
-      password: "DooiT@123456", // TODO: replace with random password
-      role: "admin",
+      password: initialPassword, // TODO: replace with random password
       isActive: true,
       userName,
     });
   }
-  // Create new user
 
   if (!user) return next(new ErrorResponse("Please try again!", 400));
 
@@ -108,6 +105,15 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     settings,
     metadata,
   });
+
+  // Seed UserType AFTER Client exists so clientBelongs can be set correctly.
+  // Remove any stale null-clientBelongs row first (from before the client was created).
+  await UserType.deleteOne({ user: user._id, userType: "client", role: "admin", clientBelongs: null, branchBelongs: null });
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType: "client", role: "admin", clientBelongs: client._id, branchBelongs: null },
+    { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   res.status(201).json({
     succeed: true,
@@ -931,21 +937,21 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   // ── Resolve entity_type → both name string and ObjectId ──────────────────
   // Incoming value may be either a plain name ("Accountants") or an ObjectId string.
   let resolvedEntityName = null;   // → client.clientType  (name string)
-  let resolvedEntityId   = null;   // → client.clientTypeId (ObjectId as String)
+  let resolvedEntityId = null;   // → client.clientTypeId (ObjectId as String)
 
   if (questions.entity_type !== undefined) {
     if (mongoose.isValidObjectId(questions.entity_type)) {
       // Incoming is an ObjectId — look up the name
       const et = await EntityType.findById(questions.entity_type).select("name").lean();
       if (et) {
-        resolvedEntityId   = String(et._id);
+        resolvedEntityId = String(et._id);
         resolvedEntityName = et.name;
       }
     } else {
       // Incoming is a plain name string — look up the ObjectId
       const et = await EntityType.findOne({ name: questions.entity_type }).select("_id").lean();
       resolvedEntityName = questions.entity_type;         // trust the name as-is
-      resolvedEntityId   = et?._id ? String(et._id) : null;
+      resolvedEntityId = et?._id ? String(et._id) : null;
     }
 
     // Normalise what gets stored in riskQuestions.entity_type → always the name
@@ -992,7 +998,7 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
   // ── Dual-write for entity_type: also keep clientType (name) in sync ───────
   if (questions.entity_type !== undefined) {
     if (resolvedEntityName) {
-      client.clientType   = resolvedEntityName;   // name string
+      client.clientType = resolvedEntityName;   // name string
     }
     if (resolvedEntityId) {
       client.clientTypeId = resolvedEntityId;     // ObjectId as String
@@ -1068,22 +1074,17 @@ exports.createDummyClient = asyncHandler(async (req, res, next) => {
 
   let user = null;
 
-  user = await User.findOne({
-    email,
-    userName,
-  });
+  // Use emailHash for dedupe — plaintext email may be AES-encrypted at rest.
+  user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user) {
     user = await User.create({
       name,
       email,
-      userType: "client",
       password: "123456", // TODO: replace with random password
-      role: "admin",
       isActive: true,
       userName,
     });
   }
-  // Create new user
 
   if (!user) return next(new ErrorResponse("Please try again!", 400));
 
@@ -1106,6 +1107,14 @@ exports.createDummyClient = asyncHandler(async (req, res, next) => {
     settings,
     metadata,
   });
+
+  // Seed UserType AFTER Client exists so clientBelongs can be set correctly.
+  await UserType.deleteOne({ user: user._id, userType: "client", role: "admin", clientBelongs: null, branchBelongs: null });
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType: "client", role: "admin", clientBelongs: client._id, branchBelongs: null },
+    { $setOnInsert: { isActive: true } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   res.status(201).json({
     succeed: true,

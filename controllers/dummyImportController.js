@@ -6,6 +6,7 @@ const Branch = require("../models/Branch");
 const Customer = require("../models/Customer");
 const Transaction = require("../models/Transaction");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const { hashForSearch } = require("../utils/encryption");
 
 // ─── User helpers (mirrors clientController / customerController pattern) ────
@@ -49,15 +50,12 @@ async function findOrCreateClientUser(clientData) {
     clientData.userName || email.split("@")[0],
   );
 
-  user = await User.create({
-    name,
-    email,
-    userName,
-    userType: "client",
-    role: "admin",
-    password: "123456",
-    isActive: true,
-  });
+  user = await User.create({ name, email, userName, password: "123456", isActive: true });
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType: "client", role: "admin", clientBelongs: null, branchBelongs: null },
+    { $setOnInsert: { isActive: true } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
   return user;
 }
 
@@ -78,16 +76,12 @@ async function findOrCreateBranchUser(branchData, clientId) {
     branchData.userName || email.split("@")[0],
   );
 
-  user = await User.create({
-    name,
-    email,
-    userName,
-    userType: "branch",
-    role: "user",
-    password: "123456",
-    isActive: true,
-    clientBelongs: clientId,
-  });
+  user = await User.create({ name, email, userName, password: "123456", isActive: true });
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType: "branch", role: "user", clientBelongs: clientId ?? null, branchBelongs: null },
+    { $setOnInsert: { isActive: true } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
   return user;
 }
 
@@ -133,11 +127,14 @@ async function findOrCreateCustomerUser(email, phone, displayName) {
     email: email || undefined,
     phone: phone || undefined,
     userName,
-    userType: "customer",
-    role: "customer",
     password: "123456",
     isActive: false,
   });
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType: "customer", role: "customer", clientBelongs: null, branchBelongs: null },
+    { $setOnInsert: { isActive: false } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 
   return user;
 }

@@ -21,6 +21,7 @@ const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 const AppNotification = require("../models/AppNotification");
 const NotificationRule = require("../models/NotificationRule");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const sendEmail = require("./sendEmail");
 
 const DUE_SOON_DAYS = 30;
@@ -95,17 +96,36 @@ async function emailReviewNotification(ruleId, assessment, title, body, actionLa
   if (!process.env.SMTP_EMAIL || !assessment.client) return 0;
 
   const roles = emailRolesFor(ruleId);
-  // native collection read — the encryption plugin masks emails ("***") on
-  // Mongoose queries that run outside an authenticated request context
+
+  // clientBelongs now lives on UserType, not User. Use native collection reads
+  // so the encryption plugin (which requires a request context) is bypassed.
+  const memberships = await UserType.collection
+    .find(
+      { clientBelongs: assessment.client, isActive: true },
+      { projection: { user: 1, role: 1 } },
+    )
+    .toArray();
+
+  const targetUserIds = [
+    ...new Set(
+      memberships
+        .filter((m) => roles.includes((m.role || "").toLowerCase()))
+        .map((m) => m.user),
+    ),
+  ];
+
+  if (!targetUserIds.length) return 0;
+
+  // Native read bypasses roleEncryptionPlugin so we get raw ciphertext,
+  // which resolveEmail() can decrypt directly.
   const users = await User.collection
     .find(
-      { clientBelongs: assessment.client },
-      { projection: { email: 1, name: 1, role: 1, isActive: 1 } },
+      { _id: { $in: targetUserIds }, isActive: { $ne: false } },
+      { projection: { email: 1, name: 1 } },
     )
     .toArray();
 
   const recipients = users
-    .filter((u) => u.isActive !== false && roles.includes((u.role || "").toLowerCase()))
     .map((u) => ({ name: u.name, email: resolveEmail(u.email) }))
     .filter((u) => u.email);
 

@@ -4,12 +4,14 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Staff = require("../models/Staff");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Role = require("../models/Role");
 const sendEmail = require("../utils/sendEmail");
 const { getRawEmail } = require("../utils/rawUserFields");
 const { generatePassword } = require("../utils/passwordUtils");
 const { staffWelcomeHtml } = require("../utils/email-template/staffEmailTemplate");
 const { attachUserRoleId } = require("../utils/attachUserRoleId");
+const { hashForSearch } = require("../utils/encryption");
 const {
   ensureStaffApplicant,
   submitStaffDocuments,
@@ -88,34 +90,136 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
   // }
 
   // ── derive user fields from staff payload ─────────────────────────────────
-  const fullName = `${personal.firstName} ${personal.lastName}`;
+  const fullName  = `${personal.firstName} ${personal.lastName}`;
+  const roleName  = personal?.role || "user";
+  const plainPassword = "DooiT@123456";
 
-  // ── check for duplicate email ─────────────────────────────────────────────
-  const existingEmail = await User.findOne({ email: contact.workEmail });
-  if (existingEmail) {
-    return next(
-      new ErrorResponse("A user with that work email already exists", 409),
+  // ── check whether this User already exists (emailHash — AES-safe) ─────────
+  const existingUser = await User.findOne({ emailHash: hashForSearch(contact.workEmail) });
+
+  if (existingUser) {
+    // User exists — check whether the same (userType + role + client + branch)
+    // membership is already active.
+    const existingMembership = await UserType.findOne({
+      user: existingUser._id,
+      userType: "client",
+      role: roleName,
+      clientBelongs: client || null,
+      branchBelongs: branch || null,
+      isActive: true,
+    });
+
+    if (existingMembership) {
+      // Membership exists — check whether a Staff record also exists for this
+      // exact combination. If both exist, the staff member is already registered.
+      const existingStaff = await Staff.findOne({
+        user: existingUser._id,
+        client: client || null,
+        branch: branch || null,
+        "personal.role": roleName,
+      });
+
+      if (existingStaff) {
+        return next(
+          new ErrorResponse(
+            "A staff member with this email, role and client/branch combination already exists.",
+            409,
+          ),
+        );
+      }
+
+      // Membership exists but no Staff record — create Staff for the existing user.
+      const staff = await Staff.create({
+        user: existingUser._id,
+        client: client || null,
+        branch: branch || null,
+        createdBy: req.user?._id || null,
+        personal,
+        contact,
+        employment,
+        ...rest,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Staff record created for existing user account",
+        data: {
+          staff,
+          user: {
+            _id: existingUser._id,
+            name: existingUser.name,
+            userName: existingUser.userName,
+            email: contact.workEmail,
+            role: roleName,
+            isActive: existingUser.isActive,
+          },
+        },
+      });
+    }
+
+    // User exists but no matching UserType — add the membership then create Staff.
+    await UserType.findOneAndUpdate(
+      {
+        user: existingUser._id,
+        userType: "client",
+        role: roleName,
+        clientBelongs: client || null,
+        branchBelongs: branch || null,
+      },
+      { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
     );
+
+    const staff = await Staff.create({
+      user: existingUser._id,
+      client: client || null,
+      branch: branch || null,
+      createdBy: req.user?._id || null,
+      personal,
+      contact,
+      employment,
+      ...rest,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Staff member added to existing user account",
+      data: {
+        staff,
+        user: {
+          _id: existingUser._id,
+          name: existingUser.name,
+          userName: existingUser.userName,
+          email: contact.workEmail,
+          role: roleName,
+          isActive: existingUser.isActive,
+        },
+      },
+    });
   }
 
-  //TODO
-  // ── generate random password ──────────────────────────────────────────────
-  // const plainPassword = generatePassword();
-  const plainPassword = 'DooiT@123456';
-
-  // ── create user ───────────────────────────────────────────────────────────
+  // ── User does not exist — full create: User → UserType → Staff ────────────
   const user = await User.create({
     name: fullName,
     userName: contact.workEmail,
     email: contact.workEmail,
     phone: contact.phone || undefined,
-    role: personal?.role,
-    userType: "client",
     password: plainPassword,
     isActive: true,
-    clientBelongs: client || null,
-    branchBelongs: branch || null,
   });
+
+  // ── seed UserType membership for this new staff member ───────────────────
+  await UserType.findOneAndUpdate(
+    {
+      user: user._id,
+      userType: "client",
+      role: roleName,
+      clientBelongs: client || null,
+      branchBelongs: branch || null,
+    },
+    { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
 
   // ── send welcome email with credentials ───────────────────────────────────
   try {
@@ -151,7 +255,7 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
         name: user.name,
         userName: user.userName,
         email: contact.workEmail,
-        role: user.role,
+        role: roleName,
         isActive: user.isActive,
       },
     },
@@ -365,12 +469,15 @@ exports.getStaffByRoleId = asyncHandler(async (req, res, next) => {
   const role = await Role.findById(roleId);
   if (!role) return next(new ErrorResponse("Role not found", 404));
 
-  const userFilter = { role: role.name };
-  if (client) userFilter.clientBelongs = client;
-  if (branch) userFilter.branchBelongs = branch;
+  // Query UserType (not User) — role/tenant now lives in UserType rows.
+  const membershipFilter = {
+    role: { $regex: new RegExp(`^${role.name}$`, "i") },
+    isActive: true,
+  };
+  if (client) membershipFilter.clientBelongs = client;
+  if (branch) membershipFilter.branchBelongs = branch;
 
-  const users = await User.find(userFilter).select("_id");
-  const userIds = users.map((u) => u._id);
+  const userIds = await UserType.distinct("user", membershipFilter);
 
   const page = parseInt(req.query.page, 10) || 1;
   const limit = parseInt(req.query.limit, 10) || 10;

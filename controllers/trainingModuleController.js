@@ -8,6 +8,7 @@ const TrainingModuleQuestion = require("../models/TrainingModuleQuestion");
 const ModuleAssignment = require("../models/ModuleAssignment");
 const TrainingModuleAccess = require("../models/TrainingModuleAccess");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Roles = require("../models/Role");
 const axios = require("axios");
 const Client = require("../models/Client");
@@ -73,35 +74,53 @@ exports.assignAccess = asyncHandler(async (req, res, next) => {
       client: doc.client,
       branch: doc.branch,
     };
-    const queryUser = {
-      // module: moduleId,
-      clientBelongs: doc.client,
-      branchBelongs: doc.branch,
-    };
+    // Resolve tenant-scoped users via UserType (role/tenant now live there, not on User).
+    const membershipFilter = { isActive: true };
+    if (doc.client) membershipFilter.clientBelongs = doc.client;
+    if (doc.branch) membershipFilter.branchBelongs = doc.branch;
 
-    const client = await Client.findById(doc.client)
-      .populate({
-        path: "user",
-        select: "_id role userType",
-      })
-      .lean();
-    const branch = await Branch.findById(doc.branch)
-      .populate({
-        path: "user",
-        select: "_id role userType",
-      })
-      .lean();
+    // Collect user IDs from UserType memberships that match any of the target roles.
+    const targetRoleNames = Object.entries(roleNameToId)
+      .filter(([, id]) => doc.roles.includes(id))
+      .map(([name]) => name.toLowerCase());
+
+    const membershipUserIds = targetRoleNames.length
+      ? await UserType.distinct("user", {
+          ...membershipFilter,
+          role: { $in: targetRoleNames.map((n) => new RegExp(`^${n}$`, "i")) },
+        })
+      : [];
+
+    // Also include the client/branch linked users (owner accounts).
+    const client = await Client.findById(doc.client).populate({ path: "user", select: "_id" }).lean();
+    const branch = await Branch.findById(doc.branch).populate({ path: "user", select: "_id" }).lean();
+
+    const extraIds = [client?.user?._id, branch?.user?._id].filter(Boolean);
+    const allIds = [...new Set([...membershipUserIds.map(String), ...extraIds.map(String)])];
+
+    // Build enriched user objects with role info from UserType for the assignDocs step.
+    const memberships = await UserType.find({
+      user: { $in: allIds },
+      isActive: true,
+    }).select("user role").lean();
+
+    // Deduplicate by user — pick first active membership per user.
+    const userToRole = {};
+    for (const m of memberships) {
+      const uid = String(m.user);
+      if (!userToRole[uid]) userToRole[uid] = m.role;
+    }
+
+    const tenantUsers = allIds.map((id) => ({ _id: id, role: userToRole[String(id)] }));
 
     clientUsers = [
       ...clientUsers,
-      ...(await User.find(queryUser).select("_id role userType").lean()),
-      ...(client?.user ? [client.user] : []),
-      ...(branch?.user ? [branch.user] : []),
+      ...tenantUsers,
     ];
 
     clientUsers = clientUsers.filter(
       (u) => u && doc.roles.includes(roleNameToId[u.role?.toLowerCase()]),
-    ); // filter out null/undefined
+    );
   }
 
   let inserted = 0;

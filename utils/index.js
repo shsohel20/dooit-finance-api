@@ -478,6 +478,8 @@ function hashToken(plain) {
   return crypto.createHash("sha256").update(plain).digest("hex");
 }
 
+const initialPassword = "DooiT@123456"
+
 module.exports = {
   isObjEmpty,
   jsonFormat,
@@ -490,4 +492,5 @@ module.exports = {
   generateRandomPassword,
   createInviteToken,
   hashToken,
+  initialPassword
 };

@@ -15,6 +15,7 @@ const {
   confirmUserByOtp,
   resendOtp,
   getMeCustomer,
+  switchContext,
 } = require("../controllers/authController");
 const { protect } = require("../middleware/auth");
 
@@ -34,5 +35,8 @@ router.route("/confirm-user/:resettoken").put(confirmUser);
 router.route("/confirm-user-by-otp").put(confirmUserByOtp);
 router.route("/update-me").put(protect, updateMe);
 router.route("/update-password").put(protect, updatePassword);
+
+// Re-issue JWT for a different membership — no server-side state change.
+router.route("/switch-context/:userTypeId").post(protect, switchContext);
 
 module.exports = router;

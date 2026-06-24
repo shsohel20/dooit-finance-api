@@ -42,6 +42,7 @@ const bcrypt = require("bcryptjs");
 require("colors");
 
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const Role = require("../models/Role");
 const Permission = require("../models/Permission");
 const RolePermission = require("../models/RolePermission");
@@ -112,23 +113,31 @@ async function run() {
   if (!user) {
     // New doc via .save() so pre-save hooks run: password hash, emailHash, slug,
     // uid, and roleEncryptionPlugin encryption of name/email/userName.
-    user = new User({ name, userName, email, password, role, userType, isActive: true });
+    // NOTE: role/userType are NOT in User schema anymore — they live in UserType.
+    user = new User({ name, userName, email, password, isActive: true });
     await user.save();
     console.log(`✓ Admin user created: ${email}  (uid ${user.uid})`.green);
   } else {
-    // Existing user: update only non-encrypted scalars via updateOne so we never
-    // re-save the masked ("***") name/email back over the ciphertext.
-    const set = { role, userType, isActive: true };
+    // Existing user: ensure isActive; password reset on --force.
+    const set = { isActive: true };
     if (force) {
       const salt = await bcrypt.genSalt(10);
       set.password = await bcrypt.hash(String(password), salt);
     }
     await User.updateOne({ _id: user._id }, { $set: set });
     console.log(
-      `• Admin user already existed — ensured role/userType/isActive${force ? " + reset password" : ""}.`.yellow
+      `• Admin user already existed — ensured isActive${force ? " + reset password" : ""}.`.yellow
     );
     if (!force) console.log(`  (pass --force to reset the password)`.gray);
   }
+
+  // 2b. UserType — seed the admin membership so protect() can resolve a hat ──
+  await UserType.findOneAndUpdate(
+    { user: user._id, userType, role, clientBelongs: null, branchBelongs: null },
+    { $setOnInsert: { isActive: true, assignedBy: user._id } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+  console.log(`✓ UserType membership seeded: userType=${userType}  role=${role}`.green);
 
   // 3. RolePermission — grant the role all permissions, global scope ─────────
   await RolePermission.findOneAndUpdate(
