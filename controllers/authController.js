@@ -133,6 +133,8 @@ exports.login = asyncHandler(async (req, res, next) => {
 
   const requestedType = req.headers["x-user-type"] || req.body.userType || null;
 
+  console.log(requestedType)
+
   if (!requestedType) {
     return next(new ErrorResponse(`Invalid request or either contact the support team`, 401));
   }
