@@ -130,6 +130,13 @@ exports.login = asyncHandler(async (req, res, next) => {
   #swagger.responses[400] = { description: 'Invalid credentials', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
+
+  const requestedType = req.headers["x-user-type"] || req.body.userType || null;
+
+  if (!requestedType) {
+    return next(new ErrorResponse(`Invalid request or either contact the support team`, 401));
+  }
+
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -163,7 +170,6 @@ exports.login = asyncHandler(async (req, res, next) => {
   }
 
   // Resolve the membership for the requested userType (from header or body).
-  const requestedType = req.headers["x-user-type"] || req.body.userType || null;
   const membership = await resolveMembership(user._id, requestedType);
 
   // No membership found at all — account exists but has no active hat.
