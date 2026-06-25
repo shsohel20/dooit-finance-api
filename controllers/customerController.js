@@ -16,6 +16,7 @@ const Customer = require("../models/Customer");
 const Client = require("../models/Client");
 const Branch = require("../models/Branch");
 const User = require("../models/User");
+const UserType = require("../models/UserType");
 const { generateQR } = require("../utils/qrService");
 const { hashForSearch } = require("../utils/encryption");
 const { ensureSumsubApplicant, requestPendingReview, triggerAmlCheck } = require("../services/sumsubService");
@@ -1360,6 +1361,22 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
 
     await customer.save();
 
+    // Ensure a customer UserType membership scoped to this client/branch exists
+    // for the invited user. Their baseline membership from registration is
+    // unscoped (clientBelongs/branchBelongs null); accepting the invite ties
+    // them to this specific tenant. Idempotent via the unique index.
+    await UserType.findOneAndUpdate(
+      {
+        user: user._id,
+        userType: "customer",
+        role: "customer",
+        clientBelongs: clientId,
+        branchBelongs: branchId,
+      },
+      { $setOnInsert: { isActive: true, assignedBy: user._id } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+
     if (customer?.sumsubApplicantId) {
       console.log(`Request to review to sum sub — scheduling background job`.bgBlue);
       runInBackground(`sumsub:pendingReview+aml [${customer.sumsubApplicantId}]`, async () => {
@@ -1694,6 +1711,22 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
   customer.metadata.client = clientId;
   if (branchId) customer.metadata.branch = branchId;
 
+  // Ensure a customer UserType membership scoped to this client/branch exists
+  // for the invited user (registration baseline is unscoped). Seeded on both the
+  // "missing steps" and "finalised" paths since the user is already linked to the
+  // relation here. Idempotent via the unique index.
+  await UserType.findOneAndUpdate(
+    {
+      user: user._id,
+      userType: "customer",
+      role: "customer",
+      clientBelongs: clientId,
+      branchBelongs: branchId,
+    },
+    { $setOnInsert: { isActive: true, assignedBy: user._id } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+
   // check presence of personal KYC (representative) on the customer
   const hasPersonal =
     customer.personalKyc && Object.keys(customer.personalKyc).length > 0;
@@ -1886,6 +1919,21 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
         });
         createdUser = await userToCreate.save({ session });
       }
+
+      // 2b) Seed this customer's UserType membership scoped to the resolved
+      // client/branch. Idempotent — the unique (user, userType, role, client,
+      // branch) index dedupes, so re-imports never create duplicate rows.
+      await UserType.findOneAndUpdate(
+        {
+          user: createdUser._id,
+          userType: userPayload.userType,
+          role: userPayload.role,
+          clientBelongs: clientDoc ? clientDoc._id : null,
+          branchBelongs: branchDoc ? branchDoc._id : null,
+        },
+        { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
+        { upsert: true, new: true, setDefaultsOnInsert: true, session },
+      );
 
       // 3) Build relation object (if we have client or branch info)
       const relationCandidate =
