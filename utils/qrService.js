@@ -31,11 +31,11 @@ const generateQR = async ({
 
     if (useUrl) {
         // Recommended approach (production safe)
-        const baseUrl = process.env.FRONTEND_URL;
+        const baseUrl = process.env.CLIENT_INVITE_URL;
 
         payload = branchId
-            ? `${baseUrl}/accept-invite/scan-qr?client=${clientId}&branch=${branchId}`
-            : `${baseUrl}/accept-invite/scan-qr?client=${clientId}`;
+            ? `${baseUrl}/scan-qr?client=${clientId}&branch=${branchId}`
+            : `${baseUrl}/scan-qr?client=${clientId}`;
     } else {
         // Raw JSON payload (not recommended for production)
         payload = JSON.stringify({
