@@ -556,6 +556,24 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
   if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user && phone) user = await User.findOne({ phone });
 
+  // If an account already exists for this contact, ensure they hold an active
+  // "customer" UserType membership scoped to this invite's client/branch
+  // (update-or-create). Anonymous invitees with no account yet get their
+  // membership at accept-time instead (acceptInvitePersonal/acceptInviteEntity).
+  if (user) {
+    await UserType.findOneAndUpdate(
+      {
+        user: user._id,
+        userType: "customer",
+        role: "customer",
+        clientBelongs: client ?? null,
+        branchBelongs: branch ?? null,
+      },
+      { $set: { isActive: true }, $setOnInsert: { assignedBy: req.user?._id ?? null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  }
+
   // ---------------------------
   // Find customer
   // Pass 1: by linked User account
@@ -832,6 +850,24 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   let user = null;
   if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user && phone) user = await User.findOne({ phone });
+
+  // If an account already exists for this contact, ensure they hold an active
+  // "customer" UserType membership scoped to this invite's client/branch
+  // (update-or-create). Anonymous invitees with no account yet get their
+  // membership at accept-time instead (acceptInvitePersonal/acceptInviteEntity).
+  if (user) {
+    await UserType.findOneAndUpdate(
+      {
+        user: user._id,
+        userType: "customer",
+        role: "customer",
+        clientBelongs: client ?? null,
+        branchBelongs: branch ?? null,
+      },
+      { $set: { isActive: true }, $setOnInsert: { assignedBy: req.user?._id ?? null } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  }
 
   // ---------------------------
   // Find customer
