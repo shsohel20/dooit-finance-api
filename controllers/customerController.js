@@ -820,6 +820,16 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
     notes = "",
   } = req.body;
 
+  const verifyClient = await Client.findById(client);
+  const verifyBranch = await Branch.findById(branch);
+
+  if (client && !verifyClient) {
+    return next(new ErrorResponse("Client ID not Valid", 400));
+  }
+  if (branch && !verifyBranch) {
+    return next(new ErrorResponse("Branch ID not Valid", 400));
+  }
+
   if (!contact || (!contact.email && !contact.phone)) {
     return next(new ErrorResponse("Provide email or phone", 400));
   }
@@ -876,6 +886,8 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   //         created from a previous anonymous QR invite with no User yet
   // ---------------------------
   let customer = user ? await Customer.findOne({ user: user._id }) : null;
+
+  console.log(customer);
 
   if (!customer) {
     const metaOr = [];
@@ -976,6 +988,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   let sumsubResult = null;
   let sumsubError = null;
 
+  //TODO
   try {
     sumsubResult = await ensureSumsubApplicant(customer);
   } catch (err) {
@@ -1000,7 +1013,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
       branchId: branch || null,
       relationIndex: relIndex,
       channel: onboardingChannel || "app",
-      provider: "sumsub",
+      provider: "dooit", //TODO Sumsub
     });
 
     const stepStatus = sumsubResult ? "approved" : "submitted";
