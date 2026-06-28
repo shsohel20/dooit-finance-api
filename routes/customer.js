@@ -16,6 +16,8 @@ const {
   getNonIndividualKycs,
   createInviteFromQr,
   downloadQR,
+  getCustomerOnBoardData,
+  submitCustomerOnboardRequest,
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
@@ -141,4 +143,18 @@ router.get(
 //   getTrustKyc
 // );
 
+router.get(
+  "/onboarding/:id",
+  protect,
+  authorize("customer"),
+
+  getCustomerOnBoardData
+);
+router.put(
+  "/onboarding/:id/request",
+  protect,
+  authorize("customer"),
+
+  submitCustomerOnboardRequest
+);
 module.exports = router;

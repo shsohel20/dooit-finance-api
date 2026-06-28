@@ -19,18 +19,7 @@ const TrustKycSchema = new Schema(
     uid: String,
     sequence: { type: Number, index: true }, // auto incremented
 
-    client: {
-      type: Schema.Types.ObjectId,
-      ref: "Client",
-      required: true,
-      index: true,
-    },
-    branch: {
-      type: Schema.Types.ObjectId,
-      ref: "Branch",
-      required: false, // allow null if branch-less relation
-      index: true,
-    },
+
     customer: {
       type: mongoose.Schema.ObjectId,
       ref: "Customer",

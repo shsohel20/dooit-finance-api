@@ -154,7 +154,14 @@ const CustomerSchema = new Schema(
         registeredAt: { type: Date, default: Date.now },
         source: { type: String, default: "api" }, // e.g. "in-branch", "web", "api", "agent"
         notes: { type: String, default: "" },
-        active: { type: Boolean, default: true },
+        active: { type: Boolean, default: false }, //TODO
+
+        relationModel: { type: String, trim: true, index: true },
+        relationId: {
+          type: Schema.Types.ObjectId,
+          index: true,
+          refPath: "relationModel",
+        },
 
         // --- INVITE: relation-scoped invite fields ---
         invitedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },

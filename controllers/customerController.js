@@ -52,7 +52,7 @@ exports.getCustomers = asyncHandler(async (req, res, next) => {
 });
 
 // @desc   Fetch single client by id
-// @route  /api/v1/clients/:id
+// @route  /api/v1/customer/:id
 // @access Public
 exports.getCustomer = asyncHandler(async (req, res, next) => {
 
@@ -96,6 +96,139 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
   });
 });
 
+
+// @desc   Fetch single client by id
+// @route  /api/v1/customer/onboarding/:id
+// @access Public
+exports.getCustomerOnBoardData = asyncHandler(async (req, res, next) => {
+  const { type } = req.query;
+
+  const customer = await Customer.findById(req.params.id).select("_id relations");
+
+  if (!customer) {
+    return next(
+      new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404)
+    );
+  }
+
+  const models = {
+    individual: Customer,
+    company: CompanyKyc,
+    partnership: NonIndividualKyc,
+    government_body: NonIndividualKyc,
+    association: NonIndividualKyc,
+    cooperative: NonIndividualKyc,
+    trust: TrustKyc,
+  };
+
+  const Model = models[type];
+
+  if (!Model) {
+    return next(new ErrorResponse("Invalid onboarding type.", 400));
+  }
+
+  const filters = customer.relations.map((relation) => ({
+    customer: customer._id,
+  }));
+
+  const data = await Model.find({
+    $or: filters,
+  });
+
+  res.status(200).json({
+    success: true,
+    data,
+  });
+});
+// @desc   PUT BY ID
+// @route  /api/v1/customer/onboarding/:id/request
+// @access Public
+exports.submitCustomerOnboardRequest = asyncHandler(async (req, res, next) => {
+
+  const { token } = req.query;
+
+  const {
+    relationType,
+    client = null,
+    branch = null,
+    onboardingChannel = 'web',
+    source = 'in-branch',
+    notes = "",
+    entityId = null,
+  } = req.body;
+
+  if (!token)
+    return next(new ErrorResponse("token required", 400));
+
+  const hashed = hashToken(token);
+
+  let customer = await Customer.findById(req.params.id).populate("user _id relations");
+
+  if (!customer)
+    return next(new ErrorResponse("Invite/customer not found", 404));
+
+  const relMatch = customer.findRelationByHashedToken(hashed);
+  if (!relMatch)
+    return next(new ErrorResponse("Invalid invite token for this customer", 400));
+
+  const { relation, index } = relMatch; // index no longer needed
+
+  if (!relation.inviteToken || !relation.inviteTokenExpire)
+    return next(new ErrorResponse("This invite is not valid", 400));
+
+  if (Date.now() > new Date(relation.inviteTokenExpire).getTime())
+    return next(new ErrorResponse("Invite expired", 410));
+
+  const models = {
+    individual: 'Customer',
+    company: 'CompanyKyc',
+    partnership: 'NonIndividualKyc',
+    government_body: 'NonIndividualKyc',
+    association: 'NonIndividualKyc',
+    cooperative: 'NonIndividualKyc',
+    trust: 'TrustKyc',
+  };
+
+  const resolvedRelationModel = models[relationType];
+
+  if (!resolvedRelationModel)
+    return next(new ErrorResponse(`Unknown relationType: ${relationType}`, 400));
+
+  const relationNew = {
+    client,
+    branch,
+    type: relationType,
+    relationModel: resolvedRelationModel,
+    relationId: entityId,
+    onboardingChannel: onboardingChannel || "",
+    source,
+    notes,
+    active: true,
+    invitedBy: req.user?._id || null,
+  };
+
+
+
+  // // Remove old invite slot by hashed token — no index needed
+  // customer.relations = customer.relations.filter(
+  //   rel => rel.inviteToken !== hashed
+  // );
+
+
+
+  customer.clearRelationInvite(index);
+
+  customer.clearInviteToken();
+  customer.relations.push(relationNew);
+  await customer.save();
+
+  res.status(200).json({
+    success: true,
+    message: `You are Verified as ${relationType}`,
+    relMatch,
+    relations: customer.relations,
+  });
+});
 // POST /api/v1/invites
 // body: { contact: { email?, phone? }, client, branch, expiresInMinutes, source, notes }
 
@@ -609,6 +742,8 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
           source,
           notes,
           active: true,
+          relationModel: "Customer",
+          relationId: null,
           invitedBy: req.user?._id,
         },
       ],
@@ -645,7 +780,9 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
       onboardingChannel: onboardingChannel || "",
       source,
       notes,
-      active: true,
+      relationModel: "Customer",
+      relationId: customer?._id,
+      active: false,
       invitedBy: req.user?._id,
     });
     relIndex = customer.relations.length - 1;
@@ -655,7 +792,10 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
     r.source = source || r.source;
     r.notes = notes || r.notes;
     if (onboardingChannel) r.onboardingChannel = onboardingChannel;
-    r.active = true;
+    r.active = false;
+
+    if (!r.relationModel) r.relationModel = "Customer";
+    if (!r.relationId) r.relationId = r._id;
     if (!r.invitedBy) r.invitedBy = req.user?._id;
   }
 
@@ -820,6 +960,8 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
     notes = "",
   } = req.body;
 
+  console.log(relationType)
+
   const verifyClient = await Client.findById(client);
   const verifyBranch = await Branch.findById(branch);
 
@@ -859,6 +1001,8 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
 
   let user = null;
   if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
+
+  console.log(user)
   if (!user && phone) user = await User.findOne({ phone });
 
   // If an account already exists for this contact, ensure they hold an active
@@ -887,7 +1031,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   // ---------------------------
   let customer = user ? await Customer.findOne({ user: user._id }) : null;
 
-  console.log(customer);
+
 
   if (!customer) {
     const metaOr = [];
@@ -917,7 +1061,8 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
           onboardingChannel: onboardingChannel || "websdk",
           source,
           notes,
-          active: true,
+          active: false,
+
           invitedBy: req.user?._id,
         },
       ],
@@ -1385,6 +1530,8 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
   // upsert personal KYC (same helper)
   const hasPersonalNow = await upsertPersonalKyc(customer, personalKyc || {});
 
+  // ✅ Activate the matched relation
+  customer.relations[relIndex].active = true;
   // finalize and persist
   if (hasPersonalNow) {
     customer.kycStatus = "in_review";
@@ -1649,7 +1796,7 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
   });
 });
 // controllers/customerController.js (replace acceptInviteEntity with this)
-exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
+exports.acceptInviteEntityOld2 = asyncHandler(async (req, res, next) => {
   const user = req.user;
   if (!user) return next(new ErrorResponse("Authentication required", 401));
 
@@ -1754,7 +1901,8 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
     console.error("upsertEntityModel error", err);
     return next(new ErrorResponse("Failed to store entity KYC", 500));
   }
-
+  // ✅ Activate the matched relation
+  customer.relations[relIndex].active = true;
   // persist client/branch into top-level metadata for quick access (optional)
   customer.metadata = customer.metadata || {};
   customer.metadata.client = clientId;
@@ -1821,7 +1969,7 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
   customer.kycHistory = customer.kycHistory || [];
   customer.kycHistory.push({
     status: "in_review",
-    note: `Entity (${requestedType}) KYC provided & representative personal KYC present`,
+    note: `Entity (${requestedType}) KYB provided & representative personal KYC present`,
     changedBy: user._id,
     changedAt: Date.now(),
   });
@@ -1846,7 +1994,172 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
     },
   });
 });
+exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
+  const user = req.user;
+  if (!user) return next(new ErrorResponse("Authentication required", 401));
 
+  const { token, cid, requestedType, kyc } = req.body;
+  if (!token) return next(new ErrorResponse("token is required", 400));
+  if (!requestedType)
+    return next(new ErrorResponse("requestedType is required", 400));
+
+  const hashed = hashToken(token);
+
+  let customer;
+  if (cid) {
+    customer = await Customer.findById(cid);
+    if (!customer) return next(new ErrorResponse("Customer not found", 404));
+  } else {
+    customer = await Customer.findOne({ "relations.inviteToken": hashed });
+    if (!customer) return next(new ErrorResponse("Invite not found", 404));
+  }
+
+  const match = customer.findRelationByHashedToken(hashed);
+  if (!match) return next(new ErrorResponse("Invalid invite token", 400));
+  const { relation, index: relIndex } = match;
+
+  if (
+    !relation.inviteTokenExpire ||
+    Date.now() > new Date(relation.inviteTokenExpire).getTime()
+  ) {
+    return next(new ErrorResponse("Invite expired", 410));
+  }
+
+  const clientId = relation.client;
+  const branchId = relation.branch || null;
+  if (!clientId)
+    return next(new ErrorResponse("Invite missing client info", 400));
+
+  if (!customer.user || customer.user.toString() !== user._id.toString()) {
+    customer.user = user._id;
+  }
+
+  // ✅ Use index consistently — no more mutating `relation` ref directly
+  if (requestedType && customer.relations[relIndex].type !== requestedType) {
+    customer.relations[relIndex].type = requestedType;
+  }
+  if (req.body.onboardingChannel) {
+    customer.relations[relIndex].onboardingChannel = req.body.onboardingChannel;
+  }
+
+  // ✅ Activate the matched relation on ALL paths
+  customer.relations[relIndex].active = true;
+
+  let createdKycDoc = null;
+  let typeKycPresent = false;
+
+  // ✅ Explicit model name map — no more constructor.modelName risk
+  const kycModelNames = {
+    company: 'CompanyKyc',
+    trust: 'TrustKyc',
+    partnership: 'NonIndividualKyc',
+    government_body: 'NonIndividualKyc',
+    association: 'NonIndividualKyc',
+    cooperative: 'NonIndividualKyc',
+  };
+
+  try {
+    if (requestedType === "company") {
+      createdKycDoc = await upsertEntityModel(CompanyKyc, kyc, customer._id, clientId, branchId);
+    } else if (requestedType === "trust") {
+      createdKycDoc = await upsertEntityModel(TrustKyc, kyc, customer._id, clientId, branchId);
+    } else if (
+      ["partnership", "government_body", "association", "cooperative"].includes(requestedType)
+    ) {
+      createdKycDoc = await upsertEntityModel(NonIndividualKyc, kyc, customer._id, clientId, branchId);
+    } else {
+      return next(new ErrorResponse("Unsupported requestedType", 400));
+    }
+
+    if (createdKycDoc) {
+      typeKycPresent = true;
+      // ✅ Set via index, with explicit model name
+      customer.relations[relIndex].entityKycId = createdKycDoc._id;
+      customer.relations[relIndex].entityKycModel = kycModelNames[requestedType];
+      // customer.relations[relIndex].type = requestedType;
+    }
+  } catch (err) {
+    console.error("upsertEntityModel error", err);
+    return next(new ErrorResponse("Failed to store entity KYC", 500));
+  }
+
+  customer.metadata = customer.metadata || {};
+  customer.metadata.client = clientId;
+  if (branchId) customer.metadata.branch = branchId;
+
+  await UserType.findOneAndUpdate(
+    {
+      user: user._id,
+      userType: "customer",
+      role: "customer",
+      clientBelongs: clientId,
+      branchBelongs: branchId,
+    },
+    { $setOnInsert: { isActive: true, assignedBy: user._id } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
+
+  const hasPersonal =
+    customer.personalKyc && Object.keys(customer.personalKyc).length > 0;
+
+  const missing = [];
+  if (!hasPersonal) missing.push("personalKyc");
+  if (!typeKycPresent) missing.push(`${requestedType}Kyc`);
+
+  if (missing.length > 0) {
+    customer.kycStatus = "pending";
+    customer.kycHistory = customer.kycHistory || [];
+    customer.kycHistory.push({
+      status: "pending",
+      note: `Entity KYC input processed for type ${requestedType}; missing: ${missing.join(", ")}`,
+      changedBy: user._id,
+      changedAt: Date.now(),
+    });
+
+    // ✅ No more redundant `customer.relations[relIndex] = relation`
+    await customer.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Entity KYC processed; additional steps required",
+      required: missing,
+      data: {
+        customerId: customer._id,
+        userId: user._id,
+        kycStatus: customer.kycStatus,
+        createdKycDocId: createdKycDoc ? createdKycDoc._id : null,
+        relationIndex: relIndex,
+      },
+    });
+  }
+
+  // customer.kycStatus = "in_review";
+  customer.kycHistory = customer.kycHistory || [];
+  customer.kycHistory.push({
+    status: "in_review",
+    note: `Entity (${requestedType}) KYB provided & representative personal KYC present`,
+    changedBy: user._id,
+    changedAt: Date.now(),
+  });
+
+  customer.clearRelationInvite(relIndex);
+  customer.isActive = true;
+
+  // ✅ No more redundant `customer.relations[relIndex] = relation`
+  await customer.save();
+
+  return res.status(200).json({
+    success: true,
+    message: "Entity KYB accepted and invite finalised for relation",
+    data: {
+      customerId: customer._id,
+      userId: user._id,
+      kycStatus: customer.kycStatus,
+      createdKycDocId: createdKycDoc ? createdKycDoc._id : null,
+      relationIndex: relIndex,
+    },
+  });
+});
 /**
  * Dispatcher: direct to personal or entity handlers
  */

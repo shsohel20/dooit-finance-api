@@ -18,18 +18,9 @@ const CompanyKycSchema = new Schema(
   {
     uid: String,
     sequence: { type: Number, index: true }, // auto incremented
-    client: {
-      type: Schema.Types.ObjectId,
-      ref: "Client",
-      required: true,
-      index: true,
-    },
-    branch: {
-      type: Schema.Types.ObjectId,
-      ref: "Branch",
-      required: false, // allow null if branch-less relation
-      index: true,
-    },
+
+    //TODO
+
     customer: {
       type: mongoose.Schema.ObjectId,
       ref: "Customer",
@@ -93,6 +84,8 @@ const CompanyKycSchema = new Schema(
       ],
     },
     documents: { type: [DocumentMetaSchema], default: [] },
+    //TODO company wise meta questions
+    questionnaires: [{ type: Schema.Types.Mixed, default: {} }]
   },
   {
     timestamps: true,

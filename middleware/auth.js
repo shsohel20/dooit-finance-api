@@ -9,6 +9,7 @@ const asyncHandler = require("./async");
 const { generateQR } = require("../utils/qrService");
 const { runWithRole } = require("../utils/roleEncryptionPlugin");
 const RolePermission = require("../models/RolePermission");
+const CompanyKyc = require("../models/CompanyKyc");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -72,6 +73,38 @@ exports.protect = asyncHandler(async (req, res, next) => {
     //   }
     // }
 
+    //  "individual",
+    // "company",
+    // "partnership",
+    // "government_body",
+    // "association",
+    // "cooperative",
+    // "trust",
+
+
+
+    // let company = [];
+
+    // if (u?.customer) {
+    //   u.customer.relations.forEach(async (relation) => {
+    //     if (relation) {
+    //       const filterObj = {
+    //         client: relation.client,
+    //         branch: relation.branch,
+    //         customer: u?.customer._id,
+
+    //       };
+    //       const c = await CompanyKyc.find(filterObj)
+    //       company = c;
+    //     }
+    //   });
+    // }
+    // console.log(company)
+    // let [company, trust] = await Promise.all([
+    //   clientId ? Client.findById(clientId).lean() : Promise.resolve(null),
+    //   branchId ? Branch.findById(branchId).populate("client").lean() : Promise.resolve(null),
+    // ]);
+
     const resolvedClientId = u.client?._id ?? null;
     const resolvedBranchId = u.branch?._id ?? null;
 
@@ -87,6 +120,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
     req.user = {
       ...u,
       id: u._id,
+
       clientBelongs: resolvedClientId,
       branchBelongs: resolvedBranchId,
       client: u?.client ?? u?.branch?.client ?? null,
