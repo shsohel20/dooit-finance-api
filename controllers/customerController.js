@@ -134,10 +134,10 @@ exports.getCustomerOnBoardData = asyncHandler(async (req, res, next) => {
   let data = []
 
   if (type === 'individual') {
-    data = customer.relations
+    data = customer?.relations ?? []
   } else {
     data = await Model.find({
-      $or: filters,
+      customer: customer._id
     });
   }
 
