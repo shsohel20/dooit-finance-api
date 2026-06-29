@@ -156,7 +156,12 @@ const CustomerSchema = new Schema(
         notes: { type: String, default: "" },
         active: { type: Boolean, default: false }, //TODO
 
-        relationModel: { type: String, trim: true, index: true },
+        relationModel: {
+          type: String,
+          trim: true,
+          index: true,
+          enum: ["Customer", "CompanyKyc", "NonIndividualKyc", "TrustKyc"],
+        },
         relationId: {
           type: Schema.Types.ObjectId,
           index: true,

@@ -103,7 +103,11 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
 exports.getCustomerOnBoardData = asyncHandler(async (req, res, next) => {
   const { type } = req.query;
 
-  const customer = await Customer.findById(req.params.id).select("_id relations");
+  const customer = await Customer.findById(req.params.id)
+    .select("_id relations")
+    .populate("relations.client", "name")
+    .populate("relations.branch", "name")
+    .populate("relations.relationId");
 
   if (!customer) {
     return next(
@@ -111,35 +115,27 @@ exports.getCustomerOnBoardData = asyncHandler(async (req, res, next) => {
     );
   }
 
-  const models = {
-    individual: Customer,
-    company: CompanyKyc,
-    partnership: NonIndividualKyc,
-    government_body: NonIndividualKyc,
-    association: NonIndividualKyc,
-    cooperative: NonIndividualKyc,
-    trust: TrustKyc,
-  };
+  // const models = {
+  //   individual: Customer,
+  //   company: CompanyKyc,
+  //   partnership: NonIndividualKyc,
+  //   government_body: NonIndividualKyc,
+  //   association: NonIndividualKyc,
+  //   cooperative: NonIndividualKyc,
+  //   trust: TrustKyc,
+  // };
 
-  const Model = models[type];
+  // const Model = models[type];
 
-  if (!Model) {
-    return next(new ErrorResponse("Invalid onboarding type.", 400));
-  }
+  // if (!Model) {
+  //   return next(new ErrorResponse("Invalid onboarding type.", 400));
+  // }
 
-  const filters = customer.relations.map((relation) => ({
-    customer: customer._id,
-  }));
 
-  let data = []
 
-  if (type === 'individual') {
-    data = customer?.relations ?? []
-  } else {
-    data = await Model.find({
-      customer: customer._id
-    });
-  }
+  const relations = customer?.relations ?? []
+
+  const data = relations.filter(relation => relation.type === type)
 
 
   res.status(200).json({
