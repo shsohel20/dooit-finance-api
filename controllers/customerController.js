@@ -131,9 +131,16 @@ exports.getCustomerOnBoardData = asyncHandler(async (req, res, next) => {
     customer: customer._id,
   }));
 
-  const data = await Model.find({
-    $or: filters,
-  });
+  let data = []
+
+  if (type === 'individual') {
+    data = customer.relations
+  } else {
+    data = await Model.find({
+      $or: filters,
+    });
+  }
+
 
   res.status(200).json({
     success: true,
