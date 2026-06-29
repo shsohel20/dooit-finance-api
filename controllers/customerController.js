@@ -165,16 +165,20 @@ exports.submitCustomerOnboardRequest = asyncHandler(async (req, res, next) => {
 
   const hashed = hashToken(token);
 
+  console.log(hashed)
+
   let customer = await Customer.findById(req.params.id).populate("user _id relations");
 
   if (!customer)
     return next(new ErrorResponse("Invite/customer not found", 404));
 
   const relMatch = customer.findRelationByHashedToken(hashed);
+
+  console.log(relMatch)
   if (!relMatch)
     return next(new ErrorResponse("Invalid invite token for this customer", 400));
 
-  const { relation, index } = relMatch; // index no longer needed
+  const { relation, index } = relMatch; // index used to update the matched relation in place
 
   if (!relation.inviteToken || !relation.inviteTokenExpire)
     return next(new ErrorResponse("This invite is not valid", 400));
@@ -197,32 +201,23 @@ exports.submitCustomerOnboardRequest = asyncHandler(async (req, res, next) => {
   if (!resolvedRelationModel)
     return next(new ErrorResponse(`Unknown relationType: ${relationType}`, 400));
 
-  const relationNew = {
-    client,
-    branch,
-    type: relationType,
-    relationModel: resolvedRelationModel,
-    relationId: entityId,
-    onboardingChannel: onboardingChannel || "",
-    source,
-    notes,
-    active: true,
-    invitedBy: req.user?._id || null,
-  };
+  // ✅ Update the invited relation in place (matched by hashed token) — do NOT push a duplicate
+  const rel = customer.relations[index];
+  rel.type = relationType;
+  rel.relationModel = resolvedRelationModel;
+  if (entityId) rel.relationId = entityId;
+  if (onboardingChannel) rel.onboardingChannel = onboardingChannel;
+  if (source) rel.source = source;
+  if (notes) rel.notes = notes;
+  rel.active = true;
+  // Only override client/branch when explicitly provided (the invite already set them)
+  if (client) rel.client = client;
+  if (branch) rel.branch = branch;
 
-
-
-  // // Remove old invite slot by hashed token — no index needed
-  // customer.relations = customer.relations.filter(
-  //   rel => rel.inviteToken !== hashed
-  // );
-
-
-
+  // Clear the relation-level invite token (and any legacy top-level token) before saving
   customer.clearRelationInvite(index);
-
   customer.clearInviteToken();
-  customer.relations.push(relationNew);
+
   await customer.save();
 
   res.status(200).json({
