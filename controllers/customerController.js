@@ -174,7 +174,7 @@ exports.submitCustomerOnboardRequest = asyncHandler(async (req, res, next) => {
 
   const relMatch = customer.findRelationByHashedToken(hashed);
 
-  console.log(relMatch)
+
   if (!relMatch)
     return next(new ErrorResponse("Invalid invite token for this customer", 400));
 
