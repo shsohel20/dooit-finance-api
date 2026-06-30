@@ -191,7 +191,7 @@ const CustomerSchema = new Schema(
     // uploaded documents
     documents: { type: [DocumentMetaSchema], default: [] },
 
-    country: { type: String, default: "Bangladesh" },
+    country: { type: String, default: "" },
     // kyc status: pending, in_review, verified, rejected
     kycStatus: {
       type: String,

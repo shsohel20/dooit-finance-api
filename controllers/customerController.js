@@ -27,6 +27,8 @@ const {
 } = require("../services/journeyService");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { buildSeedJourney } = require("../utils/journeyUtils");
+const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
+const { getCentroid } = require("../utils/countryCentroids");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -49,6 +51,122 @@ exports.getCustomers = asyncHandler(async (req, res, next) => {
 */
   // expects advancedResults middleware to populate res.advancedResults
   res.status(200).json(res.advancedResults);
+});
+
+// @desc   Customer queue analytics / dashboard stats
+// @route  /api/v1/customer/stats
+// @access Private (admin, client, branch, manager, officer)
+exports.getCustomerStats = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Customer']
+  #swagger.summary = 'Customer queue analytics (risk, KYC, screening, country distribution)'
+  #swagger.responses[200] = { description: 'Success' }
+  #swagger.responses[401] = { description: 'Unauthorized' }
+*/
+
+  // Tenant isolation — mirror the queue list scoping (advancedCustomerResultsQueryOnly)
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
+  // "New customers" window (default 30 days, clamp 1..365)
+  const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  // Base match — keep consistent with the queue (isActive=true onboarded customers)
+  const match = { isActive: true };
+  if (client) match["relations.client"] = client;
+  if (branch) match["relations.branch"] = branch;
+
+  // riskLabel is a computed virtual (not stored) so we cannot aggregate it in the DB.
+  // Pull the lean docs with only the fields the risk engine + buckets need, then
+  // compute everything in a single pass.
+  const customers = await Customer.find(match)
+    .select(
+      "kycStatus country isPep sanction amlStatus authorized createdAt personalKyc relations metadata onboardingChannel",
+    )
+    .lean();
+
+  const total = customers.length;
+
+  // Risk buckets — score bands: Low / Medium / High / Unacceptable
+  const riskCounts = { Unacceptable: 0, High: 0, Medium: 0, Low: 0 };
+  // KYC buckets — stored enum
+  const kycCounts = { pending: 0, in_review: 0, verified: 0, rejected: 0 };
+  const countryCounts = {};
+
+  let pep = 0;
+  let sanction = 0;
+  let authorized = 0;
+  let newInWindow = 0;
+
+  for (const c of customers) {
+    // risk label (computed)
+    let label = "Low";
+    try {
+      label = buildRiskAssessmentFromCustomer(c).riskLabel || "Low";
+    } catch (err) {
+      label = "Low";
+    }
+    riskCounts[label] = (riskCounts[label] || 0) + 1;
+
+    // kyc status
+    const k = c.kycStatus || "pending";
+    kycCounts[k] = (kycCounts[k] || 0) + 1;
+
+    // country distribution
+    const country = c.country || "Unknown";
+    countryCounts[country] = (countryCounts[country] || 0) + 1;
+
+    if (c.isPep) pep += 1;
+    if (c.sanction) sanction += 1;
+    if (c.authorized && c.authorized.documents_attested) authorized += 1;
+    if (c.createdAt && new Date(c.createdAt) >= since) newInWindow += 1;
+  }
+
+  const riskDistribution = ["Unacceptable", "High", "Medium", "Low"].map(
+    (lbl) => ({ label: lbl, value: riskCounts[lbl] || 0 }),
+  );
+
+  const kycDistribution = ["pending", "in_review", "verified", "rejected"].map(
+    (status) => ({ status, value: kycCounts[status] || 0 }),
+  );
+
+  const countries = Object.entries(countryCounts)
+    .map(([name, value]) => {
+      const centroid = getCentroid(name);
+      return {
+        name,
+        value,
+        lat: centroid ? centroid.lat : null,
+        lng: centroid ? centroid.lng : null,
+      };
+    })
+    .sort((a, b) => b.value - a.value);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      total,
+      newInWindow,
+      windowDays: days,
+      risk: {
+        distribution: riskDistribution,
+        unacceptable: riskCounts.Unacceptable || 0,
+        high: riskCounts.High || 0,
+      },
+      kyc: {
+        distribution: kycDistribution,
+        pending: kycCounts.pending || 0,
+      },
+      screening: {
+        pep,
+        sanction,
+        authorized,
+        notAuthorized: total - authorized,
+      },
+      countries,
+    },
+  });
 });
 
 // @desc   Fetch single client by id

@@ -499,8 +499,17 @@ function resolvePepStatus(raw) {
  */
 function buildRiskAssessmentFromCustomer(customer = {}, opts = {}) {
   // normalize customer doc or plain object
+  const relations = Array.isArray(customer.relations) ? customer.relations : [];
+
+  // A Customer document represents a person, but its `relations[]` can mix the
+  // person's own individual relation with linked entity relations (company /
+  // trust / partnership). For the customer's own risk profile + displayed type
+  // we prefer the individual relation; callers can override via opts.preferType
+  // (e.g. the per-relation path passes a single-relation context). Falls back to
+  // the first relation for pure entity onboarding with no individual relation.
+  const preferType = norm(opts.preferType || "individual");
   const relation =
-    (Array.isArray(customer.relations) && customer.relations[0]) || {};
+    relations.find((r) => norm(r?.type) === preferType) || relations[0] || {};
   const requestedType = relation?.type || customer.type || "individual";
   // customerType - lookup from FACTORS.customerType
   // const customerType = lookupFactor(FACTORS.customerType, requestedType);

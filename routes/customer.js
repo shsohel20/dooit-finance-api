@@ -7,6 +7,7 @@ const {
   acceptInvite,
   filterCustomerSection,
   getCustomers,
+  getCustomerStats,
   getCustomer,
   createCustomerDummy,
   getCompanyKycs,
@@ -69,6 +70,15 @@ router.get(
   protect,
   authorize("admin", "client", "branch", "user"),
   downloadQR,
+);
+
+// Analytics for the customer queue dashboard.
+// Must be declared before the "/:id" route so "stats" isn't matched as an id.
+router.get(
+  "/stats",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  getCustomerStats,
 );
 
 
