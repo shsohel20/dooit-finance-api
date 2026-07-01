@@ -418,10 +418,11 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
 
   if (token && cid) {
     const qry = {
+      resetToken,
       token,
       cid
     }
-    resetUrl = `${url}/auth/reset-password?${resetToken}&${convertQueryString(qry)}`;
+    resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
 
   } else {
     resetUrl = `${url}/auth/reset-password?${resetToken}`;
