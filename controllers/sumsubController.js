@@ -58,14 +58,14 @@ const resolveCustomer = async (token, customerId) => {
 // docType → Sumsub idDocType + idDocSubType mapping
 // ─────────────────────────────────────────────────────────────────────────────
 const DOC_TYPE_MAP = {
-  id_front:      { idDocType: "ID_CARD",  idDocSubType: "FRONT_SIDE" },
-  id_back:       { idDocType: "ID_CARD",  idDocSubType: "BACK_SIDE"  },
-  passport:      { idDocType: "PASSPORT"                              },
-  drivers_front: { idDocType: "DRIVERS",  idDocSubType: "FRONT_SIDE" },
-  drivers_back:  { idDocType: "DRIVERS",  idDocSubType: "BACK_SIDE"  },
-  selfie:        { idDocType: "SELFIE"                                },
-  face:          { idDocType: "SELFIE"                                },
-  live_photo:    { idDocType: "SELFIE"                                },
+  id_front: { idDocType: "ID_CARD", idDocSubType: "FRONT_SIDE" },
+  id_back: { idDocType: "ID_CARD", idDocSubType: "BACK_SIDE" },
+  passport: { idDocType: "PASSPORT" },
+  drivers_front: { idDocType: "DRIVERS", idDocSubType: "FRONT_SIDE" },
+  drivers_back: { idDocType: "DRIVERS", idDocSubType: "BACK_SIDE" },
+  selfie: { idDocType: "SELFIE" },
+  face: { idDocType: "SELFIE" },
+  live_photo: { idDocType: "SELFIE" },
 };
 
 const isSelfieType = (docType) =>
@@ -474,7 +474,7 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
     .update(req.body) // Buffer from express.raw()
     .digest("hex");
 
-     
+
 
   if (!received || received !== expected) {
     return res.status(403).json({ error: "Invalid webhook signature" });
@@ -489,7 +489,7 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
   }
 
 
-  const { type, externalUserId, applicantId, reviewResult , reviewStatus} = payload;
+  const { type, externalUserId, applicantId, reviewResult, reviewStatus } = payload;
 
   // Acknowledge non-review events immediately — Sumsub retries on non-200
   if (type !== "applicantReviewed") {
@@ -509,8 +509,16 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
   if (customer.kycStatus !== "verified") {
     console.log('I am for here not verified')
     // KYC result — customer hasn't been verified yet
-   
+
     await handleKycResult(customer, reviewResult || {}, effectiveApplicantId, reviewStatus);
+
+    console.log('I am also for here AML result')
+
+    await handleAmlResult(
+      customer,
+      reviewResult?.reviewAnswer,
+      effectiveApplicantId,
+    );
   } else {
     console.log('I am for here AML result')
 
