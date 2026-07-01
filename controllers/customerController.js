@@ -1120,7 +1120,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   let user = null;
   if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
 
-
+  console.log(user)
   // if (!user && phone) user = await User.findOne({ phone }); // TODO
 
   // If an account already exists for this contact, ensure they hold an active
@@ -1154,7 +1154,7 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   if (!customer) {
     const metaOr = [];
     if (email) metaOr.push({ "metadata.email": email });
-    if (phone) metaOr.push({ "metadata.phone": phone });
+    // if (phone) metaOr.push({ "metadata.phone": phone }); //TODO
 
     if (metaOr.length > 0) {
       const metaFilter = { $or: metaOr };
@@ -1463,6 +1463,7 @@ exports.validateInvite = asyncHandler(async (req, res, next) => {
   let user = null;
   let userExists = false;
   let linkedToCustomer = false;
+
   if (customer.user) {
     user = await User.findById(customer.user);
     if (user) {
@@ -1471,9 +1472,10 @@ exports.validateInvite = asyncHandler(async (req, res, next) => {
     } else linkedToCustomer = false;
   } else {
     if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
-    if (!user && phone) user = await User.findOne({ phone });
+    // if (!user && phone) user = await User.findOne({ phone }); //TODO
     if (user) userExists = true;
   }
+  console.log(user)
 
   res.status(200).json({
     success: true,
