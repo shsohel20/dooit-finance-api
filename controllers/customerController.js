@@ -1113,13 +1113,15 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
   // Find user
   // ---------------------------
   const email = contact.email?.toLowerCase() || null;
+
+
   const phone = contact.phone || null;
 
   let user = null;
   if (email) user = await User.findOne({ emailHash: hashForSearch(email) });
 
-  console.log(user)
-  if (!user && phone) user = await User.findOne({ phone });
+
+  // if (!user && phone) user = await User.findOne({ phone }); // TODO
 
   // If an account already exists for this contact, ensure they hold an active
   // "customer" UserType membership scoped to this invite's client/branch
