@@ -1,0 +1,134 @@
+"use strict";
+
+/**
+ * Shared branding for Dooit transactional emails.
+ *
+ * Everything here is table-based and fully inline-styled so it renders
+ * consistently across Gmail, Outlook (desktop + web), Apple Mail and mobile
+ * clients — many of which strip <head><style> blocks. A <style> block is still
+ * emitted by the shell() helper below purely as progressive enhancement
+ * (mobile @media tweaks); nothing depends on it to look correct.
+ *
+ * Logo:
+ *   Set EMAIL_LOGO_URL to a publicly reachable PNG/SVG (ideally a white or
+ *   transparent wordmark, ~280x92) and the real Dooit logo is shown in the
+ *   header. Without it, a styled white "Dooit.AI" text wordmark is rendered,
+ *   which always displays on every client with zero external image loading.
+ */
+
+const FONT =
+  "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+
+// Real hosted Dooit logo (black wordmark on transparent). Rendered on a WHITE
+// band so it's always visible. Override with EMAIL_LOGO_URL if the asset moves.
+const LOGO_URL = (process.env.EMAIL_LOGO_URL || "https://dooit.ai/assets/img/logo.png").trim();
+const SUPPORT_EMAIL =
+  (process.env.SUPPORT_EMAIL || process.env.FROM_EMAIL || "support@dooit.ai").trim();
+const BRAND_COLOR = "#2563eb";
+
+/**
+ * Logo lockup, sized for the white header band. Renders the hosted image; if the
+ * recipient blocks images the `alt` text keeps the brand visible. Falls back to a
+ * dark text wordmark only when LOGO_URL is explicitly cleared.
+ */
+const logoMark = () =>
+  LOGO_URL
+    ? `<img src="${LOGO_URL}" alt="Dooit.AI" height="36" style="display:inline-block;height:36px;width:auto;max-width:160px;border:0;line-height:100%;outline:none;text-decoration:none" />`
+    : `<span style="font-family:${FONT};font-size:26px;font-weight:800;letter-spacing:-.5px;color:#0f172a;line-height:1">Dooit<span style="color:#2563eb">.AI</span></span>`;
+
+/**
+ * Brand header: a white band carrying the logo, followed by a gradient hero with
+ * an optional emoji icon badge + title + subtitle. Returns two <tr> rows to drop
+ * inside the card <table>. Two bands keep the (black) logo readable while
+ * preserving the branded gradient hero used across Dooit emails.
+ */
+function brandHeader({ icon = "", title = "", subtitle = "" }) {
+  return `
+      <tr>
+        <td style="background:#ffffff;padding:22px 40px 20px;text-align:center;border-bottom:1px solid #eef2f7">
+          ${logoMark()}
+        </td>
+      </tr>
+      <tr>
+        <td style="background-color:#1e3a5f;background-image:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:32px 40px;text-align:center">
+          ${
+            icon
+              ? `<div style="width:60px;height:60px;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.25);border-radius:50%;display:inline-block;line-height:60px;font-size:26px;margin-bottom:14px">${icon}</div>`
+              : ""
+          }
+          <h1 style="margin:0;color:#ffffff;font-size:23px;font-weight:700;letter-spacing:-.3px;font-family:${FONT}">${title}</h1>
+          ${
+            subtitle
+              ? `<p style="margin:8px 0 0;color:rgba(255,255,255,.78);font-size:14px;line-height:1.5;font-family:${FONT}">${subtitle}</p>`
+              : ""
+          }
+        </td>
+      </tr>`;
+}
+
+/** Footer row with support contact + copyright. Returns a <tr>. */
+function brandFooter(
+  note = "This is a system-generated email — please do not reply."
+) {
+  return `
+      <tr>
+        <td style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:22px 40px;text-align:center">
+          <p style="margin:0;color:#94a3b8;font-size:12px;line-height:1.7;font-family:${FONT}">
+            Need help? Contact us at <a href="mailto:${SUPPORT_EMAIL}" style="color:#2563eb;text-decoration:none">${SUPPORT_EMAIL}</a><br/>
+            &copy; ${new Date().getFullYear()} Dooit. All rights reserved.<br/>${note}
+          </p>
+        </td>
+      </tr>`;
+}
+
+/**
+ * Full HTML document shell. `cardRows` is the concatenation of <tr> rows
+ * (header + body + footer). `preview` is hidden preheader text shown in the
+ * inbox list preview.
+ */
+function shell({ title, preview = "", cardRows = "" }) {
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+  <meta name="x-apple-disable-message-reformatting"/>
+  <title>${title}</title>
+  <style>
+    body{margin:0;padding:0;background:#f1f5f9;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
+    table{border-collapse:collapse}
+    img{border:0;line-height:100%;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+    a{text-decoration:none}
+    @media only screen and (max-width:600px){
+      .card{width:100%!important;border-radius:0!important}
+      .px{padding-left:22px!important;padding-right:22px!important}
+      .cta-btn{display:block!important;width:100%!important;box-sizing:border-box!important;text-align:center!important}
+    }
+  </style>
+</head>
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:${FONT}">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">${preview}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9">
+    <tr>
+      <td align="center" style="padding:32px 12px">
+        <table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(15,23,42,.09)">
+          ${cardRows}
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+module.exports = {
+  FONT,
+  LOGO_URL,
+  SUPPORT_EMAIL,
+  BRAND_COLOR,
+  logoMark,
+  brandHeader,
+  brandFooter,
+  shell,
+};
