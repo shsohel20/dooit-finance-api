@@ -5,7 +5,7 @@ const Client = require("../models/Client");
 const User = require("../models/User");
 const UserType = require("../models/UserType");
 const EntityType = require("../models/EntityType");
-const { validateClientCreation, markOnboardingStep, initialPassword, generateRandomPassword } = require("../utils");
+const { validateClientCreation, markOnboardingStep, initialPassword, generateRandomPassword, convertQueryString } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
 const { createRiskRegisterFromClient } = require("./riskRegisterController");
@@ -152,7 +152,10 @@ exports.createClient = asyncHandler(async (req, res, next) => {
           resetPasswordExpire: Date.now() + 24 * 60 * 60 * 1000,
         }
       );
-      setPasswordUrl = `${base}/auth/reset-password?${resetToken}`;
+      const qry = {
+        resetToken
+      }
+      setPasswordUrl = `${base}/auth/reset-password?${convertQueryString(qry)}`;
     } catch (err) {
       console.error("[createClient] reset-token generation failed:", err.message);
     }
