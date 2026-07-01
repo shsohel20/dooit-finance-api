@@ -466,9 +466,7 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
   // console.log(req.body)
   // ── 1. Verify HMAC-SHA256 signature ───────────────────────────────────────
   const received = req.headers["x-payload-digest"];
-  const webhookSecret = process.env.NODE_ENV === "production"
-    ? process.env.SUMSUB_WEBHOOK_SECRET
-    : process.env.SUMSUB_WEBHOOK_SECRET2;
+  const webhookSecret = process.env.SUMSUB_WEBHOOK_SECRET;
   const expected = crypto
     .createHmac("sha256", webhookSecret || "")
     .update(req.body) // Buffer from express.raw()

@@ -4,6 +4,7 @@ const { Schema } = mongoose;
 
 const STEP_TYPES = [
   "journey_start",
+  "occupation",
   "personal_form",
   "id_document",
   "selfie",

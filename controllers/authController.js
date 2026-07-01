@@ -425,7 +425,11 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
 
   } else {
-    resetUrl = `${url}/auth/reset-password?${resetToken}`;
+    const qry = {
+      resetToken,
+
+    }
+    resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
 
   }
   const message = passwordResetHtml(resetUrl, await getRawName(user._id));
