@@ -480,6 +480,26 @@ function hashToken(plain) {
 
 const initialPassword = "DooiT@123456"
 
+
+
+const convertQueryString = (params) => {
+  const searchParams = new URLSearchParams(params);
+  return searchParams;
+};
+
+///Array Query Format ?foo=value&foo=value1&foo=value2
+const convertQueryStringArray = (params, data) => {
+  let url = "";
+  if (data) {
+    const query = querystring.stringify(params);
+    url = `${data}&${query}`;
+  } else {
+    url = querystring.stringify(params);
+  }
+  return url;
+};
+
+
 module.exports = {
   isObjEmpty,
   jsonFormat,
@@ -492,5 +512,7 @@ module.exports = {
   generateRandomPassword,
   createInviteToken,
   hashToken,
-  initialPassword
+  initialPassword,
+  convertQueryString,
+  convertQueryStringArray
 };

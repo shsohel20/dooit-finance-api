@@ -11,6 +11,7 @@ const { hashForSearch } = require("../utils/encryption");
 const { resolveMembership } = require("../utils/resolveMembership");
 const { otpVerificationHtml, passwordResetHtml } = require("../utils/email-template/otpEmailTemplate");
 const { getRawEmail, getRawName } = require("../utils/rawUserFields");
+const { convertQueryString } = require("../utils");
 
 // ─── Token response ───────────────────────────────────────────────────────────
 // membership = the resolved UserType row (active hat); pass {} when unknown.
@@ -416,7 +417,11 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   const url = req?.body?.clientUrl ?? req.body.url ?? "";
 
   if (token && cid) {
-    resetUrl = `${url}/auth/reset-password?${resetToken}&${token}&${cid}`;
+    const qry = {
+      token,
+      cid
+    }
+    resetUrl = `${url}/auth/reset-password?${resetToken}&${convertQueryString(qry)}`;
 
   } else {
     resetUrl = `${url}/auth/reset-password?${resetToken}`;
@@ -439,6 +444,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Email could not be sent", 500));
   }
 });
+
 
 // ─── Reset Password ───────────────────────────────────────────────────────────
 // @route  PUT /api/v1/auth/reset-password/:resettoken
