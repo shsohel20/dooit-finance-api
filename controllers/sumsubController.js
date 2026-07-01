@@ -505,29 +505,22 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
 
   // ── 4. Route: KYC or AML? ──────────────────────────────────────────────────
   const effectiveApplicantId = applicantId || customer.sumsubApplicantId;
+  const reviewAnswer = reviewResult?.reviewAnswer;
 
   if (customer.kycStatus !== "verified") {
-    console.log('I am for here not verified')
-    // KYC result — customer hasn't been verified yet
-
+    // First review for this applicant → this is the KYC identity result.
     await handleKycResult(customer, reviewResult || {}, effectiveApplicantId, reviewStatus);
 
-    console.log('I am also for here AML result')
-
-    await handleAmlResult(
-      customer,
-      reviewResult?.reviewAnswer,
-      effectiveApplicantId,
-    );
+    // Only screen AML once identity passed. Running AML on a RED/RETRY applicant
+    // is meaningless and would flag a customer who was never actually onboarded.
+    // AML status is derived from the fetched hits inside handleAmlResult — never
+    // from `reviewAnswer` (a GREEN identity can still carry PEP/sanction hits).
+    if (reviewAnswer === "GREEN") {
+      await handleAmlResult(customer, effectiveApplicantId);
+    }
   } else {
-    console.log('I am for here AML result')
-
-    // AML result — KYC already GREEN, this must be AML
-    await handleAmlResult(
-      customer,
-      reviewResult?.reviewAnswer,
-      effectiveApplicantId,
-    );
+    // KYC already verified → this webhook is an AML / ongoing-monitoring result.
+    await handleAmlResult(customer, effectiveApplicantId);
   }
 
   return res.status(200).json({ received: true });

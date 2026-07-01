@@ -22,6 +22,11 @@ const {
   sumsubWebhook,
 } = require("../controllers/sumsubController");
 
+const {
+  getAmlMatches,
+  updateAmlMatch,
+} = require("../controllers/amlMatchController");
+
 const { protect, authorize } = require("../middleware/auth");
 
 const router = express.Router();
@@ -71,6 +76,20 @@ router.get(
   protect,
   authorize("admin", "client", "branch", "manager"),
   getAmlCase,
+);
+
+// Step 7: Per-match compliance review (analyst dispositions)
+router.get(
+  "/aml-matches/:customerId",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  getAmlMatches,
+);
+router.patch(
+  "/aml-matches/:id",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  updateAmlMatch,
 );
 
 module.exports = router;

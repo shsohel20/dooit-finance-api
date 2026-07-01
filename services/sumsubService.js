@@ -29,6 +29,10 @@ const {
 } = require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 const { syncJourneyStatus } = require("./journeyService");
+const {
+  upsertMatchesForCustomer,
+  recomputeCustomerAmlStatus,
+} = require("./amlMatchService");
 
 const LEVEL_NAME = () => process.env.SUMSUB_LEVEL_NAME || "kyc-level";
 
@@ -367,14 +371,16 @@ const handleKycResult = async (
 /**
  * Process a Sumsub AML webhook result:
  *   - Fetches full AML case (riskLabels + hits)
- *   - Updates Customer.amlStatus, isPep, sanction, amlRiskLabels, amlHits
+ *   - Updates Customer.amlRiskLabels + amlHits (raw), amlCheckedAt, amlVendor
+ *   - Upserts one AmlMatch per hit (preserving analyst decisions)
+ *   - Derives Customer.amlStatus / isPep / sanction from the *matches*, NOT the
+ *     KYC review answer — a GREEN identity can still carry PEP/sanction hits
  *   - Updates OnboardingJourney review step
  *
  * @param {Customer} customer
- * @param {string}   reviewAnswer  — 'GREEN' | 'RED' | 'YELLOW'
  * @param {string}   applicantId
  */
-const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
+const handleAmlResult = async (customer, applicantId) => {
   // ── Fetch full AML case for riskLabels + hits ──────────────────────────────
   let riskLabels = [],
     hits = [],
@@ -393,23 +399,18 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
     console.error("[SumsubService] Failed to fetch AML case:", err.message);
   }
 
-  // ── Map to our amlStatus enum ──────────────────────────────────────────────
-  const amlStatus =
-    reviewAnswer === "GREEN"
-      ? "clear"
-      : reviewAnswer === "YELLOW"
-        ? "yellow"
-        : "flagged";
-
-  // ── Update Customer ────────────────────────────────────────────────────────
-  customer.amlStatus = amlStatus;
+  // ── Persist raw case data on the Customer (kept for back-compat / export) ───
   customer.amlRiskLabels = riskLabels;
   customer.amlHits = hits;
   customer.amlCheckedAt = new Date();
   customer.amlVendor = vendor;
-  if (riskLabels.includes("pep")) customer.isPep = true;
-  if (riskLabels.includes("sanctions")) customer.sanction = true;
   await customer.save();
+
+  // ── Upsert per-match records + derive amlStatus from them ──────────────────
+  // upsert keeps prior analyst dispositions; recompute sets amlStatus/isPep/sanction.
+  await upsertMatchesForCustomer(customer, hits);
+  const amlStatus = await recomputeCustomerAmlStatus(customer._id);
+  customer.amlStatus = amlStatus; // keep the in-memory doc consistent for callers
 
   // ── Update all Sumsub-linked journeys — review step ───────────────────────
   const journeys = await OnboardingJourney.find({
@@ -417,10 +418,16 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
     provider: "sumsub",
   });
 
-  const reviewStepStatus = amlStatus === "clear" ? "approved" : "rejected";
+  // clear → approved · flagged → rejected · yellow (needs review) → in_progress
+  const reviewStepStatus =
+    amlStatus === "clear"
+      ? "approved"
+      : amlStatus === "flagged"
+        ? "rejected"
+        : "in_progress";
   const amlNote =
     amlStatus !== "clear"
-      ? `AML screening: ${riskLabels.join(", ") || reviewAnswer}`
+      ? `AML screening: ${riskLabels.join(", ") || amlStatus}`
       : "AML screening: clear";
 
   for (const journey of journeys) {
@@ -432,7 +439,7 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
         vendor,
         checkedAt: new Date(),
       },
-      rejectionReason: amlStatus !== "clear" ? amlNote : undefined,
+      rejectionReason: amlStatus === "flagged" ? amlNote : undefined,
       bumpAttempt: false,
     });
     journey.recordEvent({
