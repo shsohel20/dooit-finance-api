@@ -21,6 +21,8 @@ const {
   submitCustomerOnboardRequest,
 } = require("../controllers/customerController");
 
+const { exportCustomers } = require("../controllers/customerExportController");
+
 const Customer = require("../models/Customer");
 const advancedResults = require("../middleware/advancedResults");
 
@@ -45,6 +47,7 @@ router.route("/").get(
       { path: "relations.branch", select: "name" },
     ],
     searchFields: [
+      "uid",
       "user.name",
       "user.email",
       "personalKyc.personal_form.customer_details.given_name",
@@ -79,6 +82,14 @@ router.get(
   protect,
   authorize("admin", "client", "branch", "manager", "officer"),
   getCustomerStats,
+);
+
+// Professional Excel export of the customer queue (before "/:id").
+router.get(
+  "/export",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  exportCustomers,
 );
 
 
