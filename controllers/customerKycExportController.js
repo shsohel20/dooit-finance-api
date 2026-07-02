@@ -4,7 +4,7 @@
 // print-grade HTML report and streams it through Puppeteer (same pattern as
 // the CRA audit trail export).
 
-const puppeteer = require("puppeteer");
+const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Customer = require("../models/Customer");
@@ -374,10 +374,7 @@ exports.exportCustomerKycPdf = asyncHandler(async (req, res, next) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await launchPdfBrowser();
     const page = await browser.newPage();
     // networkidle0 lets Cloudinary document/avatar images load; if a remote
     // image hangs, fall back to rendering without waiting on the network.
