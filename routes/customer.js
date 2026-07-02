@@ -23,6 +23,14 @@ const {
 
 const { exportCustomers } = require("../controllers/customerExportController");
 const { exportCustomerKycPdf } = require("../controllers/customerKycExportController");
+const {
+  updateCustomerKycStatus,
+  reviewJourneyStep,
+} = require("../controllers/customerKycStatusController");
+const {
+  addCustomerDocuments,
+  removeCustomerDocument,
+} = require("../controllers/customerDocumentsController");
 
 const Customer = require("../models/Customer");
 const advancedResults = require("../middleware/advancedResults");
@@ -100,6 +108,36 @@ router.get(
   authorize("admin", "client", "branch", "manager", "officer"),
   exportCustomerKycPdf,
 );
+
+// Manual KYC decision (approve / reject / status change) with audit note.
+router.patch(
+  "/:id/kyc-status",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  updateCustomerKycStatus,
+);
+
+// Manual approve/reject of a single verification journey step (e.g. ID Document).
+router.patch(
+  "/:id/journeys/:journeyId/steps/:stepType/review",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  reviewJourneyStep,
+);
+
+// Reviewer-side customer documents (Documents tab): add / remove by URL.
+router
+  .route("/:id/documents")
+  .post(
+    protect,
+    authorize("admin", "client", "branch", "manager", "officer"),
+    addCustomerDocuments,
+  )
+  .delete(
+    protect,
+    authorize("admin", "client", "branch", "manager", "officer"),
+    removeCustomerDocument,
+  );
 
 
 

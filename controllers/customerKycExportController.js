@@ -10,6 +10,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const Customer = require("../models/Customer");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { buildSeedJourney } = require("../utils/journeyUtils");
+const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
 
 // ── small formatters ─────────────────────────────────────────────────────────
 const esc = (s) =>
@@ -40,8 +41,6 @@ const fmtDateTime = (v) => {
 };
 const composeAddress = (a = {}) =>
   [a.address, a.suburb, a.state, a.postcode, a.country].filter(Boolean).join(", ");
-
-const idStr = (ref) => (ref && ref._id ? String(ref._id) : ref ? String(ref) : null);
 
 // ── status chips (Sumsub-like colour language) ───────────────────────────────
 const CHIP = {
@@ -350,15 +349,8 @@ exports.exportCustomerKycPdf = asyncHandler(async (req, res, next) => {
   }
 
   // Tenant guard — a client/branch user may only export customers related to them.
-  if (client) {
-    const related = (customer.relations || []).some(
-      (r) =>
-        idStr(r.client) === String(client) &&
-        (branch ? idStr(r.branch) === String(branch) : true),
-    );
-    if (!related) {
-      return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
-    }
+  if (!customerRelatedToTenant(customer, client, branch)) {
+    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
   }
 
   const role = req.user?.role;
