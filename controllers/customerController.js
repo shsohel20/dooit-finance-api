@@ -1609,7 +1609,7 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
   const user = req.user;
   if (!user) return next(new ErrorResponse("Authentication required", 401));
 
-  const { token, cid, personalKyc } = req.body;
+  const { token, cid,country='', personalKyc } = req.body;
   if (!token) return next(new ErrorResponse("token is required", 400));
   const hashed = hashToken(token);
 
@@ -1674,6 +1674,7 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
 
     // optionally activate customer (business rule)
     customer.isActive = true;
+    customer.country = country;
 
     await customer.save();
 
