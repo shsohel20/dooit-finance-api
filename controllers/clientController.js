@@ -190,6 +190,87 @@ exports.createClient = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc   Resend the welcome / onboarding email to an existing client
+// @route  POST /api/v1/clients/:id/send-welcome
+// @access Protected (dooit)
+exports.sendClientWelcomeEmail = asyncHandler(async (req, res, next) => {
+  const client = await Client.findById(req.params.id).populate("user", "name email");
+  if (!client) return next(new ErrorResponse("Client not found", 404));
+
+  const email = client.email || client.user?.email;
+  const name = client.name || client.user?.name;
+  if (!email)
+    return next(new ErrorResponse("This client has no email address on file", 400));
+
+  const base = String(req.body?.clientUrl || process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  const loginUrl = `${base}/auth/login`;
+
+  await sendEmail({
+    email,
+    subject: "Welcome to Dooit",
+    message: clientWelcomeHtml({ name, loginUrl }),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Welcome email sent to ${email}`,
+  });
+});
+
+// @desc   Resend the password-setup / reset email to an existing client
+// @route  POST /api/v1/clients/:id/send-password-reset
+// @access Protected (dooit)
+exports.sendClientPasswordReset = asyncHandler(async (req, res, next) => {
+  const client = await Client.findById(req.params.id).populate("user", "name email");
+  if (!client) return next(new ErrorResponse("Client not found", 404));
+
+  // Full user doc is needed for the reset-token helper.
+  const user = await User.findById(client.user?._id || client.user);
+  if (!user)
+    return next(new ErrorResponse("This client has no linked user account", 404));
+
+  const email = client.email || user.email;
+  const name = client.name || user.name;
+  if (!email)
+    return next(new ErrorResponse("This client has no email address on file", 400));
+
+  const base = String(req.body?.clientUrl || process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  const loginUrl = `${base}/auth/login`;
+
+  // Fresh 24h set-password link; falls back to forgot-password on failure.
+  let setPasswordUrl = `${base}/auth/forgot-password`;
+  try {
+    const resetToken = user.getResetPasswordToken();
+    await User.updateOne(
+      { _id: user._id },
+      {
+        resetPasswordToken: user.resetPasswordToken,
+        resetPasswordExpire: Date.now() + 24 * 60 * 60 * 1000,
+      }
+    );
+    setPasswordUrl = `${base}/auth/reset-password?${convertQueryString({ resetToken })}`;
+  } catch (err) {
+    console.error("[sendClientPasswordReset] reset-token generation failed:", err.message);
+  }
+
+  await sendEmail({
+    email,
+    subject: "Your Dooit Login Details & Password Setup",
+    message: clientCredentialsHtml({
+      name,
+      email,
+      tempPassword: null, // never re-expose a temporary password on resend
+      setPasswordUrl,
+      loginUrl,
+    }),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Password reset email sent to ${email}`,
+  });
+});
+
 // @desc   Fetch single client by id
 // @route  /api/v1/clients/:id
 // @access Public
