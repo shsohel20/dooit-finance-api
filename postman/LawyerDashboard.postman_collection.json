@@ -1,0 +1,48 @@
+{
+  "info": {
+    "name": "Lawyer Dashboard",
+    "description": "Aggregated analytics for the Lawyers/Conveyancers entity dashboard. Single summary endpoint — client-scoped except SMR/TTR counts (those collections carry no client ref yet, so they are global).",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000/api/v1" },
+    { "key": "token", "value": "" }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "item": [
+    {
+      "name": "Get Dashboard Summary",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/lawyer-dashboard/summary",
+          "host": ["{{baseUrl}}"],
+          "path": ["lawyer-dashboard", "summary"]
+        },
+        "description": "Returns all dashboard analytics in one call:\n\n- **kpi** — totalClients, newThisMonth, kycVerifiedPct, highRiskClients, pendingEcdd, openCases, trustVolumeThisMonth, trustTxnsThisMonth, reviewsOverdue\n- **clients** — byKycStatus (pending/in_review/verified/rejected), pep, sanctioned, newThisMonth\n- **risk** — CRA distribution byLabel (Low/Medium/High/Unacceptable), avgScore\n- **ecdd** — pendingCount + queue (cddGate true, ecddStatus Pending, max 8, newest first)\n- **reviews** — dueSoonCount (30 days), overdueCount, upcoming list\n- **cases** — Alert byStatus, open count, 5 most recent\n- **trust** — 6-month monthly transaction trend (count + AUD volume), byType, thisMonth incl. flagged count\n- **onboarding** — OnboardingJourney byStatus\n- **reports** — SMR (draft/review/approved) and TTR (draft/submitted/approved) counts — GLOBAL scope"
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test(\"200 OK\", () => pm.response.to.have.status(200));",
+              "pm.test(\"has kpi block\", () => {",
+              "  const body = pm.response.json();",
+              "  pm.expect(body.success).to.be.true;",
+              "  pm.expect(body.data).to.have.property(\"kpi\");",
+              "  pm.expect(body.data).to.have.property(\"trust\");",
+              "  pm.expect(body.data).to.have.property(\"ecdd\");",
+              "});"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

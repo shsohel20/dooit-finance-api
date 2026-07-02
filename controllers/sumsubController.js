@@ -513,9 +513,9 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
     // is meaningless and would flag a customer who was never actually onboarded.
     // AML status is derived from the fetched hits inside handleAmlResult — never
     // from `reviewAnswer` (a GREEN identity can still carry PEP/sanction hits).
-    if (reviewAnswer === "GREEN") {
-      await handleAmlResult(customer, effectiveApplicantId);
-    }
+
+    await handleAmlResult(customer, effectiveApplicantId);
+
   } else {
     // KYC already verified → this webhook is an AML / ongoing-monitoring result.
     await handleAmlResult(customer, effectiveApplicantId);
