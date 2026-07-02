@@ -722,6 +722,12 @@ const DOC_TYPE_TO_SUMSUB_SUBTYPE = {
   back: "BACK_SIDE",
 };
 
+// Sumsub only accepts FRONT_SIDE/BACK_SIDE on double-sided document types.
+// Single-sided docs (PASSPORT, etc.) must omit idDocSubType entirely —
+// the UI sends docType "id_front" even for passports, so the sub-type has
+// to be gated on the resolved idDocType, not the incoming docType.
+const DOUBLE_SIDED_DOC_TYPES = new Set(["ID_CARD", "DRIVERS", "RESIDENCE_PERMIT"]);
+
 /**
  * Build the Sumsub /info/idDoc metadata object from OCR results.
  *
@@ -739,8 +745,9 @@ const buildIdDocMetadata = (
 ) => {
   const cardTypeLower = (ocrCardType || "").toLowerCase();
   const idDocType = OCR_CARD_TYPE_TO_SUMSUB_DOC_TYPE[cardTypeLower] || "OTHER";
-  const idDocSubType =
-    DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null;
+  const idDocSubType = DOUBLE_SIDED_DOC_TYPES.has(idDocType)
+    ? DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null
+    : null;
 
   const rawCountry = ocrFields.issuing_country || fallbackCountry || null;
   const docCountry = rawCountry ? toAlpha3(rawCountry) || null : null;
