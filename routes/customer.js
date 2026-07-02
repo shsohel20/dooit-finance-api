@@ -22,6 +22,7 @@ const {
 } = require("../controllers/customerController");
 
 const { exportCustomers } = require("../controllers/customerExportController");
+const { exportCustomerKycPdf } = require("../controllers/customerKycExportController");
 
 const Customer = require("../models/Customer");
 const advancedResults = require("../middleware/advancedResults");
@@ -90,6 +91,14 @@ router.get(
   protect,
   authorize("admin", "client", "branch", "manager", "officer"),
   exportCustomers,
+);
+
+// Sumsub-style per-customer KYC applicant report (PDF).
+router.get(
+  "/:id/kyc-export",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  exportCustomerKycPdf,
 );
 
 
