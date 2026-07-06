@@ -19,26 +19,35 @@ const {
   downloadQR,
   getCustomerOnBoardData,
   submitCustomerOnboardRequest,
-} = require("../controllers/customerController");
-
-const { exportCustomers } = require("../controllers/customerExportController");
-const { exportCustomerKycPdf } = require("../controllers/customerKycExportController");
-const {
+  // merged in from the former per-concern customer controllers
+  exportCustomers,
+  exportCustomerKycPdf,
   updateCustomerKycStatus,
   reviewJourneyStep,
-} = require("../controllers/customerKycStatusController");
-const {
   addCustomerDocuments,
   removeCustomerDocument,
-} = require("../controllers/customerDocumentsController");
+  manualImportCustomer,
+} = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
-router.use(express.json({ limit: "100kb" }));
 
 const { protect, authorize } = require("../middleware/auth");
+
+// Staff-side manual import of an individual customer (in-branch onboarding).
+// Registered BEFORE the router-level 100kb json parser — signature images
+// (base64 data-URIs) in the declaration need a larger body limit.
+router.post(
+  "/manual-import",
+  express.json({ limit: "5mb" }),
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  manualImportCustomer,
+);
+
+router.use(express.json({ limit: "100kb" }));
 const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
 const CompanyKyc = require("../models/CompanyKyc");
 const TrustKyc = require("../models/TrustKyc");

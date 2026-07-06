@@ -1,0 +1,120 @@
+{
+  "info": {
+    "name": "Dooit API — Customer Manual Import",
+    "_postman_id": "dooit-customer-manual-import-v1",
+    "description": "Staff-side manual import of an INDIVIDUAL customer (in-branch onboarding).\n\n**Flow**: staff fill an OCR-prefilled form → POST /customer/manual-import → customer + audit journey created → Sumsub chain (applicant → upload docs → request check) runs in the background → webhook updates KYC status (GREEN auto-triggers AML).\n\n**Setup**\n1. Set `baseUrl` (default `http://localhost:5000`).\n2. Run **Auth / Login** to populate `{{token}}` — the endpoint requires role admin/client/branch/manager/officer.\n3. Send **Manual Import — Individual**. Tenant (client/branch) is resolved from the session; only tenant-less admin sessions may pass `clientId`/`branchId` in the body.\n\n**Responses**\n- `201` created — `data.sumsub` is `queued` (docs present, runSumsubCheck ≠ false) or `skipped`\n- `200` existing customer linked to this tenant (`relationAdded: true`, Sumsub not re-run)\n- `409` customer already exists for this client/branch — `data.customerId` links to the record\n- `400` validation / tenant errors",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string",
+      "description": "Base URL of the Dooit API server"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT Bearer token — set automatically by Auth / Login"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const json = pm.response.json();",
+                  "if (json && json.token) {",
+                  "  pm.collectionVariables.set('token', json.token);",
+                  "  console.log('token saved');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"client@example.com\",\n  \"password\": \"123456\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Manual Import — Individual (full, Sumsub queued)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/v1/customer/manual-import", "host": ["{{baseUrl}}"], "path": ["api", "v1", "customer", "manual-import"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"personalKyc\": {\n    \"personal_form\": {\n      \"customer_details\": {\n        \"given_name\": \"Rahim\",\n        \"middle_name\": \"\",\n        \"surname\": \"Uddin\",\n        \"date_of_birth\": \"1990-01-15\"\n      },\n      \"contact_details\": {\n        \"email\": \"rahim.uddin@example.com\",\n        \"phone\": \"+8801711111111\"\n      },\n      \"employment_details\": {\n        \"occupation\": \"Software Engineer\",\n        \"industry\": \"Technology\",\n        \"employer_name\": \"Acme Ltd\"\n      },\n      \"residential_address\": {\n        \"address\": \"12 Lake Road\",\n        \"suburb\": \"Dhanmondi\",\n        \"state\": \"Dhaka\",\n        \"postcode\": \"1209\",\n        \"country\": \"Bangladesh\"\n      },\n      \"mailing_address\": {\n        \"address\": \"12 Lake Road\",\n        \"suburb\": \"Dhanmondi\",\n        \"state\": \"Dhaka\",\n        \"postcode\": \"1209\",\n        \"country\": \"Bangladesh\"\n      },\n      \"identificationNo\": \"NID-1234567890\"\n    },\n    \"funds_wealth\": {\n      \"source_of_funds\": \"Salary\",\n      \"source_of_wealth\": \"Employment\",\n      \"account_purpose\": \"Savings\",\n      \"estimated_trading_volume\": \"10000-50000\"\n    }\n  },\n  \"documents\": [\n    { \"url\": \"https://res.cloudinary.com/demo/image/upload/id_front.jpg\", \"type\": \"front\", \"docType\": \"national_id\" },\n    { \"url\": \"https://res.cloudinary.com/demo/image/upload/id_back.jpg\", \"type\": \"back\", \"docType\": \"national_id\" },\n    { \"url\": \"https://res.cloudinary.com/demo/image/upload/selfie.jpg\", \"type\": \"front\", \"docType\": \"selfie\" }\n  ],\n  \"authorized\": {\n    \"company_name\": \"Alpha Bank Ltd\",\n    \"agent_name\": \"Branch Officer Name\",\n    \"title_relationship\": \"KYC Officer\",\n    \"documents_attested\": true\n  },\n  \"country\": \"Bangladesh\",\n  \"notes\": \"Walk-in customer, documents sighted in person\",\n  \"consentToScreen\": true\n}"
+        },
+        "description": "Creates the customer, writes the audit journey (personal_form / id_document / selfie steps), then runs the Sumsub chain in the background. Returns 201 with data.sumsub = \"queued\"."
+      }
+    },
+    {
+      "name": "Manual Import — minimal, skip Sumsub",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/v1/customer/manual-import", "host": ["{{baseUrl}}"], "path": ["api", "v1", "customer", "manual-import"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"personalKyc\": {\n    \"personal_form\": {\n      \"customer_details\": { \"given_name\": \"Karima\", \"surname\": \"Begum\" },\n      \"contact_details\": { \"phone\": \"+8801722222222\" }\n    }\n  },\n  \"runSumsubCheck\": false,\n  \"notes\": \"Docs to follow — KYC deferred\"\n}"
+        },
+        "description": "Minimum viable import: given_name + one contact. No documents → Sumsub skipped, kycStatus stays \"pending\"."
+      }
+    },
+    {
+      "name": "Manual Import — admin with explicit tenant",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/v1/customer/manual-import", "host": ["{{baseUrl}}"], "path": ["api", "v1", "customer", "manual-import"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"clientId\": \"<CLIENT_OBJECT_ID>\",\n  \"branchId\": \"<BRANCH_OBJECT_ID — must belong to clientId>\",\n  \"personalKyc\": {\n    \"personal_form\": {\n      \"customer_details\": { \"given_name\": \"Admin\", \"surname\": \"Imported\" },\n      \"contact_details\": { \"email\": \"admin.imported@example.com\" }\n    }\n  },\n  \"runSumsubCheck\": false\n}"
+        },
+        "description": "clientId/branchId in the body are honored ONLY when the session has no client context (platform admin). branchId is verified to belong to clientId."
+      }
+    },
+    {
+      "name": "Manual Import — duplicate (expect 409 or 200 relation-add)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Authorization", "value": "Bearer {{token}}" }
+        ],
+        "url": { "raw": "{{baseUrl}}/api/v1/customer/manual-import", "host": ["{{baseUrl}}"], "path": ["api", "v1", "customer", "manual-import"] },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"personalKyc\": {\n    \"personal_form\": {\n      \"customer_details\": { \"given_name\": \"Rahim\", \"surname\": \"Uddin\" },\n      \"contact_details\": { \"email\": \"rahim.uddin@example.com\" }\n    }\n  },\n  \"runSumsubCheck\": false\n}"
+        },
+        "description": "Re-send after the full import. Same tenant → 409 with data.customerId. Different tenant session → 200 with relationAdded: true (Sumsub not re-run)."
+      }
+    }
+  ]
+}

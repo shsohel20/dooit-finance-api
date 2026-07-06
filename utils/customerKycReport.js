@@ -1,16 +1,8 @@
-// controllers/customerKycExportController.js
-// Sumsub-style per-customer KYC applicant report as a PDF.
-// Mirrors getCustomer's decryption + journey tenant scoping, renders a
-// print-grade HTML report and streams it through Puppeteer (same pattern as
-// the CRA audit trail export).
-
-const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
-const asyncHandler = require("../middleware/async");
-const ErrorResponse = require("../utils/errorResponse");
-const Customer = require("../models/Customer");
-const OnboardingJourney = require("../models/OnboardingJourney");
-const { buildSeedJourney } = require("../utils/journeyUtils");
-const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
+// utils/customerKycReport.js
+// Presentation layer for the Sumsub-style per-customer KYC applicant report.
+// Owns the formatters, status chips and print-grade HTML builder; the
+// controller keeps data-fetch, decryption, journey scoping and Puppeteer
+// streaming. Extracted from the former customerKycExportController.
 
 // ── small formatters ─────────────────────────────────────────────────────────
 const esc = (s) =>
@@ -86,7 +78,7 @@ const isImageDoc = (doc = {}) =>
   /^image\//i.test(doc.mimeType || "") || /\.(png|jpe?g|webp|gif)(\?|$)/i.test(doc.url || "");
 
 // ── report HTML ──────────────────────────────────────────────────────────────
-const buildReportHtml = (d, journeys) => {
+const buildKycReportHtml = (d, journeys) => {
   const kyc = d.personalKyc || {};
   const cd = kyc.personal_form?.customer_details || {};
   const contact = kyc.personal_form?.contact_details || {};
@@ -333,68 +325,4 @@ const buildReportHtml = (d, journeys) => {
 </body></html>`;
 };
 
-// Exposed for template testing.
-exports.buildReportHtml = buildReportHtml;
-
-// @desc   Sumsub-style KYC applicant report (PDF) for one customer
-// @route  GET /api/v1/customer/:id/kyc-export
-// @access Private (admin, client, branch, manager, officer)
-exports.exportCustomerKycPdf = asyncHandler(async (req, res, next) => {
-  const client = req?.user?.client?._id || null;
-  const branch = req?.user?.branch?._id || null;
-
-  const customer = await Customer.findById(req.params.id).populate("user");
-  if (!customer) {
-    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
-  }
-
-  // Tenant guard — a client/branch user may only export customers related to them.
-  if (!customerRelatedToTenant(customer, client, branch)) {
-    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
-  }
-
-  const role = req.user?.role;
-  const data = customer.decryptForRole(role);
-  if (customer.user && typeof customer.user.decryptForRole === "function") {
-    data.user = customer.user.decryptForRole(role);
-  }
-
-  // Journeys — same tenant scoping as getCustomer.
-  const filter = { customer: req.params.id };
-  if (client) filter.client = client;
-  if (branch) filter.branch = branch;
-  const journeys = await OnboardingJourney.find(filter)
-    .populate({ path: "client", select: "name" })
-    .populate({ path: "branch", select: "name" })
-    .sort({ createdAt: -1 })
-    .lean({ virtuals: true });
-  const journeyData = journeys.length > 0 ? journeys : [buildSeedJourney(customer)];
-
-  const html = buildReportHtml(data, journeyData);
-
-  let browser;
-  try {
-    browser = await launchPdfBrowser();
-    const page = await browser.newPage();
-    // networkidle0 lets Cloudinary document/avatar images load; if a remote
-    // image hangs, fall back to rendering without waiting on the network.
-    try {
-      await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
-    } catch (e) {
-      await page.setContent(html, { waitUntil: "domcontentloaded" });
-    }
-    const pdfBuffer = await page.pdf({
-      format: "A4",
-      printBackground: true,
-      margin: { top: "10mm", bottom: "12mm", left: "8mm", right: "8mm" },
-    });
-
-    const filename = `KYC_Report_${data.uid || data._id}.pdf`;
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    res.send(Buffer.from(pdfBuffer));
-  } finally {
-    if (browser) await browser.close();
-  }
-});
+module.exports = { buildKycReportHtml };

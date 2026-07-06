@@ -401,7 +401,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   #swagger.responses[404] = { description: 'Email not found', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
-  const { token = null, cid = null } = req?.body
+  const { token = null, cid = null, client = null } = req?.body
   const user = await User.findOne({ emailHash: hashForSearch(req.body.email) });
   if (!user) {
     return next(new ErrorResponse("The email address is not valid", 404));
@@ -420,7 +420,8 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     const qry = {
       resetToken,
       token,
-      cid
+      cid,
+      client
     }
     resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
 

@@ -4,7 +4,7 @@ const bcrypt = require("bcryptjs");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 
-const { hashToken } = require("../utils");
+const { hashToken, initialPassword } = require("../utils");
 const sendEmail = require("../utils/sendEmail");
 const sendSMS = require("../utils/sendSms");
 const InvitationEmailTemplate = require("../utils/email-template/invitation");
@@ -24,11 +24,28 @@ const { runInBackground } = require("../utils/backgroundJob");
 const {
   findOrCreateJourney,
   syncJourneyStatus,
+  writeJourneyStep,
+  sanitizeDocuments,
 } = require("../services/journeyService");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { buildSeedJourney } = require("../utils/journeyUtils");
 const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
 const { getCentroid } = require("../utils/countryCentroids");
+const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
+const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
+const {
+  buildCustomerWorkbook,
+  pickPrimaryRelation,
+  isEmpty: isEmptyExport,
+} = require("../utils/customerExcelExport");
+const { buildKycReportHtml } = require("../utils/customerKycReport");
+const {
+  findOrCreateCustomerUser,
+  ensureCustomerMembership,
+  isSelfieDoc,
+  runFaceVerification,
+  runSumsubChain,
+} = require("../services/customerImportService");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -959,7 +976,7 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
       branchId: branch || null,
       relationIndex: relIndex,
       channel: onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
 
     const stepStatus = sumsubResult ? "approved" : "submitted";
@@ -2310,7 +2327,7 @@ exports.createCustomerDummy = asyncHandler(async (req, res, next) => {
   const { kyc } = body;
 
   // sensible defaults
-  const DEFAULT_PASSWORD = "123456";
+  const DEFAULT_PASSWORD = initialPassword;
   const saltRounds = 10;
 
   // map possible incoming requestedType values to canonical ones
@@ -3102,4 +3119,819 @@ exports.downloadQR = asyncHandler(async (req, res, next) => {
   );
 
   return res.send(qr);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Customer documents (Documents tab) — merged from customerDocumentsController.
+// Reviewer-side management of Customer.documents (DocumentMetaSchema): add via
+// the Documents tab and remove by URL. Persisted with updateOne ($push/$pull)
+// so the Customer pre-save encryption hooks don't re-process untouched PII.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Keep only the DocumentMetaSchema fields — never trust arbitrary keys.
+const sanitizeDoc = (doc = {}) => ({
+  name: String(doc.name || "").slice(0, 200),
+  url: String(doc.url || ""),
+  mimeType: String(doc.mimeType || "application/octet-stream"),
+  type: String(doc.type || "manual_upload"),
+  docType: String(doc.docType || "other"),
+  uploadedAt: new Date(),
+});
+
+const loadGuardedCustomer = async (req, next) => {
+  const customer = await Customer.findById(req.params.id).select("documents relations");
+  if (!customer) {
+    next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+    return null;
+  }
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  if (!customerRelatedToTenant(customer, client, branch)) {
+    next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+    return null;
+  }
+  return customer;
+};
+
+// @desc   Add one or more documents to a customer
+// @route  POST /api/v1/customer/:id/documents
+// @access Private (admin, client, branch, manager, officer)
+exports.addCustomerDocuments = asyncHandler(async (req, res, next) => {
+  const raw = Array.isArray(req.body?.documents)
+    ? req.body.documents
+    : req.body?.document
+      ? [req.body.document]
+      : [];
+
+  const docs = raw.map(sanitizeDoc).filter((d) => d.url);
+  if (docs.length === 0) {
+    return next(new ErrorResponse("At least one document with a url is required", 400));
+  }
+
+  const customer = await loadGuardedCustomer(req, next);
+  if (!customer) return;
+
+  // No duplicate URLs — documents have no _id, URL is the identity.
+  const existing = new Set((customer.documents || []).map((d) => d.url));
+  const fresh = docs.filter((d) => !existing.has(d.url));
+  if (fresh.length === 0) {
+    return next(new ErrorResponse("Document(s) already attached to this customer", 400));
+  }
+
+  await Customer.updateOne(
+    { _id: customer._id },
+    { $push: { documents: { $each: fresh } } },
+  );
+
+  const updated = await Customer.findById(customer._id).select("documents").lean();
+  res.status(200).json({
+    success: true,
+    message: `${fresh.length} document(s) added`,
+    data: updated.documents,
+  });
+});
+
+// @desc   Remove a customer document by its URL
+// @route  DELETE /api/v1/customer/:id/documents?url=...
+// @access Private (admin, client, branch, manager, officer)
+exports.removeCustomerDocument = asyncHandler(async (req, res, next) => {
+  const url = req.query.url || req.body?.url;
+  if (!url) {
+    return next(new ErrorResponse("url (query or body) is required", 400));
+  }
+
+  const customer = await loadGuardedCustomer(req, next);
+  if (!customer) return;
+
+  const exists = (customer.documents || []).some((d) => d.url === url);
+  if (!exists) {
+    return next(new ErrorResponse("Document not found on this customer", 404));
+  }
+
+  await Customer.updateOne({ _id: customer._id }, { $pull: { documents: { url } } });
+
+  const updated = await Customer.findById(customer._id).select("documents").lean();
+  res.status(200).json({
+    success: true,
+    message: "Document removed",
+    data: updated.documents,
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// KYC status decisions — merged from customerKycStatusController.
+// Manual KYC decision (approve / reject / status change) and per-step review,
+// each writing an audit entry. updateOne (not doc.save) so the Customer
+// pre-save encryption hooks don't re-process untouched PII fields.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const KYC_STATUS_ALLOWED = ["pending", "in_review", "verified", "rejected"];
+
+// @desc   Manually set a customer's KYC status (with audit note)
+// @route  PATCH /api/v1/customer/:id/kyc-status
+// @access Private (admin, client, branch, manager, officer)
+exports.updateCustomerKycStatus = asyncHandler(async (req, res, next) => {
+  const { status, note } = req.body || {};
+
+  if (!status || !KYC_STATUS_ALLOWED.includes(status)) {
+    return next(new ErrorResponse(`status must be one of: ${KYC_STATUS_ALLOWED.join(", ")}`, 400));
+  }
+  if (status === "rejected" && !note) {
+    return next(new ErrorResponse("note is required when rejecting", 400));
+  }
+
+  const customer = await Customer.findById(req.params.id).select(
+    "kycStatus kycVerifiedAt kycRejectReason relations",
+  );
+  if (!customer) {
+    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+  }
+
+  // Tenant guard — a client/branch user may only act on customers related to them.
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  if (!customerRelatedToTenant(customer, client, branch)) {
+    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+  }
+
+  const prev = customer.kycStatus;
+  if (prev === status) {
+    return next(new ErrorResponse(`Customer KYC status is already "${status}"`, 400));
+  }
+
+  const defaultNotes = {
+    verified: "Approved by reviewer",
+    rejected: "Rejected by reviewer",
+    in_review: "Moved to review",
+    pending: "Reset to pending",
+  };
+  const historyEntry = {
+    status,
+    note: note || defaultNotes[status],
+    changedBy: req.user._id,
+    changedAt: new Date(),
+  };
+
+  const set = { kycStatus: status };
+  if (status === "verified") {
+    set.kycVerifiedAt = new Date();
+    set.kycRejectReason = null;
+  }
+  if (status === "rejected") set.kycRejectReason = note;
+
+  await Customer.updateOne(
+    { _id: customer._id },
+    { $set: set, $push: { kycHistory: historyEntry } },
+  );
+
+  res.status(200).json({
+    success: true,
+    message: `Customer KYC ${status}`,
+    data: {
+      customerId: customer._id,
+      prevStatus: prev,
+      kycStatus: status,
+      kycVerifiedAt: set.kycVerifiedAt ?? customer.kycVerifiedAt,
+      kycRejectReason:
+        status === "rejected" ? note : status === "verified" ? null : customer.kycRejectReason,
+      historyEntry,
+    },
+  });
+});
+
+const STEP_DECISIONS = ["approved", "rejected"];
+
+// @desc   Manually approve/reject a verification journey step (e.g. ID Document)
+// @route  PATCH /api/v1/customer/:id/journeys/:journeyId/steps/:stepType/review
+// @access Private (admin, client, branch, manager, officer)
+exports.reviewJourneyStep = asyncHandler(async (req, res, next) => {
+  const { status, note, cascadeSteps } = req.body || {};
+  const { id, journeyId, stepType } = req.params;
+
+  if (!status || !STEP_DECISIONS.includes(status)) {
+    return next(new ErrorResponse(`status must be one of: ${STEP_DECISIONS.join(", ")}`, 400));
+  }
+  if (status === "rejected" && !note) {
+    return next(new ErrorResponse("note is required when rejecting", 400));
+  }
+  if (!OnboardingJourney.STEP_TYPES.includes(stepType)) {
+    return next(new ErrorResponse(`Unknown step type "${stepType}"`, 400));
+  }
+
+  // Optional cascade — apply the same decision to sibling steps in one review
+  // (e.g. the UI's combined "ID Document & Selfie" section approves/rejects both).
+  const extraSteps = [
+    ...new Set(
+      (Array.isArray(cascadeSteps) ? cascadeSteps : []).filter(
+        (t) => t !== stepType && OnboardingJourney.STEP_TYPES.includes(t),
+      ),
+    ),
+  ];
+
+  // Tenant scope — same journey filter as getCustomer.
+  const filter = { _id: journeyId, customer: id };
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+
+  const journey = await OnboardingJourney.findOne(filter);
+  if (!journey) {
+    return next(new ErrorResponse(`Journey not found with id of ${journeyId}`, 404));
+  }
+
+  const step = journey.steps.find((s) => s.type === stepType);
+  if (!step) {
+    return next(new ErrorResponse(`Step "${stepType}" not found on this journey`, 404));
+  }
+  if (step.status === status) {
+    return next(new ErrorResponse(`Step is already "${status}"`, 400));
+  }
+
+  // setStepStatus → recordEvent → syncJourneyStatus → save. A manual decision
+  // is not a customer attempt, so don't bump the attempt counter.
+  await writeJourneyStep(journey, {
+    step: stepType,
+    status,
+    rejectionReason: status === "rejected" ? note : undefined,
+    bumpAttempt: false,
+    event: {
+      action: "manual_review",
+      note: note || (status === "approved" ? "Approved by reviewer" : ""),
+      actor: req.user._id,
+      actorRole: req.user.role || "reviewer",
+    },
+  });
+
+  // Cascade the same decision to the sibling steps (skip absent steps and
+  // steps already in the requested status — the primary decision stands alone).
+  const cascaded = [];
+  for (const extraType of extraSteps) {
+    const extraStep = journey.steps.find((s) => s.type === extraType);
+    if (!extraStep || extraStep.status === status) continue;
+
+    await writeJourneyStep(journey, {
+      step: extraType,
+      status,
+      rejectionReason: status === "rejected" ? note : undefined,
+      bumpAttempt: false,
+      event: {
+        action: "manual_review",
+        note: `${note || (status === "approved" ? "Approved by reviewer" : "")} (reviewed together with ${stepType})`,
+        actor: req.user._id,
+        actorRole: req.user.role || "reviewer",
+      },
+    });
+    cascaded.push(extraType);
+  }
+
+  res.status(200).json({
+    success: true,
+    message: cascaded.length
+      ? `Steps ${[stepType, ...cascaded].join(" + ")} ${status}`
+      : `Step ${stepType} ${status}`,
+    data: {
+      journeyId: journey._id,
+      stepType,
+      stepStatus: status,
+      cascadedSteps: cascaded,
+      journeyStatus: journey.status,
+    },
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Excel export — merged from customerExportController.
+// Professional, fully-populated .xlsx of the Customer queue. Mirrors the queue
+// list's tenant scoping + filters; the grouped column model + workbook styling
+// live in utils/customerExcelExport.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// @desc   Professional Excel export of the customer queue
+// @route  GET /api/v1/customer/export
+// @access Private (admin, client, branch, manager, officer)
+exports.exportCustomers = asyncHandler(async (req, res, next) => {
+  // ── Tenant scope + filters (mirror advancedCustomerResultsQueryOnly) ────────
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
+  const dbQuery = {};
+  if (client) dbQuery["relations.client"] = client;
+  if (branch) dbQuery["relations.branch"] = branch;
+
+  // default the queue's isActive=true unless explicitly overridden
+  dbQuery.isActive = isEmptyExport(req.query.isActive) ? true : req.query.isActive === "true";
+
+  ["kycStatus", "country"].forEach((f) => {
+    if (!isEmptyExport(req.query[f])) dbQuery[f] = req.query[f];
+  });
+  ["isPep", "sanction"].forEach((f) => {
+    if (!isEmptyExport(req.query[f])) dbQuery[f] = req.query[f] === "true";
+  });
+  // relation type — accept both `type` (queue list) and `relationType`
+  const relType = req.query.relationType || req.query.type;
+  if (!isEmptyExport(relType)) dbQuery["relations.type"] = relType;
+  if (!isEmptyExport(req.query.uid)) {
+    dbQuery.uid = new RegExp(String(req.query.uid).replace(/^#/, ""), "i");
+  }
+
+  // OR-groups combined via $and so search + email don't clobber each other.
+  const andGroups = [];
+  if (!isEmptyExport(req.query.q)) {
+    const rx = new RegExp(req.query.q, "i");
+    andGroups.push({
+      $or: [
+        { "personalKyc.personal_form.customer_details.given_name": rx },
+        { "personalKyc.personal_form.customer_details.surname": rx },
+        { uid: rx },
+      ],
+    });
+  }
+  if (!isEmptyExport(req.query.email)) {
+    const email = String(req.query.email).trim();
+    const rx = new RegExp(email, "i");
+    const orGroup = [
+      { "personalKyc.personal_form.contact_details.email": rx },
+      { "metadata.email": rx },
+    ];
+    // Exact email → match the linked (encrypted) Users record via emailHash.
+    try {
+      const matched = await User.find({ emailHash: hashForSearch(email) })
+        .select("_id")
+        .lean();
+      if (matched.length) orGroup.push({ user: { $in: matched.map((u) => u._id) } });
+    } catch (e) {
+      /* fall back to customer-field match */
+    }
+    andGroups.push({ $or: orGroup });
+  }
+  if (andGroups.length) dbQuery.$and = andGroups;
+
+  const MAX_ROWS = 10000;
+  const docs = await Customer.find(dbQuery)
+    .populate([
+      { path: "user", select: "name email userName photoUrl userType role" },
+      { path: "relations.client", select: "name" },
+      { path: "relations.branch", select: "name" },
+    ])
+    .sort("-createdAt")
+    .limit(MAX_ROWS);
+
+  // Decrypt + materialize virtuals; optional in-memory riskLabel filter.
+  const role = req.user?.role;
+  let rows = docs.map((doc) => {
+    const row =
+      typeof doc.decryptForRole === "function"
+        ? doc.decryptForRole(role)
+        : doc.toObject({ virtuals: true });
+    // user.name/email are AES-256-GCM encrypted on the Users model; the
+    // customer's own decryptForRole doesn't touch the populated subdoc, so
+    // decrypt it separately (mirrors getCustomer) for a real Account Email.
+    if (doc.user && typeof doc.user.decryptForRole === "function") {
+      row.user = doc.user.decryptForRole(role);
+    }
+    // Primary Client/Branch scoped to the current logged-in tenant.
+    row._primaryRelation = pickPrimaryRelation(row.relations, client, branch);
+    return row;
+  });
+  if (!isEmptyExport(req.query.riskLabel)) {
+    rows = rows.filter((d) => d.riskLabel === req.query.riskLabel);
+  }
+
+  // User Type / Role moved off the Users model into the UserType collection
+  // (multi-userType migration). Attach each customer's membership scoped to the
+  // current tenant so those columns reflect *this* client/branch's view.
+  const userIds = rows.map((r) => r.user?._id).filter(Boolean);
+  if (userIds.length) {
+    const mFilter = { user: { $in: userIds }, userType: "customer" };
+    if (client) mFilter.clientBelongs = client;
+    if (branch) mFilter.branchBelongs = branch;
+    const memberships = await UserType.find(mFilter)
+      .select("user userType role clientBelongs branchBelongs isActive")
+      .lean();
+    const byUser = new Map();
+    memberships.forEach((m) => {
+      const k = String(m.user);
+      // prefer an active membership when a user has more than one
+      if (!byUser.has(k) || (m.isActive && !byUser.get(k).isActive)) {
+        byUser.set(k, m);
+      }
+    });
+    rows.forEach((r) => {
+      const k = r.user?._id ? String(r.user._id) : null;
+      r._membership = k ? byUser.get(k) || null : null;
+    });
+  }
+
+  // ── Workbook (grouped column model + styling in utils/customerExcelExport) ──
+  const activeFilters = ["kycStatus", "country", "isPep", "sanction", "type", "relationType", "riskLabel", "uid", "email", "q"]
+    .filter((k) => !isEmptyExport(req.query[k]))
+    .map((k) => `${k}=${req.query[k]}`)
+    .join("  |  ");
+
+  const wb = buildCustomerWorkbook(rows, {
+    recordCount: rows.length,
+    capped: docs.length >= MAX_ROWS,
+    maxRows: MAX_ROWS,
+    activeFilters,
+  });
+
+  // ── Stream ──────────────────────────────────────────────────────────────────
+  const filename = `customers-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// KYC applicant report (PDF) — merged from customerKycExportController.
+// Mirrors getCustomer's decryption + journey tenant scoping; the print-grade
+// report HTML lives in utils/customerKycReport, streamed via Puppeteer.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// @desc   Sumsub-style KYC applicant report (PDF) for one customer
+// @route  GET /api/v1/customer/:id/kyc-export
+// @access Private (admin, client, branch, manager, officer)
+exports.exportCustomerKycPdf = asyncHandler(async (req, res, next) => {
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+
+  const customer = await Customer.findById(req.params.id).populate("user");
+  if (!customer) {
+    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+  }
+
+  // Tenant guard — a client/branch user may only export customers related to them.
+  if (!customerRelatedToTenant(customer, client, branch)) {
+    return next(new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404));
+  }
+
+  const role = req.user?.role;
+  const data = customer.decryptForRole(role);
+  if (customer.user && typeof customer.user.decryptForRole === "function") {
+    data.user = customer.user.decryptForRole(role);
+  }
+
+  // Journeys — same tenant scoping as getCustomer.
+  const filter = { customer: req.params.id };
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+  const journeys = await OnboardingJourney.find(filter)
+    .populate({ path: "client", select: "name" })
+    .populate({ path: "branch", select: "name" })
+    .sort({ createdAt: -1 })
+    .lean({ virtuals: true });
+  const journeyData = journeys.length > 0 ? journeys : [buildSeedJourney(customer)];
+
+  const html = buildKycReportHtml(data, journeyData);
+
+  let browser;
+  try {
+    browser = await launchPdfBrowser();
+    const page = await browser.newPage();
+    // networkidle0 lets Cloudinary document/avatar images load; if a remote
+    // image hangs, fall back to rendering without waiting on the network.
+    try {
+      await page.setContent(html, { waitUntil: "networkidle0", timeout: 30000 });
+    } catch (e) {
+      await page.setContent(html, { waitUntil: "domcontentloaded" });
+    }
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      margin: { top: "10mm", bottom: "12mm", left: "8mm", right: "8mm" },
+    });
+
+    const filename = `KYC_Report_${data.uid || data._id}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.send(Buffer.from(pdfBuffer));
+  } finally {
+    if (browser) await browser.close();
+  }
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Manual import (staff-side, in-branch) — merged from
+// customerManualImportController. This handler owns validation, dedupe, create
+// and the response; the portal-user/membership/Sumsub/face-verify helpers live
+// in services/customerImportService.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// @desc    Manually import an individual customer (staff-side, in-branch)
+// @route   POST /api/v1/customer/manual-import
+// @access  Protected — admin, client, branch, manager, officer
+exports.manualImportCustomer = asyncHandler(async (req, res, next) => {
+  /*
+  #swagger.tags = ['Onboarding']
+  #swagger.summary = 'Manual import of an individual customer (staff-side)'
+  #swagger.responses[201] = { description: 'Customer created (Sumsub chain queued)' }
+  #swagger.responses[200] = { description: 'Existing customer linked to this tenant' }
+  #swagger.responses[409] = { description: 'Customer already exists for this tenant' }
+*/
+  const body = req.body || {};
+  const {
+    personalKyc,
+    documents = [],
+    authorized,
+    declaration,
+    country,
+    notes = "",
+    consentToScreen = false,
+    runSumsubCheck = true,
+    ocr = null,
+  } = body;
+
+  // ── 1. Tenant from session (body only honored for tenant-less admin/dooit) ──
+  const sessionClientId = req.user?.client?._id || null;
+  const sessionBranchId = req.user?.branch?._id || null;
+
+  const clientId = sessionClientId || body.clientId || null;
+  if (!clientId) {
+    return next(
+      new ErrorResponse(
+        "No client context — log in under a client/branch or pass clientId (admin only)",
+        400,
+      ),
+    );
+  }
+
+  let branchId = sessionBranchId || null;
+  if (!branchId && body.branchId) {
+    // client-level staff importing for one of their branches — verify ownership
+    const branchDoc = await Branch.findById(body.branchId).select("client");
+    if (!branchDoc || String(branchDoc.client) !== String(clientId)) {
+      return next(new ErrorResponse("Branch not found under this client", 400));
+    }
+    branchId = branchDoc._id;
+  }
+
+  // ── 2. Validate payload ─────────────────────────────────────────────────────
+  const pf = personalKyc?.personal_form || {};
+  const givenName = pf.customer_details?.given_name?.trim();
+  const email = pf.contact_details?.email?.trim().toLowerCase() || null;
+  const phone = pf.contact_details?.phone?.trim() || null;
+  const identificationNo = pf.identificationNo?.trim() || null;
+
+  if (!givenName) {
+    return next(new ErrorResponse("personalKyc.personal_form.customer_details.given_name is required", 400));
+  }
+  if (!email && !phone) {
+    return next(new ErrorResponse("At least one of contact email or phone is required", 400));
+  }
+
+  // normalize what we validated back onto the payload
+  if (email) pf.contact_details.email = email;
+
+  const docs = (Array.isArray(documents) ? documents : [])
+    .filter((d) => d && typeof d.url === "string" && d.url)
+    .map((d) => ({
+      name: d.name || "",
+      url: d.url,
+      mimeType: d.mimeType || "",
+      type: d.type || "",
+      docType: d.docType || "",
+      uploadedAt: d.uploadedAt || new Date(),
+    }));
+
+  // ── 3. Dedupe ───────────────────────────────────────────────────────────────
+  const orConditions = [];
+  if (email) orConditions.push({ "personalKyc.personal_form.contact_details.email": email });
+  if (phone) orConditions.push({ "personalKyc.personal_form.contact_details.phone": phone });
+  if (identificationNo) {
+    orConditions.push({ "personalKyc.personal_form.identificationNo": identificationNo });
+  }
+
+  let existing = orConditions.length
+    ? await Customer.findOne({ $or: orConditions })
+    : null;
+
+  // Privacy-encrypted records won't match plaintext queries — catch the ones
+  // that have a linked portal user via the deterministic emailHash index.
+  if (!existing && email) {
+    const linkedUser = await User.findOne({ emailHash: hashForSearch(email) }).select("_id");
+    if (linkedUser) existing = await Customer.findOne({ user: linkedUser._id });
+  }
+
+  const relationCandidate = {
+    client: clientId,
+    branch: branchId,
+    type: "individual",
+    onboardingChannel: "In-Branch",
+    registeredAt: new Date(),
+    source: "manual",
+    notes,
+    active: true,
+  };
+
+  if (existing) {
+    const alreadyLinked = (existing.relations || []).some(
+      (r) =>
+        String(r.client) === String(clientId) &&
+        String(r.branch || "") === String(branchId || ""),
+    );
+
+    if (alreadyLinked) {
+      return res.status(409).json({
+        success: false,
+        message: "Customer already exists for this client/branch",
+        data: { customerId: existing._id, uid: existing.uid },
+      });
+    }
+
+    // Known customer, new tenant — append the relation only. Existing KYC data
+    // is not overwritten and the Sumsub chain is not re-run.
+    existing.relations.push(relationCandidate);
+    await existing.save();
+
+    // extend their portal membership to the new tenant (idempotent)
+    if (existing.user) {
+      await ensureCustomerMembership(existing.user, clientId, branchId, req.user.id);
+    }
+
+    const journey = await findOrCreateJourney({
+      customerId: existing._id,
+      clientId,
+      branchId,
+      channel: "In-Branch",
+      provider: "internal",
+    });
+    journey.recordEvent({
+      action: "manual_import_relation_added",
+      note: "Existing customer linked to this client/branch via manual import",
+      actor: req.user.id,
+      actorRole: req.user.role,
+      payload: { customerId: existing._id },
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    });
+    syncJourneyStatus(journey, { fallbackStatus: "in_progress" });
+    await journey.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Existing customer linked to this client/branch",
+      data: {
+        customerId: existing._id,
+        uid: existing.uid,
+        relationAdded: true,
+        sumsub: "skipped",
+      },
+    });
+  }
+
+  // ── 4. Portal user FIRST (link if one already exists), then the customer ───
+  const { user: portalUser, created: userCreated } = await findOrCreateCustomerUser({
+    email,
+    phone,
+    displayName: `${givenName} ${pf.customer_details?.surname || ""}`.trim(),
+  });
+  if (portalUser) {
+    await ensureCustomerMembership(portalUser._id, clientId, branchId, req.user.id);
+
+    // Use the customer's uploaded selfie as their portal avatar so the details
+    // page shows a real photo instead of the generic placeholder. Never
+    // overwrite a photo the user already set — only fill the default/empty one.
+    const selfieDoc = docs.find(isSelfieDoc);
+    const defaultPhoto = User.schema.paths.photoUrl?.defaultValue || null;
+    if (
+      selfieDoc?.url &&
+      (!portalUser.photoUrl || portalUser.photoUrl === defaultPhoto)
+    ) {
+      portalUser.photoUrl = selfieDoc.url;
+      await portalUser.save();
+    }
+  }
+
+  const customer = await Customer.create({
+    user: portalUser ? portalUser._id : null, // null only for phone-only imports
+    relations: [relationCandidate],
+    personalKyc,
+    documents: docs,
+    declaration: declaration || {},
+    authorized: authorized || {},
+    country: country || pf.residential_address?.country || "",
+    consentToScreen: !!consentToScreen,
+    isActive: true,
+    kycStatus: "pending",
+    kycHistory: [
+      {
+        status: "pending",
+        note: "Customer created via staff manual import",
+        changedBy: req.user.id,
+        changedAt: Date.now(),
+      },
+    ],
+  });
+
+  // ── 5. Real audit journey (not the display-only seed fallback) ──────────────
+  const journey = await findOrCreateJourney({
+    customerId: customer._id,
+    clientId,
+    branchId,
+    channel: "In-Branch",
+    provider: "internal",
+  });
+
+  journey.setStepStatus("personal_form", "submitted", {
+    data: { source: "manual-import" },
+    bumpAttempt: true,
+  });
+  const idDocs = docs.filter((d) => !isSelfieDoc(d));
+  const selfieDocs = docs.filter(isSelfieDoc);
+
+  // Persist the OCR extraction (run in the UI to pre-fill the form) onto the
+  // id_document step so the details page can render the "OCR Data" panel —
+  // same shape the invite flow writes via onboarding-journey/ocr-document.
+  const ocrData =
+    ocr && (ocr.fields || ocr.cardType || ocr.detectedType)
+      ? {
+          cardType: ocr.cardType || null,
+          detectedType: ocr.detectedType || null,
+          fields: ocr.fields || {},
+          checkedAt: new Date(),
+        }
+      : null;
+
+  if (idDocs.length) {
+    journey.setStepStatus("id_document", "submitted", {
+      documents: sanitizeDocuments(idDocs),
+      ...(ocrData ? { data: { ocr: ocrData } } : {}),
+      bumpAttempt: true,
+    });
+  }
+  if (selfieDocs.length) {
+    journey.setStepStatus("selfie", "submitted", {
+      documents: sanitizeDocuments(selfieDocs),
+      bumpAttempt: true,
+    });
+  }
+  journey.recordEvent({
+    action: "manual_import",
+    status: "submitted",
+    note: notes,
+    actor: req.user.id,
+    actorRole: req.user.role,
+    payload: { customerId: customer._id, docCount: docs.length },
+    ip: req.ip,
+    userAgent: req.get("user-agent"),
+  });
+  syncJourneyStatus(journey, { fallbackStatus: "in_progress" });
+  await journey.save();
+
+  // ── 6. Background verification — staff never waits on the AI providers ───────
+  // Face match (ID photo vs selfie) then the Sumsub chain, run sequentially in
+  // ONE job so both mutate the same journey without a concurrent-write clash.
+  const staffId = req.user.id;
+  const faceDocImage =
+    idDocs.find((d) => String(d.type).toLowerCase() === "front") || idDocs[0] || null;
+  const faceSelfieImage = selfieDocs[0] || null;
+  const faceVerifyQueued = !!(faceDocImage && faceSelfieImage);
+  const sumsubQueued = runSumsubCheck !== false && docs.length > 0;
+
+  if (faceVerifyQueued || sumsubQueued) {
+    runInBackground(`manual-import:verify [${customer._id}]`, async () => {
+      if (faceVerifyQueued) {
+        await runFaceVerification({
+          customer,
+          clientId,
+          branchId,
+          staffId,
+          docImage: faceDocImage,
+          selfieImage: faceSelfieImage,
+        });
+      }
+      if (sumsubQueued) {
+        await runSumsubChain({
+          customer,
+          clientId,
+          branchId,
+          staffId,
+          documents: docs,
+          ocrFields: ocrData?.fields || null,
+        });
+      }
+    });
+  }
+
+  return res.status(201).json({
+    success: true,
+    message: sumsubQueued
+      ? "Customer imported — verification queued"
+      : "Customer imported — verification skipped",
+    data: {
+      customerId: customer._id,
+      uid: customer.uid,
+      userId: portalUser ? portalUser._id : null,
+      userCreated,
+      kycStatus: customer.kycStatus,
+      sumsub: sumsubQueued ? "queued" : "skipped",
+      faceVerify: faceVerifyQueued ? "queued" : "skipped",
+    },
+  });
 });

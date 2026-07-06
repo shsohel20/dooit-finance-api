@@ -99,10 +99,10 @@ exports.createApplicant = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
 
-    journey.provider = "sumsub";
+    journey.provider = "dooit";
     journey.providerRef = result.applicantId;
     journey.recordEvent({
       action: "applicant_created",
@@ -210,7 +210,7 @@ exports.uploadDocument = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
 
     for (const result of uploadResults) {
@@ -312,7 +312,7 @@ exports.requestCheck = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
     journey.recordEvent({
       action: "check_requested",

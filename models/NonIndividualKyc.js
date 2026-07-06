@@ -173,6 +173,9 @@ const NonIndividualKycSchema = new Schema(
       default: {},
     },
     documents: { type: [DocumentMetaSchema], default: [] },
+
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
   },
   {
     timestamps: true,

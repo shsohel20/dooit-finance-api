@@ -198,6 +198,9 @@ const ClientSchema = new Schema(
     // Structured AUSTRAC questionnaire answers
     riskQuestions: { type: RiskQuestionsSchema, default: () => ({}) },
 
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
+
     settings: { type: Schema.Types.Mixed, default: {} },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },

@@ -1,14 +1,10 @@
-// controllers/customerExportController.js
-// Professional, fully-populated Excel export of the Customer queue.
-// Mirrors the queue list's tenant scoping + filters and streams a styled
-// .xlsx workbook (one row per customer, grouped/banded columns).
+// utils/customerExcelExport.js
+// Presentation layer for the Customer queue Excel export. Owns the grouped
+// column model, formatters, styling and workbook assembly; the controller keeps
+// data-fetch, tenant scoping and streaming. Extracted from the former
+// customerExportController.
 
 const ExcelJS = require("exceljs");
-const asyncHandler = require("../middleware/async");
-const Customer = require("../models/Customer");
-const User = require("../models/User");
-const UserType = require("../models/UserType");
-const { hashForSearch } = require("../utils/encryption");
 
 // ── small formatters ─────────────────────────────────────────────────────────
 const isEmpty = (v) => v === undefined || v === null || v === "" || v === "null";
@@ -218,123 +214,19 @@ const fill = (cell, argb) => {
   cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
 };
 
-// @desc   Professional Excel export of the customer queue
-// @route  GET /api/v1/customer/export
-// @access Private (admin, client, branch, manager, officer)
-exports.exportCustomers = asyncHandler(async (req, res, next) => {
-  // ── Tenant scope + filters (mirror advancedCustomerResultsQueryOnly) ────────
-  const client = req?.user?.client?._id || null;
-  const branch = req?.user?.branch?._id || null;
+/**
+ * Build the styled Customers workbook from already-decrypted/materialized rows.
+ * @param {Array<Object>} rows — decrypted customer objects (virtuals + _primaryRelation + _membership)
+ * @param {Object} meta
+ * @param {number} meta.recordCount — number of rows rendered
+ * @param {boolean} [meta.capped] — true when the query hit the row cap
+ * @param {number} [meta.maxRows] — the cap value (shown when capped)
+ * @param {string} [meta.activeFilters] — human-readable active-filter summary
+ * @returns {ExcelJS.Workbook}
+ */
+const buildCustomerWorkbook = (rows, meta = {}) => {
+  const { recordCount = rows.length, capped = false, maxRows, activeFilters } = meta;
 
-  const dbQuery = {};
-  if (client) dbQuery["relations.client"] = client;
-  if (branch) dbQuery["relations.branch"] = branch;
-
-  // default the queue's isActive=true unless explicitly overridden
-  dbQuery.isActive = isEmpty(req.query.isActive) ? true : req.query.isActive === "true";
-
-  ["kycStatus", "country"].forEach((f) => {
-    if (!isEmpty(req.query[f])) dbQuery[f] = req.query[f];
-  });
-  ["isPep", "sanction"].forEach((f) => {
-    if (!isEmpty(req.query[f])) dbQuery[f] = req.query[f] === "true";
-  });
-  // relation type — accept both `type` (queue list) and `relationType`
-  const relType = req.query.relationType || req.query.type;
-  if (!isEmpty(relType)) dbQuery["relations.type"] = relType;
-  if (!isEmpty(req.query.uid)) {
-    dbQuery.uid = new RegExp(String(req.query.uid).replace(/^#/, ""), "i");
-  }
-
-  // OR-groups combined via $and so search + email don't clobber each other.
-  const andGroups = [];
-  if (!isEmpty(req.query.q)) {
-    const rx = new RegExp(req.query.q, "i");
-    andGroups.push({
-      $or: [
-        { "personalKyc.personal_form.customer_details.given_name": rx },
-        { "personalKyc.personal_form.customer_details.surname": rx },
-        { uid: rx },
-      ],
-    });
-  }
-  if (!isEmpty(req.query.email)) {
-    const email = String(req.query.email).trim();
-    const rx = new RegExp(email, "i");
-    const orGroup = [
-      { "personalKyc.personal_form.contact_details.email": rx },
-      { "metadata.email": rx },
-    ];
-    // Exact email → match the linked (encrypted) Users record via emailHash.
-    try {
-      const matched = await User.find({ emailHash: hashForSearch(email) })
-        .select("_id")
-        .lean();
-      if (matched.length) orGroup.push({ user: { $in: matched.map((u) => u._id) } });
-    } catch (e) {
-      /* fall back to customer-field match */
-    }
-    andGroups.push({ $or: orGroup });
-  }
-  if (andGroups.length) dbQuery.$and = andGroups;
-
-  const MAX_ROWS = 10000;
-  const docs = await Customer.find(dbQuery)
-    .populate([
-      { path: "user", select: "name email userName photoUrl userType role" },
-      { path: "relations.client", select: "name" },
-      { path: "relations.branch", select: "name" },
-    ])
-    .sort("-createdAt")
-    .limit(MAX_ROWS);
-
-  // Decrypt + materialize virtuals; optional in-memory riskLabel filter.
-  const role = req.user?.role;
-  let rows = docs.map((doc) => {
-    const row =
-      typeof doc.decryptForRole === "function"
-        ? doc.decryptForRole(role)
-        : doc.toObject({ virtuals: true });
-    // user.name/email are AES-256-GCM encrypted on the Users model; the
-    // customer's own decryptForRole doesn't touch the populated subdoc, so
-    // decrypt it separately (mirrors getCustomer) for a real Account Email.
-    if (doc.user && typeof doc.user.decryptForRole === "function") {
-      row.user = doc.user.decryptForRole(role);
-    }
-    // Primary Client/Branch scoped to the current logged-in tenant.
-    row._primaryRelation = pickPrimaryRelation(row.relations, client, branch);
-    return row;
-  });
-  if (!isEmpty(req.query.riskLabel)) {
-    rows = rows.filter((d) => d.riskLabel === req.query.riskLabel);
-  }
-
-  // User Type / Role moved off the Users model into the UserType collection
-  // (multi-userType migration). Attach each customer's membership scoped to the
-  // current tenant so those columns reflect *this* client/branch's view.
-  const userIds = rows.map((r) => r.user?._id).filter(Boolean);
-  if (userIds.length) {
-    const mFilter = { user: { $in: userIds }, userType: "customer" };
-    if (client) mFilter.clientBelongs = client;
-    if (branch) mFilter.branchBelongs = branch;
-    const memberships = await UserType.find(mFilter)
-      .select("user userType role clientBelongs branchBelongs isActive")
-      .lean();
-    const byUser = new Map();
-    memberships.forEach((m) => {
-      const k = String(m.user);
-      // prefer an active membership when a user has more than one
-      if (!byUser.has(k) || (m.isActive && !byUser.get(k).isActive)) {
-        byUser.set(k, m);
-      }
-    });
-    rows.forEach((r) => {
-      const k = r.user?._id ? String(r.user._id) : null;
-      r._membership = k ? byUser.get(k) || null : null;
-    });
-  }
-
-  // ── Workbook ────────────────────────────────────────────────────────────────
   const wb = new ExcelJS.Workbook();
   wb.creator = "dooit.ai";
   wb.lastModifiedBy = "dooit.ai Customer Module";
@@ -361,19 +253,15 @@ exports.exportCustomers = asyncHandler(async (req, res, next) => {
 
   // Row 2 — export metadata
   ws.mergeCells(`A2:${lastColLetter}2`);
-  const meta = ws.getCell("A2");
-  const activeFilters = ["kycStatus", "country", "isPep", "sanction", "type", "relationType", "riskLabel", "uid", "email", "q"]
-    .filter((k) => !isEmpty(req.query[k]))
-    .map((k) => `${k}=${req.query[k]}`)
-    .join("  |  ");
-  meta.value =
+  const metaCell = ws.getCell("A2");
+  metaCell.value =
     `Generated: ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC` +
-    `      Records: ${rows.length}${docs.length >= MAX_ROWS ? ` (capped at ${MAX_ROWS})` : ""}` +
+    `      Records: ${recordCount}${capped && maxRows ? ` (capped at ${maxRows})` : ""}` +
     (activeFilters ? `      Filters: ${activeFilters}` : "      Filters: none") +
     "      CONFIDENTIAL";
-  fill(meta, "FFEDEDED");
-  meta.font = { size: 9, italic: true, color: { argb: "FF505050" } };
-  meta.alignment = { horizontal: "left", vertical: "middle" };
+  fill(metaCell, "FFEDEDED");
+  metaCell.font = { size: 9, italic: true, color: { argb: "FF505050" } };
+  metaCell.alignment = { horizontal: "left", vertical: "middle" };
   ws.getRow(2).height = 16;
 
   // Row 3 — group colour bands
@@ -430,13 +318,11 @@ exports.exportCustomers = asyncHandler(async (req, res, next) => {
   // Autofilter over the header row
   ws.autoFilter = { from: { row: HEADER_ROW, column: 1 }, to: { row: HEADER_ROW, column: N_COLS } };
 
-  // ── Stream ───────────────────────────────────────────────────────────────────
-  const filename = `customers-${new Date().toISOString().slice(0, 10)}.xlsx`;
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-  res.setHeader("Pragma", "no-cache");
+  return wb;
+};
 
-  await wb.xlsx.write(res);
-  res.end();
-});
+module.exports = {
+  buildCustomerWorkbook,
+  pickPrimaryRelation,
+  isEmpty,
+};

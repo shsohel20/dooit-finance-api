@@ -85,7 +85,9 @@ const CompanyKycSchema = new Schema(
     },
     documents: { type: [DocumentMetaSchema], default: [] },
     //TODO company wise meta questions
-    questionnaires: [{ type: Schema.Types.Mixed, default: {} }]
+    questionnaires: [{ type: Schema.Types.Mixed, default: {} }],
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
   },
   {
     timestamps: true,

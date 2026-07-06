@@ -118,6 +118,9 @@ const TrustKycSchema = new Schema(
       has_additional_trustees: Boolean,
     },
     documents: { type: [DocumentMetaSchema], default: [] },
+
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
   },
   {
     timestamps: true,

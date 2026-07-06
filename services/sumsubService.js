@@ -197,7 +197,7 @@ const ensureSumsubApplicant = async (customer) => {
       createData?.description ||
       createData?.message ||
       JSON.stringify(createData);
-    throw new Error(`Sumsub createApplicant failed (${createStatus}): ${msg}`);
+    throw new Error(`Dooit createApplicant failed (${createStatus}): ${msg}`); //Sumsub
   }
 
   customer.sumsubApplicantId = createData.id;
@@ -315,7 +315,10 @@ const handleKycResult = async (
   // ── Update all Sumsub-linked journeys ─────────────────────────────────────
   const journeys = await OnboardingJourney.find({
     customer: customer._id,
-    provider: "sumsub",
+    // "dooit" is the client-facing brand for our KYC provider. Match it plus
+    // any legacy "sumsub"-labelled journeys so webhook verdicts reach every
+    // journey (manual-import journeys are created as "dooit").
+    provider: { $in: ["sumsub", "dooit"] },
   });
 
   const providerData = {
@@ -415,7 +418,10 @@ const handleAmlResult = async (customer, applicantId) => {
   // ── Update all Sumsub-linked journeys — review step ───────────────────────
   const journeys = await OnboardingJourney.find({
     customer: customer._id,
-    provider: "sumsub",
+    // "dooit" is the client-facing brand for our KYC provider. Match it plus
+    // any legacy "sumsub"-labelled journeys so webhook verdicts reach every
+    // journey (manual-import journeys are created as "dooit").
+    provider: { $in: ["sumsub", "dooit"] },
   });
 
   // clear → approved · flagged → rejected · yellow (needs review) → in_progress
@@ -815,6 +821,9 @@ const uploadDocToSumsub = (
   metadata,
 ) => {
   const form = buildDocFormData(metadata, imageBuffer, mimeType, filename);
+
+  console.log({form});
+  
   return sumsubPostForm(
     `/resources/applicants/${applicantId}/info/idDoc`,
     form,

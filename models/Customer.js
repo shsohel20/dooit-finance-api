@@ -254,6 +254,8 @@ const CustomerSchema = new Schema(
 
     // 🔐 controls READ behavior only
     isDataEncrypted: { type: Boolean, default: false },
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
   },
   {
     timestamps: true,

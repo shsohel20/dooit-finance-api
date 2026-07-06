@@ -142,7 +142,8 @@ const BranchSchema = new Schema(
       enum: ["Pending", "Active", "Inactive", "Closed", "Blocked"],
       default: "Pending",
     },
-
+// Osint Status 
+    osintStatus: { type: Boolean, default: false },
     settings: { type: Schema.Types.Mixed, default: {} },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
