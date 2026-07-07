@@ -4,7 +4,7 @@
  * Business logic for AML *matches* (AmlMatch collection).
  *
  *   normalizeHit(rawHit)                  — Sumsub/ComplyAdvantage hit → our shape
- *   upsertMatchesForCustomer(cust, hits)  — refresh match data, keep analyst decisions
+ *   upsertMatchesForCustomer(cust, hits)  — insert only new hits, leave existing matches untouched
  *   recomputeCustomerAmlStatus(customerId)— derive Customer.amlStatus from matches
  *
  * Why recompute instead of trusting the KYC review answer? A GREEN KYC applicant
@@ -96,20 +96,33 @@ const resolveMatchId = (rawHit, index) =>
   `${(rawHit?.name || "unknown").toLowerCase().replace(/\s+/g, "-")}-${index}`;
 
 /**
- * Upsert every provider hit for a customer, preserving analyst decisions.
- * Machine data is written with $set (always fresh); analyst fields default only
- * on insert ($setOnInsert), so a re-screen never overwrites a review.
+ * Insert only the provider hits a customer doesn't already have a match row
+ * for, keyed by matchId. Existing matches are left untouched — they may carry
+ * an analyst's disposition (matchStatus, whitelisted, riskLevel…), and a
+ * re-screen must never clobber that decision, so we skip them entirely
+ * instead of re-writing their machine-populated fields.
  *
  * @param {Customer} customer — must have _id (and ideally sumsubApplicantId)
  * @param {Array}    hits     — raw provider hits (customer.amlHits shape)
- * @returns {Promise<number>} number of hits processed
+ * @returns {Promise<number>} number of new match rows inserted
  */
 const upsertMatchesForCustomer = async (customer, hits = []) => {
   if (!customer?._id || !Array.isArray(hits) || hits.length === 0) return 0;
 
+  const existingIds = new Set(
+    (await AmlMatch.find({ customer: customer._id }).select("matchId").lean()).map(
+      (m) => m.matchId,
+    ),
+  );
+
+  const newHits = hits
+    .map((rawHit, i) => ({ rawHit, matchId: resolveMatchId(rawHit, i) }))
+    .filter(({ matchId }) => !existingIds.has(matchId));
+
+  if (newHits.length === 0) return 0;
+
   await Promise.all(
-    hits.map((rawHit, i) => {
-      const matchId = resolveMatchId(rawHit, i);
+    newHits.map(({ rawHit, matchId }) => {
       const norm = normalizeHit(rawHit);
       return AmlMatch.updateOne(
         { customer: customer._id, matchId },
@@ -131,7 +144,7 @@ const upsertMatchesForCustomer = async (customer, hits = []) => {
     }),
   );
 
-  return hits.length;
+  return newHits.length;
 };
 
 /**

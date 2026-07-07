@@ -4,6 +4,26 @@
 // controller keeps data-fetch, decryption, journey scoping and Puppeteer
 // streaming. Extracted from the former customerKycExportController.
 
+const countriesA3 = require("../_data/countries-alpha3.json");
+
+// ISO alpha-2/alpha-3 → country name (for the Identity Check block). No flag
+// emoji — headless Chrome ships no emoji font, so codes render as tofu boxes.
+const COUNTRY_BY_CODE = countriesA3.reduce((acc, c) => {
+  if (c.alpha2) acc[c.alpha2.toUpperCase()] = c.name;
+  if (c.alpha3) acc[c.alpha3.toUpperCase()] = c.name;
+  return acc;
+}, {});
+const countryName = (code) =>
+  code ? COUNTRY_BY_CODE[String(code).toUpperCase()] || String(code) : "";
+
+const ID_DOC_TYPE_LABELS = {
+  DRIVERS: "Driver's Licence",
+  PASSPORT: "Passport",
+  ID_CARD: "ID Card",
+  RESIDENCE_PERMIT: "Residence Permit",
+  UTILITY_BILL: "Utility Bill",
+};
+
 // ── small formatters ─────────────────────────────────────────────────────────
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -150,6 +170,57 @@ const buildKycReportHtml = (d, journeys) => {
     })
     .join("");
 
+  // ── identity checks (Sumsub DVS / PERSON check) ──
+  const identityCheckBlocks = (Array.isArray(d.checks) ? d.checks : [])
+    .map((c) => {
+      const inp = c.inputDoc || {};
+      const bg = c.personBackgroundInfo || {};
+      const docLabel = ID_DOC_TYPE_LABELS[inp.idDocType] || fmtLabel(inp.idDocType || "Document");
+      const idValid = String(bg.identityAnswer ?? c.answer ?? "").toUpperCase() === "GREEN";
+      const cName = countryName(inp.country);
+      // Retrieved-data descriptors: prefer explicit fields, else DVS defaults
+      // for Australian checks (DVS is the AU government identity source).
+      const isDvs = cName === "Australia";
+      const productName =
+        bg.productName ||
+        (isDvs ? `Document Verification Service (DVS) Validation in ${cName}` : "");
+      const dataSources =
+        bg.dataSources || (isDvs ? "Document Verification Service (DVS)" : "");
+      const validChip = `<span class="chip" style="${idValid ? CHIP.green : CHIP.red}">${
+        idValid ? "Identity document is valid" : "Identity document is not valid"
+      }</span>`;
+      return `
+        <div class="idc">
+          <div class="idc-head">
+            <span class="idc-title">Identity check</span>
+            <span class="muted">${c.createdAt ? fmtDateTime(c.createdAt) : ""}</span>
+            ${chip(c.answer)}
+          </div>
+          <div class="idc-cols">
+            <div>
+              <div class="idc-sub">Input Data</div>
+              <div class="grid" style="grid-template-columns: repeat(2, 1fr);">
+                ${field("Country", cName ? esc(cName) : "—")}
+                ${field("First Name", dash(inp.firstName))}
+                ${field("Last Name", dash(inp.lastName))}
+                ${field(docLabel, dash(inp.number))}
+                ${inp.additionalNumber ? field("Additional Number", dash(inp.additionalNumber)) : ""}
+                ${field("Date of Birth", dash(inp.dob))}
+              </div>
+            </div>
+            <div>
+              <div class="idc-sub">Retrieved Data</div>
+              <div class="grid" style="grid-template-columns: 1fr;">
+                ${productName ? field("Product Name", esc(productName)) : ""}
+                ${dataSources ? field("Data Sources", esc(dataSources)) : ""}
+                ${field("Identity Document Validation", validChip)}
+              </div>
+            </div>
+          </div>
+        </div>`;
+    })
+    .join("");
+
   // ── KYC history ──
   const historyRows = (d.kycHistory || [])
     .map(
@@ -201,6 +272,11 @@ const buildKycReportHtml = (d, journeys) => {
   .doc-cap { padding: 5px 7px; font-weight: bold; font-size: 9px; border-top: 1px solid #EFEFEF; }
   .j-head { display: flex; justify-content: space-between; align-items: baseline; margin: 8px 0 5px; }
   .j-title { font-weight: bold; color: #1F3864; }
+  .idc { border: 1px solid #E4E9F2; border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: #fff; page-break-inside: avoid; }
+  .idc-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .idc-title { font-weight: bold; color: #1F3864; font-size: 10.5px; }
+  .idc-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .idc-sub { font-size: 8px; text-transform: uppercase; letter-spacing: 0.4px; color: #888; font-weight: bold; margin-bottom: 4px; }
   .footer { margin-top: 16px; color: #888; font-size: 8.5px; border-top: 1px solid #E2E2E2; padding-top: 6px; }
 </style></head><body>
 
@@ -301,6 +377,8 @@ const buildKycReportHtml = (d, journeys) => {
       </tbody>
     </table>`,
   )}
+
+  ${identityCheckBlocks ? section("Identity Check", identityCheckBlocks) : ""}
 
   ${journeyBlocks ? section("Verification Journey", journeyBlocks) : ""}
 

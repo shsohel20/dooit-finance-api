@@ -149,3 +149,113 @@ exports.updateAmlMatch = asyncHandler(async (req, res, next) => {
     amlStatus, // recomputed customer-level status so the UI can refresh the badge
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH  /aml-matches/bulk
+// Body: { ids: [String], matchStatus?, whitelisted?, riskLevel?, reviewStatus?, reviewNote? }
+//
+// Apply the same disposition to many matches in one call. Each match is marked
+// reviewed (unless reviewStatus is set explicitly). Customer AML status is
+// recomputed ONCE per distinct customer — not per match.
+// ─────────────────────────────────────────────────────────────────────────────
+exports.bulkUpdateAmlMatches = asyncHandler(async (req, res, next) => {
+  const { ids, matchStatus, whitelisted, riskLevel, reviewStatus, reviewNote } =
+    req.body || {};
+
+  if (!Array.isArray(ids) || ids.length === 0) {
+    return next(new ErrorResponse("ids array is required", 400));
+  }
+
+  // ── Validate against the model's enums (once for the whole batch) ──────────
+  if (matchStatus !== undefined && !AmlMatch.MATCH_STATUS.includes(matchStatus)) {
+    return next(new ErrorResponse(`Invalid matchStatus: ${matchStatus}`, 400));
+  }
+  if (riskLevel !== undefined && !AmlMatch.RISK_LEVEL.includes(riskLevel)) {
+    return next(new ErrorResponse(`Invalid riskLevel: ${riskLevel}`, 400));
+  }
+  if (reviewStatus !== undefined && !AmlMatch.REVIEW_STATUS.includes(reviewStatus)) {
+    return next(new ErrorResponse(`Invalid reviewStatus: ${reviewStatus}`, 400));
+  }
+
+  const hasFieldUpdate =
+    matchStatus !== undefined ||
+    whitelisted !== undefined ||
+    riskLevel !== undefined ||
+    reviewNote !== undefined;
+
+  if (!hasFieldUpdate && reviewStatus === undefined) {
+    return next(new ErrorResponse("No updatable fields supplied", 400));
+  }
+
+  const matches = await AmlMatch.find({ _id: { $in: ids } });
+  if (matches.length === 0) {
+    return next(new ErrorResponse("No AML matches found for the supplied ids", 404));
+  }
+
+  const actorId = req.user?.id || req.user?._id || null;
+  const now = new Date();
+  const auditDocs = [];
+
+  for (const match of matches) {
+    const before = {
+      matchStatus: match.matchStatus,
+      whitelisted: match.whitelisted,
+      riskLevel: match.riskLevel,
+      reviewStatus: match.reviewStatus,
+    };
+
+    if (matchStatus !== undefined) match.matchStatus = matchStatus;
+    if (whitelisted !== undefined) match.whitelisted = !!whitelisted;
+    if (riskLevel !== undefined) match.riskLevel = riskLevel;
+    if (reviewNote !== undefined) match.reviewNote = String(reviewNote);
+
+    match.reviewStatus = reviewStatus !== undefined ? reviewStatus : "reviewed";
+    match.reviewedBy = actorId;
+    match.reviewedAt = now;
+    await match.save();
+
+    auditDocs.push({
+      service: "sumsub",
+      action: "aml_match_review",
+      externalId: match.sumsubApplicantId || undefined,
+      customer: match.customer,
+      target: match.matchId,
+      status: "success",
+      actor: actorId || undefined,
+      actorName: req.user?.name || undefined,
+      actorRole: req.user?.role || undefined,
+      beforeValue: before,
+      afterValue: {
+        matchStatus: match.matchStatus,
+        whitelisted: match.whitelisted,
+        riskLevel: match.riskLevel,
+        reviewStatus: match.reviewStatus,
+      },
+    });
+  }
+
+  AuditLog.insertMany(auditDocs).catch((err) =>
+    console.error("[AmlMatch] bulk audit write failed:", err.message),
+  );
+
+  // Recompute customer-level status once per distinct customer (usually one).
+  const customerIds = [...new Set(matches.map((m) => String(m.customer)))];
+  const amlStatusByCustomer = {};
+  for (const cid of customerIds) {
+    amlStatusByCustomer[cid] = await recomputeCustomerAmlStatus(cid);
+  }
+
+  const populated = await AmlMatch.find({ _id: { $in: matches.map((m) => m._id) } })
+    .populate({ path: "reviewedBy", select: "name" })
+    .lean();
+
+  return res.status(200).json({
+    success: true,
+    data: populated,
+    updated: populated.length,
+    // Convenience scalar for the single-customer table; full map for callers
+    // that bulk-update across customers.
+    amlStatus: amlStatusByCustomer[customerIds[0]],
+    amlStatusByCustomer,
+  });
+});

@@ -6,6 +6,7 @@ const {
 } = require("../utils/riskAssessment");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const { roleEncryptionPlugin } = require("../utils/roleEncryptionPlugin");
+const { type } = require("os");
 
 const { Schema } = mongoose;
 
@@ -256,6 +257,12 @@ const CustomerSchema = new Schema(
     isDataEncrypted: { type: Boolean, default: false },
     // Osint Status 
     osintStatus: { type: Boolean, default: false },
+
+    //Dvs Checked
+    checks:{
+    type: [Schema.Types.Mixed],
+     default: []
+    }
   },
   {
     timestamps: true,

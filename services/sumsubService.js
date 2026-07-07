@@ -375,7 +375,8 @@ const handleKycResult = async (
  * Process a Sumsub AML webhook result:
  *   - Fetches full AML case (riskLabels + hits)
  *   - Updates Customer.amlRiskLabels + amlHits (raw), amlCheckedAt, amlVendor
- *   - Upserts one AmlMatch per hit (preserving analyst decisions)
+ *   - Inserts an AmlMatch for each new hit only (existing matches, and any
+ *     analyst decisions on them, are left untouched)
  *   - Derives Customer.amlStatus / isPep / sanction from the *matches*, NOT the
  *     KYC review answer — a GREEN identity can still carry PEP/sanction hits
  *   - Updates OnboardingJourney review step
@@ -409,8 +410,8 @@ const handleAmlResult = async (customer, applicantId) => {
   customer.amlVendor = vendor;
   await customer.save();
 
-  // ── Upsert per-match records + derive amlStatus from them ──────────────────
-  // upsert keeps prior analyst dispositions; recompute sets amlStatus/isPep/sanction.
+  // ── Insert new match records + derive amlStatus from them ───────────────────
+  // only new hits are added; existing dispositions are untouched. recompute sets amlStatus/isPep/sanction.
   await upsertMatchesForCustomer(customer, hits);
   const amlStatus = await recomputeCustomerAmlStatus(customer._id);
   customer.amlStatus = amlStatus; // keep the in-memory doc consistent for callers
@@ -459,6 +460,45 @@ const handleAmlResult = async (customer, applicantId) => {
     syncJourneyStatus(journey);
     await journey.save();
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6b. handleVerificationChecks  (called from webhook handler after handleAmlResult)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the latest PERSON verification checks for an applicant and persist the
+ * raw array on Customer.checks (used for the identity/DVS check breakdown).
+ *
+ * Failures are swallowed (logged only) so a checks-fetch problem never blocks
+ * the webhook 200 — the AML result has already been persisted by this point.
+ *
+ * @param {Customer} customer
+ * @param {string}   applicantId
+ * @returns {Promise<Array>} the persisted checks array (empty on failure)
+ */
+const handleVerificationChecks = async (customer, applicantId) => {
+  let checks = [];
+
+  try {
+    const { status, data } = await sumsubGet(
+      `/resources/checks/latest?applicantId=${applicantId}&type=PERSON`,
+    );
+    if (status === 200) {
+      checks = data?.checks || [];
+    }
+  } catch (err) {
+    console.error(
+      "[SumsubService] Failed to fetch verification checks:",
+      err.message,
+    );
+  }
+
+  // Full reassignment → Mongoose tracks this without markModified.
+  customer.checks = checks;
+  await customer.save();
+
+  return checks;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -950,6 +990,7 @@ module.exports = {
   triggerAmlCheck,
   handleKycResult,
   handleAmlResult,
+  handleVerificationChecks,
   syncApplicantFromOcr,
   buildIdDocMetadata,
   uploadDocToSumsub,

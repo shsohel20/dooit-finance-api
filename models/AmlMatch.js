@@ -7,11 +7,12 @@
  * positive / true positive, whitelist it, set a risk level — without those
  * decisions being blown away the next time screening re-runs.
  *
- * Machine-populated fields (name, categories, sources…) are refreshed on every
- * screen via upsert; analyst decisions (matchStatus, whitelisted, riskLevel,
- * reviewStatus…) are written with $setOnInsert so re-screening preserves them.
+ * A re-screen only inserts hits the customer doesn't already have a row for
+ * (matched by matchId); existing rows — machine-populated fields and analyst
+ * decisions (matchStatus, whitelisted, riskLevel, reviewStatus…) alike — are
+ * left untouched so a review is never overwritten or reset.
  *
- * See services/amlMatchService.js for the upsert + status-recompute logic.
+ * See services/amlMatchService.js for the insert + status-recompute logic.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 "use strict";
