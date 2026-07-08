@@ -24,6 +24,10 @@ const ID_DOC_TYPE_LABELS = {
   UTILITY_BILL: "Utility Bill",
 };
 
+// Avatar prefers the live selfie captured during onboarding over the portal
+// user's photoUrl — shared rule (also used by the queue list enrichment).
+const { resolveSelfieUrl } = require("./customerSelfie");
+
 // ── small formatters ─────────────────────────────────────────────────────────
 const esc = (s) =>
   String(s ?? "").replace(/[&<>"']/g, (c) =>
@@ -114,8 +118,9 @@ const buildKycReportHtml = (d, journeys) => {
     d.user?.name ||
     "—";
 
-  const photo = d.user?.photoUrl
-    ? `<img class="avatar" src="${esc(d.user.photoUrl)}" />`
+  const avatarUrl = resolveSelfieUrl(d, journeys) || d.user?.photoUrl;
+  const photo = avatarUrl
+    ? `<img class="avatar" src="${esc(avatarUrl)}" />`
     : `<div class="avatar avatar-ph">${esc((fullName || "?").charAt(0).toUpperCase())}</div>`;
 
   // ── documents ──

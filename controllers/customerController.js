@@ -39,6 +39,7 @@ const {
   isEmpty: isEmptyExport,
 } = require("../utils/customerExcelExport");
 const { buildKycReportHtml } = require("../utils/customerKycReport");
+const { resolveSelfieUrl } = require("../utils/customerSelfie");
 const {
   findOrCreateCustomerUser,
   ensureCustomerMembership,
@@ -67,8 +68,46 @@ exports.getCustomers = asyncHandler(async (req, res, next) => {
   #swagger.responses[401] = { description: 'Unauthorized' }
 */
   // expects advancedResults middleware to populate res.advancedResults
+  await attachSelfieUrls(req, res.advancedResults?.data);
   res.status(200).json(res.advancedResults);
 });
+
+// Attach `selfieUrl` to each queue row — the list avatar prefers the live
+// onboarding selfie (journey selfie step, else a selfie-typed customer
+// document) over user.photoUrl. Journeys live in their own collection, so one
+// batched, tenant-scoped query covers the page. Rows are serialized via
+// toJSON first (same output res.json would produce) so the ad-hoc field
+// survives on mongoose documents.
+const attachSelfieUrls = async (req, rows) => {
+  if (!rows?.length) return;
+
+  const filter = {
+    customer: { $in: rows.map((r) => r._id) },
+    "steps.type": "selfie",
+  };
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  if (client) filter.client = client;
+  if (branch) filter.branch = branch;
+
+  const journeys = await OnboardingJourney.find(filter)
+    .select("customer steps.type steps.documents")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const byCustomer = new Map();
+  for (const j of journeys) {
+    const key = String(j.customer);
+    if (!byCustomer.has(key)) byCustomer.set(key, []);
+    byCustomer.get(key).push(j);
+  }
+
+  rows.forEach((row, i) => {
+    const doc = typeof row.toJSON === "function" ? row.toJSON() : row;
+    doc.selfieUrl = resolveSelfieUrl(doc, byCustomer.get(String(doc._id)) || []);
+    rows[i] = doc;
+  });
+};
 
 // @desc   Customer queue analytics / dashboard stats
 // @route  /api/v1/customer/stats
