@@ -77,6 +77,12 @@ const AuditLogSchema = new mongoose.Schema(
       ref: "IndividualRiskAssessment",
       index: true,
     },
+    // ── KYB compliance fields (service "kyb", utils/kybAudit.js) ─────────────
+    companyKyc: {
+      type: mongoose.Schema.ObjectId,
+      ref: "CompanyKyc",
+      index: true,
+    },
     client: { type: mongoose.Schema.ObjectId, ref: "Client", index: true },
     branch: { type: mongoose.Schema.ObjectId, ref: "Branch" },
     actor: { type: mongoose.Schema.ObjectId, ref: "Users" },

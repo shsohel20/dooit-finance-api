@@ -12,6 +12,13 @@ const {
   createCustomerDummy,
   getCompanyKycs,
   getCompanyKyc,
+  createCompanyKyc,
+  updateCompanyKyc,
+  updateCompanyReviewStatus,
+  getCompanyKycAudit,
+  addCompanyDocuments,
+  removeCompanyDocument,
+  updateCompanyDocument,
   getTrustKycs,
   getTrustKyc,
   getNonIndividualKycs,
@@ -30,7 +37,6 @@ const {
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
-const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
 
@@ -49,9 +55,6 @@ router.post(
 
 router.use(express.json({ limit: "100kb" }));
 const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
-const CompanyKyc = require("../models/CompanyKyc");
-const TrustKyc = require("../models/TrustKyc");
-const NonIndividualKyc = require("../models/NonIndividualKyc");
 // Protect all routes and allow only authorized roles (adjust as needed)
 
 router.route("/").get(
@@ -174,11 +177,57 @@ router.post(
 
 
 ///Company:
+router.post(
+  "/company",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  createCompanyKyc,
+);
+router.put(
+  "/company/:id",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  updateCompanyKyc,
+);
+// KYB review decision (docs/65 Step 31) — approve / escalate / decline with
+// history + audit; distinct from the registry status on the record itself.
+router.patch(
+  "/company/:id/review-status",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  updateCompanyReviewStatus,
+);
+router.get(
+  "/company/:id/audit",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  getCompanyKycAudit,
+);
+router
+  .route("/company/:id/documents")
+  .post(
+    protect,
+    authorize("admin", "client", "branch", "manager", "officer"),
+    addCompanyDocuments,
+  )
+  .delete(
+    protect,
+    authorize("admin", "client", "branch", "manager", "officer"),
+    removeCompanyDocument,
+  );
+router.patch(
+  "/company/:id/documents/:docId",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  updateCompanyDocument,
+);
 router.get(
   "/company/all",
   protect,
   authorize("admin", "client", "branch"),
-  advancedResults(CompanyKyc),
+  // advancedResults removed (docs/65 Step 30): it ran a second, discarded
+  // query per call — getCompanyKycs builds and answers its own query and
+  // never reads res.advancedResults.
   getCompanyKycs
 );
 router.get(
@@ -194,7 +243,6 @@ router.get(
   "/trust/all",
   protect,
   authorize("admin", "client", "branch"),
-  advancedResults(TrustKyc),
   getTrustKycs
 );
 router.get(
@@ -209,7 +257,6 @@ router.get(
   "/non-individual/all",
   protect,
   authorize("admin", "client", "branch"),
-  advancedResults(NonIndividualKyc),
   getNonIndividualKycs
 );
 // router.get(

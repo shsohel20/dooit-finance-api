@@ -32,6 +32,8 @@ const { buildSeedJourney } = require("../utils/journeyUtils");
 const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
 const { getCentroid } = require("../utils/countryCentroids");
 const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
+const { logKybEvent } = require("../utils/kybAudit");
+const AuditLog = require("../models/AuditLog");
 const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 const {
   buildCustomerWorkbook,
@@ -2784,6 +2786,461 @@ function escapeRegExp(string) {
 
 ///Company Controller:
 
+/**
+ * Whitelist shared by the create/update writers below — uid/sequence/
+ * customer/name_history/osintStatus are server-owned and ignored even if
+ * sent (docs/65 Step 30 extracted this from the two inline copies).
+ */
+function pickKybPayload(b = {}) {
+  const payload = {
+    general_information: b.general_information,
+    identifiers: b.identifiers,
+    appointments: b.appointments,
+    directors_beneficial_owner: b.directors_beneficial_owner,
+    share_capital: b.share_capital,
+    shareholders: b.shareholders,
+    related_entities: b.related_entities,
+    documents: b.documents,
+    questionnaires: b.questionnaires,
+  };
+  Object.keys(payload).forEach(
+    (k) => payload[k] === undefined && delete payload[k],
+  );
+  return payload;
+}
+
+/**
+ * Duplicate guard (docs/65 Step 30): the registration-number index is sparse
+ * but not unique, so the writers check explicitly and answer 409 with the
+ * existing record's id — friendlier than a raw index error, and lets the UI
+ * offer "open the existing record". `excludeId` skips the record being
+ * updated so saving a record against its own number stays legal.
+ */
+async function findRegistrationConflict(regNumber, excludeId) {
+  const value = String(regNumber || "").trim();
+  if (!value) return null;
+  const query = { "general_information.registration_number": value };
+  if (excludeId) query._id = { $ne: excludeId };
+  return CompanyKyc.findOne(query).select("_id uid general_information.legal_name").lean();
+}
+
+/**
+ * @desc   Create a CompanyKyc record from the companies add-form.
+ * @route  POST /api/v1/customer/company
+ * @access admin | client | branch | manager | officer
+ *
+ * Scope note (docs/65 KYB log): this writer does NOT attempt tenancy linkage
+ * (Customer.relations) — that's out of scope here by explicit instruction;
+ * tenant scoping for KYB records is Customer.relations design work, not a
+ * standalone endpoint concern. The created doc has no `customer` set.
+ */
+exports.createCompanyKyc = asyncHandler(async (req, res, next) => {
+  const b = req.body || {};
+  if (!b.general_information?.legal_name?.trim()) {
+    return next(
+      new ErrorResponse("general_information.legal_name is required", 400),
+    );
+  }
+
+  const conflict = await findRegistrationConflict(
+    b.general_information?.registration_number,
+  );
+  if (conflict) {
+    return next(
+      new ErrorResponse(
+        `A company with registration number ${String(b.general_information.registration_number).trim()} already exists: ${conflict.general_information?.legal_name || conflict.uid} (id: ${conflict._id})`,
+        409,
+      ),
+    );
+  }
+
+  const payload = pickKybPayload(b);
+  // Review workflow is server-owned (docs/65 Step 31): a wizard submission
+  // lands in the review queue, never pre-approved — regardless of what the
+  // client sent (review_status/review_history aren't in the whitelist).
+  const doc = await CompanyKyc.create({
+    ...payload,
+    review_status: "in_review",
+    review_history: [
+      {
+        status: "in_review",
+        note: "Submitted for review",
+        changedBy: req.user?._id,
+        changedAt: new Date(),
+      },
+    ],
+  });
+
+  await logKybEvent({
+    req,
+    company: doc,
+    action: "KYB_CREATED",
+    after: payload,
+    target: doc.general_information?.legal_name || doc.uid,
+  });
+
+  res.status(201).json({ success: true, data: doc });
+});
+
+/**
+ * @desc   Update an existing CompanyKyc record from the companies edit-form.
+ * @route  PUT /api/v1/customer/company/:id
+ * @access admin | client | branch | manager | officer
+ *
+ * Same whitelist as createCompanyKyc. Uses findById + Object.assign + save()
+ * (not findByIdAndUpdate) so the model's pre-save hooks — director-mirror,
+ * name_history, number_of_directors sync — still run on every update.
+ */
+exports.updateCompanyKyc = asyncHandler(async (req, res, next) => {
+  const doc = await CompanyKyc.findById(req.params.id);
+  if (!doc) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const b = req.body || {};
+  if (
+    b.general_information &&
+    "legal_name" in b.general_information &&
+    !b.general_information.legal_name?.trim()
+  ) {
+    return next(
+      new ErrorResponse("general_information.legal_name is required", 400),
+    );
+  }
+
+  const conflict = await findRegistrationConflict(
+    b.general_information?.registration_number,
+    doc._id,
+  );
+  if (conflict) {
+    return next(
+      new ErrorResponse(
+        `A company with registration number ${String(b.general_information.registration_number).trim()} already exists: ${conflict.general_information?.legal_name || conflict.uid} (id: ${conflict._id})`,
+        409,
+      ),
+    );
+  }
+
+  const payload = pickKybPayload(b);
+
+  // Per-register audit diff (docs/65 Step 31): compare the STORED state
+  // before vs after the save — both sides schema-cast — rather than payload
+  // vs storage, which false-positives on schema defaults (empty arrays) and
+  // date-string casting. Subdocument _ids are stripped from the comparison
+  // only (re-casting an array mints fresh _ids even for identical content);
+  // the audited snapshots keep them.
+  const stripIds = (k, v) => (k === "_id" ? undefined : v);
+  const beforeDoc = doc.toObject();
+
+  Object.assign(doc, payload);
+  await doc.save();
+  // Reload for the after-snapshot: assigning a plain object to a nested path
+  // leaves the in-memory doc without that path's array defaults, while a
+  // hydrated doc carries them as [] — comparing in-memory vs hydrated would
+  // flag every update as a change. Symmetric hydration fixes that.
+  const afterDoc = (await CompanyKyc.findById(doc._id)).toObject();
+
+  const changedBefore = {};
+  const changedAfter = {};
+  for (const key of Object.keys(payload)) {
+    if (
+      JSON.stringify(beforeDoc[key] ?? null, stripIds) !==
+      JSON.stringify(afterDoc[key] ?? null, stripIds)
+    ) {
+      changedBefore[key] = beforeDoc[key] ?? null;
+      changedAfter[key] = afterDoc[key] ?? null;
+    }
+  }
+
+  if (Object.keys(changedAfter).length) {
+    await logKybEvent({
+      req,
+      company: doc,
+      action: "KYB_UPDATED",
+      before: changedBefore,
+      after: changedAfter,
+      target: doc.general_information?.legal_name || doc.uid,
+    });
+  }
+
+  res.status(200).json({ success: true, data: doc });
+});
+
+const KYB_REVIEW_ALLOWED = ["draft", "in_review", "approved", "escalated", "declined"];
+
+/**
+ * @desc   Advance a company's KYB review status (with decision note).
+ * @route  PATCH /api/v1/customer/company/:id/review-status
+ * @access admin | client | branch | manager | officer
+ *
+ * Mirrors updateCustomerKycStatus (the platform's KYC decision pattern):
+ * enum-validated status, note required on escalate/decline, history entry
+ * attributed to the acting user, updateOne (no unrelated pre-save hooks),
+ * and a KYB_REVIEW_* audit entry (docs/65 Step 31).
+ */
+exports.updateCompanyReviewStatus = asyncHandler(async (req, res, next) => {
+  const { status, note } = req.body || {};
+
+  if (!status || !KYB_REVIEW_ALLOWED.includes(status)) {
+    return next(
+      new ErrorResponse(`status must be one of: ${KYB_REVIEW_ALLOWED.join(", ")}`, 400),
+    );
+  }
+  if ((status === "escalated" || status === "declined") && !note) {
+    return next(new ErrorResponse(`note is required when status is "${status}"`, 400));
+  }
+
+  const doc = await CompanyKyc.findById(req.params.id).select(
+    "review_status general_information.legal_name uid customer",
+  );
+  if (!doc) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const prev = doc.review_status || "draft";
+  if (prev === status) {
+    return next(new ErrorResponse(`Company review status is already "${status}"`, 400));
+  }
+
+  const defaultNotes = {
+    draft: "Reset to draft",
+    in_review: "Moved to review",
+    approved: "Approved by reviewer",
+    escalated: "Escalated by reviewer",
+    declined: "Declined by reviewer",
+  };
+  const historyEntry = {
+    status,
+    note: note || defaultNotes[status],
+    changedBy: req.user?._id,
+    changedAt: new Date(),
+  };
+
+  await CompanyKyc.updateOne(
+    { _id: doc._id },
+    { $set: { review_status: status }, $push: { review_history: historyEntry } },
+  );
+
+  await logKybEvent({
+    req,
+    company: doc,
+    action: `KYB_REVIEW_${status.toUpperCase()}`,
+    before: { review_status: prev },
+    after: { review_status: status, note: historyEntry.note },
+    target: doc.general_information?.legal_name || doc.uid,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Company review ${status}`,
+    data: {
+      companyId: doc._id,
+      prevStatus: prev,
+      review_status: status,
+      historyEntry,
+    },
+  });
+});
+
+/**
+ * @desc   Compliance audit trail for one company (service "kyb" entries).
+ * @route  GET /api/v1/customer/company/:id/audit
+ * @access admin | client | branch | manager | officer
+ */
+exports.getCompanyKycAudit = asyncHandler(async (req, res, next) => {
+  const exists = await CompanyKyc.exists({ _id: req.params.id });
+  if (!exists) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const qPage = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const qLimit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+
+  const filter = { service: "kyb", companyKyc: req.params.id };
+  const total = await AuditLog.countDocuments(filter);
+  const entries = await AuditLog.find(filter)
+    .sort("-createdAt")
+    .skip((qPage - 1) * qLimit)
+    .limit(qLimit)
+    .lean();
+
+  res.status(200).json({
+    success: true,
+    count: entries.length,
+    total,
+    page: qPage,
+    pages: Math.ceil(total / qLimit),
+    data: entries,
+  });
+});
+
+// Company document rows: keep only the fields a client may set — the binary
+// itself lives in the file store; verification_status starts server-side.
+const sanitizeKybDoc = (d = {}) => {
+  const doc = {
+    name: d.name,
+    url: d.url,
+    mimeType: d.mimeType,
+    docType: d.docType,
+    category: d.category,
+    document_date: d.document_date,
+    expiry_date: d.expiry_date,
+    file: d.file,
+  };
+  Object.keys(doc).forEach((k) => doc[k] === undefined && delete doc[k]);
+  return doc;
+};
+
+/**
+ * @desc   Attach one or more documents to a company (metadata + file-store ref).
+ * @route  POST /api/v1/customer/company/:id/documents
+ * @access admin | client | branch | manager | officer
+ */
+exports.addCompanyDocuments = asyncHandler(async (req, res, next) => {
+  const raw = Array.isArray(req.body?.documents)
+    ? req.body.documents
+    : req.body?.document
+      ? [req.body.document]
+      : [];
+
+  const docs = raw.map(sanitizeKybDoc).filter((d) => d.url);
+  if (docs.length === 0) {
+    return next(new ErrorResponse("At least one document with a url is required", 400));
+  }
+
+  const company = await CompanyKyc.findById(req.params.id).select(
+    "documents general_information.legal_name uid customer",
+  );
+  if (!company) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const existing = new Set((company.documents || []).map((d) => d.url));
+  const fresh = docs.filter((d) => !existing.has(d.url));
+  if (fresh.length === 0) {
+    return next(new ErrorResponse("Document(s) already attached to this company", 400));
+  }
+
+  await CompanyKyc.updateOne(
+    { _id: company._id },
+    { $push: { documents: { $each: fresh } } },
+  );
+
+  await logKybEvent({
+    req,
+    company,
+    action: "KYB_DOCUMENT_ADDED",
+    after: fresh.map((d) => ({ name: d.name, url: d.url, category: d.category })),
+    target: company.general_information?.legal_name || company.uid,
+  });
+
+  const updated = await CompanyKyc.findById(company._id).select("documents").lean();
+  res.status(200).json({
+    success: true,
+    message: `${fresh.length} document(s) added`,
+    data: updated.documents,
+  });
+});
+
+/**
+ * @desc   Remove a company document by row id or URL.
+ * @route  DELETE /api/v1/customer/company/:id/documents?docId=... | ?url=...
+ * @access admin | client | branch | manager | officer
+ */
+exports.removeCompanyDocument = asyncHandler(async (req, res, next) => {
+  const docId = req.query.docId || req.body?.docId;
+  const url = req.query.url || req.body?.url;
+  if (!docId && !url) {
+    return next(new ErrorResponse("docId or url (query or body) is required", 400));
+  }
+
+  const company = await CompanyKyc.findById(req.params.id).select(
+    "documents general_information.legal_name uid customer",
+  );
+  if (!company) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const target = (company.documents || []).find(
+    (d) => (docId && String(d._id) === String(docId)) || (url && d.url === url),
+  );
+  if (!target) {
+    return next(new ErrorResponse("Document not found on this company", 404));
+  }
+
+  const pull = docId ? { _id: target._id } : { url };
+  await CompanyKyc.updateOne({ _id: company._id }, { $pull: { documents: pull } });
+
+  await logKybEvent({
+    req,
+    company,
+    action: "KYB_DOCUMENT_REMOVED",
+    before: { name: target.name, url: target.url, category: target.category },
+    target: company.general_information?.legal_name || company.uid,
+  });
+
+  const updated = await CompanyKyc.findById(company._id).select("documents").lean();
+  res.status(200).json({
+    success: true,
+    message: "Document removed",
+    data: updated.documents,
+  });
+});
+
+const KYB_DOC_VERIFICATION_STATUSES = ["unverified", "verified", "rejected"];
+
+/**
+ * @desc   Set a company document's verification outcome (and/or expiry date)
+ *         — the reviewer-side counterpart to sanitizeKybDoc leaving
+ *         verification_status server-owned on add.
+ * @route  PATCH /api/v1/customer/company/:id/documents/:docId
+ * @access admin | client | branch | manager | officer
+ */
+exports.updateCompanyDocument = asyncHandler(async (req, res, next) => {
+  const { verification_status, expiry_date } = req.body || {};
+
+  if (verification_status === undefined && expiry_date === undefined) {
+    return next(new ErrorResponse("verification_status or expiry_date is required", 400));
+  }
+  if (verification_status !== undefined && !KYB_DOC_VERIFICATION_STATUSES.includes(verification_status)) {
+    return next(
+      new ErrorResponse(`verification_status must be one of: ${KYB_DOC_VERIFICATION_STATUSES.join(", ")}`, 400),
+    );
+  }
+
+  const company = await CompanyKyc.findById(req.params.id).select(
+    "documents general_information.legal_name uid customer",
+  );
+  if (!company) {
+    return next(new ErrorResponse("CompanyKyc not found", 404));
+  }
+
+  const target = company.documents.id(req.params.docId);
+  if (!target) {
+    return next(new ErrorResponse("Document not found on this company", 404));
+  }
+
+  const before = { verification_status: target.verification_status, expiry_date: target.expiry_date };
+  if (verification_status !== undefined) target.verification_status = verification_status;
+  if (expiry_date !== undefined) target.expiry_date = expiry_date || undefined;
+  await company.save();
+
+  await logKybEvent({
+    req,
+    company,
+    action: "KYB_DOCUMENT_VERIFIED",
+    before,
+    after: { verification_status: target.verification_status, expiry_date: target.expiry_date },
+    target: company.general_information?.legal_name || company.uid,
+  });
+
+  res.status(200).json({
+    success: true,
+    message: "Document updated",
+    data: target,
+  });
+});
+
 // Get many company KYC records (with filters, pagination, search)
 exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
   // Query params: page, limit, client, branch, customer, reg (registration number),
@@ -2802,7 +3259,8 @@ exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
   } = req.query;
 
   const qPage = Math.max(parseInt(page, 10) || 1, 1);
-  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+  // Cap page size — an unbounded ?limit= dumped the whole collection.
+  const qLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 200);
 
   const filter = {};
 
@@ -2815,7 +3273,9 @@ exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
     filter["general_information.registration_number"] = String(reg).trim();
 
   if (search) {
-    const rx = new RegExp(String(search).trim(), "i");
+    // escapeRegExp: user input is a literal, not a pattern — "A+B (Holdings)"
+    // must match itself, not throw or mis-match (docs/65 Step 30).
+    const rx = new RegExp(escapeRegExp(String(search).trim()), "i");
     filter.$or = [
       { "general_information.legal_name": rx },
       { "general_information.trading_names": rx },
@@ -2861,20 +3321,18 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
       .lean();
   }
 
-  // If not found by ObjectId, try uid match (e.g. COMKYC_123456) or sequence
+  // If not found by ObjectId, try uid match (e.g. COMKYC_123456) or sequence.
+  // No client/branch populates here — those paths don't exist on CompanyKyc
+  // and threw StrictPopulateError under Mongoose 8 (docs/65 Step 30).
   if (!doc) {
     // if identifier looks like COMKYC_* or contains non-numeric chars treat as uid
     if (typeof identifier === "string" && identifier.match(/^COMKYC_/i)) {
       doc = await CompanyKyc.findOne({ uid: identifier })
-        .populate("client", "name _id")
-        .populate("branch", "name _id")
         .populate("customer", "user _id")
         .lean();
     } else if (!Number.isNaN(Number(identifier))) {
       // numeric -> sequence
       doc = await CompanyKyc.findOne({ sequence: Number(identifier) })
-        .populate("client", "name _id")
-        .populate("branch", "name _id")
         .populate("customer", "user _id")
         .lean();
     } else {
@@ -2882,8 +3340,6 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
       doc = await CompanyKyc.findOne({
         "general_information.legal_name": identifier,
       })
-        .populate("client", "name _id")
-        .populate("branch", "name _id")
         .populate("customer", "user _id")
         .lean();
     }
@@ -2923,7 +3379,7 @@ exports.getTrustKycs = asyncHandler(async (req, res, next) => {
   } = req.query;
 
   const qPage = Math.max(parseInt(page, 10) || 1, 1);
-  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+  const qLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 200);
 
   const filter = {};
 
@@ -2944,9 +3400,9 @@ exports.getTrustKycs = asyncHandler(async (req, res, next) => {
       String(abn).trim();
   }
 
-  // search by trust name
+  // search by trust name (escaped — literal match, docs/65 Step 30)
   if (search) {
-    const rx = new RegExp(String(search).trim(), "i");
+    const rx = new RegExp(escapeRegExp(String(search).trim()), "i");
     filter["trust_details.full_trust_name"] = rx;
   }
 
@@ -2981,11 +3437,13 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
   let doc = null;
   const isObjectId = mongoose.Types.ObjectId.isValid(identifier);
 
+  // No client/branch populates — those paths don't exist on TrustKyc and
+  // threw StrictPopulateError on EVERY branch, including the plain ObjectId
+  // path, so every GET /trust/:id 500'd (docs/65 Step 30).
+
   // Try ObjectId
   if (isObjectId) {
     doc = await TrustKyc.findById(identifier)
-      .populate("client", "name _id")
-      .populate("branch", "name _id")
       .populate("customer", "personalKyc country isPep sanction kycStatus")
       .lean();
   }
@@ -2993,8 +3451,6 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
   // Try UID
   if (!doc && /^TRKYC_/i.test(identifier)) {
     doc = await TrustKyc.findOne({ uid: identifier })
-      .populate("client", "name _id")
-      .populate("branch", "name _id")
       .populate("customer", "user _id")
       .lean();
   }
@@ -3002,8 +3458,6 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
   // Try sequence
   if (!doc && !Number.isNaN(Number(identifier))) {
     doc = await TrustKyc.findOne({ sequence: Number(identifier) })
-      .populate("client", "name _id")
-      .populate("branch", "name _id")
       .populate("customer", "user _id")
       .lean();
   }
@@ -3013,8 +3467,6 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
     doc = await TrustKyc.findOne({
       "trust_details.full_trust_name": identifier,
     })
-      .populate("client", "name _id")
-      .populate("branch", "name _id")
       .populate("customer", "user _id")
       .lean();
   }
@@ -3071,7 +3523,7 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
   } = req.query;
 
   const qPage = Math.max(parseInt(page, 10) || 1, 1);
-  const qLimit = Math.max(parseInt(limit, 10) || 25, 1);
+  const qLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 200);
 
   const filter = {};
 
@@ -3086,9 +3538,9 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
     Object.assign(filter, buildNonIndividualTypeFilter(type));
   }
 
-  // ✅ search by name
+  // ✅ search by name (escaped — literal match, docs/65 Step 30)
   if (search) {
-    const rx = new RegExp(search, "i");
+    const rx = new RegExp(escapeRegExp(String(search).trim()), "i");
     filter.$or = [
       { "general_information.entity_name": rx },
       { "general_information.registered_business_name": rx },
@@ -3099,7 +3551,6 @@ exports.getNonIndividualKycs = asyncHandler(async (req, res, next) => {
 
   const total = await NonIndividualKyc.countDocuments(filter);
   const pages = Math.ceil(total / qLimit);
-  console.log(filter);
   const docs = await NonIndividualKyc.find(filter)
     .sort(sort)
     .skip(skip)
