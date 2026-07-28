@@ -49,6 +49,13 @@ const AlertSchema = new Schema(
     branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
 
     caseType: String,
+    
+    //New fields for Alert generation
+    alertOrigin: {
+      type: String,
+      enum: ["Rule Based", "AI Based",],
+      default: "Rule Based",
+    },
 
     riskScore: Number,
     riskLabel: String,

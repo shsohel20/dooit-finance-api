@@ -119,6 +119,57 @@ const ShareholderSchema = new Schema(
     // rather than derived from percent_held (docs/65 Step 23).
     beneficially_held: Boolean,
     fully_paid: Boolean,
+    // Who this row is actually held for when beneficially_held is false
+    // (docs/65 Step 43 — Trust/Nominee/Minor cases). A "trust" arrangement
+    // links to a real TrustKyc via the existing holder_model/holder_entity
+    // polymorphic ref above (holder_model:"TrustKyc"); nominee/minor aren't
+    // TrustKyc-shaped, so they use the beneficiary block below instead.
+    //
+    // Restructured in docs/65 Step 66:
+    //  - `type` -> `arrangement_type`. A nested path literally named `type`
+    //    is the classic Mongoose ambiguity (it's also the type-descriptor
+    //    key); it happened to register correctly here, but it read as a
+    //    schema definition at every call site.
+    //  - flat `beneficiary_name`/`date_of_birth` -> a `beneficiary` block,
+    //    with `beneficiary_type` saying whether that beneficiary is a person
+    //    or an entity. A nominee can hold for a company, which the single
+    //    name field could only record as a string.
+    // Old documents are migrated by api/scripts/migrate-beneficial-arrangement.js.
+    beneficial_arrangement: {
+      arrangement_type: {
+        type: String,
+        enum: ["trust", "nominee", "minor", "other"],
+        set: emptyToUndef,
+      },
+
+      beneficiary_type: {
+        type: String,
+        enum: ["individual", "entity"],
+        set: emptyToUndef,
+      },
+
+      beneficiary: {
+        first_name: String,
+        middle_name: String,
+        last_name: String,
+        // Whole-name capture. The wizard collects one name field, so this is
+        // the populated one in practice; the split parts are here for
+        // payloads that carry them (OCR, an imported register).
+        full_name: String,
+
+        entity_name: String, // beneficiary_type === "entity"
+
+        date_of_birth: Date, // minor / individual beneficiary
+      },
+
+      // Declared but still never written: a "trust" arrangement's link lives
+      // on holder_model/holder_entity above (docs/65 Step 43), and writing it
+      // here as well would create a second source of truth for one link.
+      trust_kyc: {
+        type: Schema.Types.ObjectId,
+        ref: "TrustKyc",
+      },
+    },
   },
   { _id: false }
 );
@@ -227,6 +278,12 @@ const CompanyKycSchema = new Schema(
       // and every onboarding writer (KYB add-wizard, both onboarding-ui/
       // onboard-new-ui company wizards, and the internal registration forms)
       // now targets this field directly.
+      // "trust" as an entity_type was added in docs/65 Step 43 (requiring a
+      // linked TrustKyc) and removed again in Step 45 — the wizard's "Trust"
+      // label now collapses back into "other" (Step 24 behaviour), and a
+      // Trust entity is onboarded through the separate TrustKyc flow instead
+      // of the Companies module. Shareholder-level trust arrangements
+      // (beneficial_arrangement, below) are unrelated and unaffected.
       entity_type: {
         type: String,
         enum: ["proprietary_limited", "public_company", "foreign_company", "other"],

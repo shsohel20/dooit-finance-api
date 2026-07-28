@@ -35,6 +35,7 @@ const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
 const { logKybEvent } = require("../utils/kybAudit");
 const AuditLog = require("../models/AuditLog");
 const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
+const ocrService = require("../utils/ocrService");
 const {
   buildCustomerWorkbook,
   pickPrimaryRelation,
@@ -1883,7 +1884,11 @@ exports.acceptInviteEntityOld = asyncHandler(async (req, res, next) => {
   } else if (requestedType === "trust") {
     createdKycDoc = await upsertEntityModel(
       TrustKyc,
-      kyc,
+      // The onboarding trust forms still post
+      // trust_details.settlor_name, which is no longer a schema field
+      // (docs/65 Step 60). Lift it onto settlor.full_name here or Mongoose
+      // discards it the moment the document is constructed.
+      TrustKyc.liftLegacyTrustFields(kyc),
       customer._id,
       clientId,
       branchId,
@@ -2810,6 +2815,142 @@ function pickKybPayload(b = {}) {
 }
 
 /**
+ * Trust / Nominee / Minor handling for shareholders (docs/65 Step 43; the
+ * entity-level "company itself is a Trust" branch this originally also had
+ * was removed in Step 45 — Trust is no longer an entity_type option, so a
+ * Trust entity is onboarded via the separate TrustKyc flow instead of the
+ * Companies module). Reuses the existing TrustKyc model rather than
+ * duplicating its schema onto CompanyKyc:
+ *  - For each shareholder row with beneficially_held===false, requires
+ *    beneficial_arrangement.arrangement_type (renamed from `type` in Step
+ *    66). A "trust" arrangement additionally requires that row's
+ *    trust.trust_details.full_trust_name (the
+ *    `{ id, trust_details, individual_trustees, beneficiaries }` wrapper
+ *    shape), gets its own companion TrustKyc, and is linked via the
+ *    existing holder_model/holder_entity polymorphic ref
+ *    (holder_model:"TrustKyc") rather than a new field — nominee/minor
+ *    aren't TrustKyc-shaped, so they instead require the beneficiary to be
+ *    named: beneficiary.entity_name for an entity beneficiary,
+ *    beneficiary.full_name (or first+last) for a person.
+ * `shareholders[].trust` is payload-only — not a field on CompanyKyc's
+ * schema; it's consumed here to create/update the linked TrustKyc doc(s),
+ * then dropped before the shareholder rows are persisted. Passing back an
+ * already-linked id (`.trust.id`, or shareholders[].holder_entity when
+ * holder_model is "TrustKyc") updates that same TrustKyc instead of minting
+ * a new one on every save.
+ * The field whitelist lives in `pickTrustPayload` below — shared with the
+ * standalone trust writers (Step 57) so the two can't drift.
+ * Throws { status, message } on validation failure — callers catch and
+ * forward to ErrorResponse.
+ */
+
+/**
+ * Whitelist of client-writable TrustKyc fields (docs/65 Step 46, widened in
+ * Step 55 for the expanded schema; lifted to module scope in Step 57 so
+ * `resolveTrustLinks` and the standalone POST/PUT trust writers share one
+ * definition rather than two that drift).
+ *
+ * Deliberately absent: `review_status` / `review_history` /
+ * `next_review_date` — the review workflow is server-owned and never
+ * accepted from a payload, same rule as CompanyKyc (Step 31), pinned by
+ * test. Also absent: `uid` / `sequence` / `customer` / `osintStatus`.
+ *
+ * `aml_kyc` IS whitelisted: these endpoints are staff-gated, and its fields
+ * (source of funds/wealth, screening statuses) are working data an
+ * authorised staff member legitimately records — unlike a review decision,
+ * they don't gate an approval workflow.
+ */
+function pickTrustPayload(t = {}) {
+  // Retired paths are lifted onto their canonical fields before anything
+  // else touches the payload (docs/65 Step 60) — Mongoose would drop them
+  // silently otherwise. Operates on a shallow copy of trust_details so the
+  // caller's object isn't mutated underneath it.
+  const lifted = TrustKyc.liftLegacyTrustFields({
+    ...t,
+    ...(t.trust_details ? { trust_details: { ...t.trust_details } } : {}),
+    ...(t.settlor ? { settlor: { ...t.settlor } } : {}),
+  });
+  const p = {
+    trust_details: lifted.trust_details,
+    individual_trustees: lifted.individual_trustees,
+    beneficiaries: lifted.beneficiaries,
+    company_trustees: lifted.company_trustees,
+    settlor: lifted.settlor,
+    controllers: lifted.controllers,
+    appointors: lifted.appointors,
+    aml_kyc: lifted.aml_kyc,
+    documents: lifted.documents,
+  };
+  Object.keys(p).forEach((k) => p[k] === undefined && delete p[k]);
+  return p;
+}
+
+async function resolveTrustLinks(b) {
+  // findById + assign + save(), NOT findByIdAndUpdate: the model's
+  // canonical/alias reconciliation runs in a `save` hook (docs/65 Step 59)
+  // and findOneAndUpdate bypasses save hooks entirely, so an update through
+  // that path would leave settlor_name / the variant identifiers out of
+  // sync. Same pattern updateTrustKyc and updateCompanyKyc already use.
+  const upsertTrust = async (existingId, t) => {
+    const payload = pickTrustPayload(t);
+    if (existingId) {
+      const existing = await TrustKyc.findById(existingId);
+      if (existing) {
+        Object.assign(existing, payload);
+        await existing.save();
+        return existing._id;
+      }
+    }
+    const created = await TrustKyc.create(payload);
+    return created._id;
+  };
+  const fail = (message) => {
+    const err = new Error(message);
+    err.status = 400;
+    throw err;
+  };
+
+  const shareholders = Array.isArray(b.shareholders)
+    ? await Promise.all(
+        b.shareholders.map(async (h, i) => {
+          if (h?.beneficially_held !== false) return h;
+          const arrangement = h.beneficial_arrangement || {};
+          if (!arrangement.arrangement_type) {
+            fail(`shareholders[${i}].beneficial_arrangement.arrangement_type is required when beneficially_held is false`);
+          }
+          if (arrangement.arrangement_type === "trust") {
+            if (!h.trust?.trust_details?.full_trust_name?.trim()) {
+              fail(`shareholders[${i}].trust.trust_details.full_trust_name is required for a trust arrangement`);
+            }
+            const existingId = h.trust?.id || (h.holder_model === "TrustKyc" ? h.holder_entity : undefined);
+            const id = await upsertTrust(existingId, h.trust);
+            const { trust, ...rest } = h;
+            return { ...rest, holder_model: "TrustKyc", holder_entity: id };
+          }
+          // Non-trust arrangements must still say WHO benefits (docs/65 Step
+          // 66). An entity beneficiary is named by entity_name; a person by
+          // full_name, or by first+last when the payload carries split parts.
+          const ben = arrangement.beneficiary || {};
+          const named =
+            arrangement.beneficiary_type === "entity"
+              ? ben.entity_name?.trim()
+              : ben.full_name?.trim() || (ben.first_name?.trim() && ben.last_name?.trim());
+          if (!named) {
+            const expected = arrangement.beneficiary_type === "entity" ? "beneficiary.entity_name" : "beneficiary.full_name";
+            fail(
+              `shareholders[${i}].beneficial_arrangement.${expected} is required for a ${arrangement.arrangement_type} arrangement`,
+            );
+          }
+          const { trust, ...rest } = h;
+          return rest;
+        }),
+      )
+    : b.shareholders;
+
+  return { shareholders };
+}
+
+/**
  * Duplicate guard (docs/65 Step 30): the registration-number index is sparse
  * but not unique, so the writers check explicitly and answer 409 with the
  * existing record's id — friendlier than a raw index error, and lets the UI
@@ -2854,7 +2995,15 @@ exports.createCompanyKyc = asyncHandler(async (req, res, next) => {
     );
   }
 
+  let trustLinks;
+  try {
+    trustLinks = await resolveTrustLinks(b);
+  } catch (err) {
+    return next(new ErrorResponse(err.message, err.status || 400));
+  }
+
   const payload = pickKybPayload(b);
+  if (trustLinks.shareholders) payload.shareholders = trustLinks.shareholders;
   // Review workflow is server-owned (docs/65 Step 31): a wizard submission
   // lands in the review queue, never pre-approved — regardless of what the
   // client sent (review_status/review_history aren't in the whitelist).
@@ -2921,7 +3070,15 @@ exports.updateCompanyKyc = asyncHandler(async (req, res, next) => {
     );
   }
 
+  let trustLinks;
+  try {
+    trustLinks = await resolveTrustLinks(b);
+  } catch (err) {
+    return next(new ErrorResponse(err.message, err.status || 400));
+  }
+
   const payload = pickKybPayload(b);
+  if (trustLinks.shareholders) payload.shareholders = trustLinks.shareholders;
 
   // Per-register audit diff (docs/65 Step 31): compare the STORED state
   // before vs after the save — both sides schema-cast — rather than payload
@@ -2942,7 +3099,8 @@ exports.updateCompanyKyc = asyncHandler(async (req, res, next) => {
 
   const changedBefore = {};
   const changedAfter = {};
-  for (const key of Object.keys(payload)) {
+  const diffKeys = Object.keys(payload);
+  for (const key of diffKeys) {
     if (
       JSON.stringify(beforeDoc[key] ?? null, stripIds) !==
       JSON.stringify(afterDoc[key] ?? null, stripIds)
@@ -2965,6 +3123,61 @@ exports.updateCompanyKyc = asyncHandler(async (req, res, next) => {
 
   res.status(200).json({ success: true, data: doc });
 });
+
+/**
+ * Shared body for every OCR pre-fill endpoint (docs/65 Step 48/50) — pure
+ * extraction, does NOT create or touch any KYC record. `processFn` is one
+ * of ocrService's processEkyb* functions; the response envelope and error
+ * handling are identical across all of them (same upstream EKYBResponse
+ * shape). Reshaping `data` into wizard state is a frontend concern —
+ * kept as-is here so the two stay honest about what the OCR service
+ * actually returned.
+ */
+async function ocrExtract(req, res, next, processFn) {
+  if (!req.file) {
+    return next(new ErrorResponse("A document (image or PDF) is required", 400));
+  }
+  let upstream;
+  try {
+    upstream = await processFn(req.file.buffer, req.file.originalname, req.file.mimetype);
+  } catch (err) {
+    const status = err.response?.status;
+    // Upstream validation (bad/unreadable file) surfaces as a 4xx we can
+    // relay directly; anything else (network/timeout/5xx) is our problem to
+    // report, not the caller's input.
+    if (status && status >= 400 && status < 500) {
+      return next(new ErrorResponse(err.response?.data?.detail?.[0]?.msg || "The OCR service rejected this document", status));
+    }
+    return next(new ErrorResponse("OCR extraction service is currently unavailable", 502));
+  }
+
+  if (!upstream?.success) {
+    return next(new ErrorResponse(upstream?.error || "Could not extract data from this document", 422));
+  }
+
+  res.status(200).json({
+    success: true,
+    document_type: upstream.document_type,
+    data: upstream.data || null,
+  });
+}
+
+/**
+ * @desc   Extract company KYB data from an ASIC Company Extract / Form 201
+ *         via the external eKYB OCR service, for pre-filling the add-wizard.
+ * @route  POST /api/v1/customer/company/ocr
+ * @access admin | client | branch | manager | officer
+ */
+exports.ocrExtractCompany = asyncHandler((req, res, next) => ocrExtract(req, res, next, ocrService.processEkybCompany));
+
+/**
+ * @desc   Extract trust KYB data from a Trust Deed via the external eKYB OCR
+ *         service, for pre-filling the shareholder "held on behalf of a
+ *         trust" arrangement's linked-TrustKyc form (docs/65 Step 43/46).
+ * @route  POST /api/v1/customer/trust/ocr
+ * @access admin | client | branch | manager | officer
+ */
+exports.ocrExtractTrust = asyncHandler((req, res, next) => ocrExtract(req, res, next, ocrService.processEkybTrust));
 
 const KYB_REVIEW_ALLOWED = ["draft", "in_review", "approved", "escalated", "declined"];
 
@@ -3318,6 +3531,7 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
       // .populate("client", "name _id")
       // .populate("branch", "name _id")
       .populate("customer", "personalKyc country isPep sanction kycStatus")
+      .populate("shareholders.holder_entity")
       .lean();
   }
 
@@ -3329,11 +3543,13 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
     if (typeof identifier === "string" && identifier.match(/^COMKYC_/i)) {
       doc = await CompanyKyc.findOne({ uid: identifier })
         .populate("customer", "user _id")
+        .populate("shareholders.holder_entity")
         .lean();
     } else if (!Number.isNaN(Number(identifier))) {
       // numeric -> sequence
       doc = await CompanyKyc.findOne({ sequence: Number(identifier) })
         .populate("customer", "user _id")
+        .populate("shareholders.holder_entity")
         .lean();
     } else {
       // fallback: try search by legal_name (exact) as last resort
@@ -3341,6 +3557,7 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
         "general_information.legal_name": identifier,
       })
         .populate("customer", "user _id")
+        .populate("shareholders.holder_entity")
         .lean();
     }
   }
@@ -3484,6 +3701,259 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
     success: true,
     data: doc,
   });
+});
+
+/**
+ * @desc   Portfolio analytics for the companies list dashboard.
+ * @route  GET /api/v1/customer/company/stats
+ * @access admin | client | branch | manager | officer
+ *
+ * Computed server-side over the WHOLE collection on purpose (docs/65 Step
+ * 58). `getCompanyKycs` is paginated — default 25, hard-capped at 200 — so a
+ * dashboard tallied from that response in the browser would silently report
+ * on the first page only and under-count every figure. In a compliance
+ * product a confidently wrong total is worse than no total, so the numbers
+ * come from one `$facet` aggregation instead.
+ *
+ * `ubo_unresolved` mirrors the Review page's own rule (a parent entity is
+ * recorded but no beneficial owner meets the UBO test) and the `ubos`
+ * virtual's thresholds — >=25% ownership, >=25% voting, or control_type
+ * "other_means". The virtual can't be used here (aggregations don't hydrate
+ * documents), so the same predicate is expressed in the pipeline; if the
+ * virtual's thresholds ever change, this must change with it.
+ */
+exports.getCompanyKycStats = asyncHandler(async (req, res, next) => {
+  const now = new Date();
+  const DAY = 24 * 60 * 60 * 1000;
+  const in30Days = new Date(now.getTime() + 30 * DAY);
+  const last30 = new Date(now.getTime() - 30 * DAY);
+  // 12 whole months back, from the start of that month.
+  const trendFrom = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+
+  const countBy = (field) => [{ $group: { _id: field, count: { $sum: 1 } } }, { $sort: { count: -1 } }];
+
+  const [facet] = await CompanyKyc.aggregate([
+    {
+      $facet: {
+        total: [{ $count: "n" }],
+        byReviewStatus: countBy("$review_status"),
+        byRegistryStatus: countBy("$general_information.status"),
+        byEntityType: countBy("$general_information.entity_type"),
+        byCountry: [
+          { $match: { "general_information.country_of_incorporation": { $nin: [null, ""] } } },
+          ...countBy("$general_information.country_of_incorporation"),
+          { $limit: 6 },
+        ],
+        // Added per month for the last 12 months.
+        trend: [
+          { $match: { createdAt: { $gte: trendFrom } } },
+          { $group: { _id: { y: { $year: "$createdAt" }, m: { $month: "$createdAt" } }, count: { $sum: 1 } } },
+          { $sort: { "_id.y": 1, "_id.m": 1 } },
+        ],
+        // Ownership that doesn't resolve to a natural person — the single
+        // most actionable compliance signal on this register.
+        uboUnresolved: [
+          {
+            $match: {
+              "related_entities.relation": "parent",
+              "directors_beneficial_owner.beneficial_owners": {
+                $not: {
+                  $elemMatch: {
+                    $or: [
+                      { ownership_percent: { $gte: 25 } },
+                      { voting_percent: { $gte: 25 } },
+                      { control_type: "other_means" },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+          { $count: "n" },
+        ],
+        noDocuments: [{ $match: { $or: [{ documents: { $size: 0 } }, { documents: { $exists: false } }] } }, { $count: "n" }],
+        docsExpired: [{ $match: { "documents.expiry_date": { $lt: now } } }, { $count: "n" }],
+        docsExpiringSoon: [
+          { $match: { documents: { $elemMatch: { expiry_date: { $gte: now, $lte: in30Days } } } } },
+          { $count: "n" },
+        ],
+        docsRejected: [{ $match: { "documents.verification_status": "rejected" } }, { $count: "n" }],
+        screeningPending: [{ $match: { "appointments.screening_status": "pending" } }, { $count: "n" }],
+        // Companies whose ownership involves a linked trust.
+        withTrustHolders: [{ $match: { "shareholders.holder_model": "TrustKyc" } }, { $count: "n" }],
+
+        // ── panels added for the Company Dashboard design (docs/65 Step 58) ──
+        addedLast30: [{ $match: { createdAt: { $gte: last30 } } }, { $count: "n" }],
+        // Days from creation to the most recent "approved" history entry.
+        // Collected raw and reduced to a median in JS — $percentile needs
+        // Mongo 7 and this collection is small enough that it isn't worth
+        // the version floor.
+        approvalDays: [
+          { $match: { review_status: "approved", "review_history.status": "approved" } },
+          {
+            $project: {
+              createdAt: 1,
+              approvedAt: {
+                $max: {
+                  $map: {
+                    input: { $filter: { input: "$review_history", as: "h", cond: { $eq: ["$$h.status", "approved"] } } },
+                    as: "h",
+                    in: "$$h.changedAt",
+                  },
+                },
+              },
+            },
+          },
+          { $match: { approvedAt: { $ne: null } } },
+          { $project: { days: { $divide: [{ $subtract: ["$approvedAt", "$createdAt"] }, DAY] } } },
+        ],
+        oldestInReview: [
+          { $match: { review_status: "in_review" } },
+          { $sort: { createdAt: 1 } },
+          { $limit: 1 },
+          { $project: { legal_name: "$general_information.legal_name", createdAt: 1 } },
+        ],
+        withAnyDocument: [{ $match: { "documents.0": { $exists: true } } }, { $count: "n" }],
+        // How many companies hold at least one document of each kind —
+        // de-duplicated per company so three copies of the same docType on
+        // one file still count once.
+        docCoverage: [
+          {
+            $project: {
+              types: {
+                $setUnion: [{ $map: { input: { $ifNull: ["$documents", []] }, as: "d", in: "$$d.docType" } }, []],
+              },
+            },
+          },
+          { $unwind: "$types" },
+          { $match: { types: { $nin: [null, ""] } } },
+          { $group: { _id: "$types", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 6 },
+        ],
+      },
+    },
+  ]);
+
+  const n = (arr) => arr?.[0]?.n || 0;
+  const asMap = (rows) =>
+    (rows || []).reduce((acc, r) => {
+      acc[r._id == null ? "unspecified" : r._id] = r.count;
+      return acc;
+    }, {});
+
+  // Emit a dense 12-month series (zero-filled) so the client renders a real
+  // timeline rather than only the months that happen to have records.
+  const trendMap = (facet.trend || []).reduce((acc, r) => {
+    acc[`${r._id.y}-${String(r._id.m).padStart(2, "0")}`] = r.count;
+    return acc;
+  }, {});
+  const trend = [];
+  for (let i = 11; i >= 0; i -= 1) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    const key = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    trend.push({ month: key, count: trendMap[key] || 0 });
+  }
+
+  // Median, not mean: a couple of files that sat for months would drag a
+  // mean far away from what a reviewer actually experiences.
+  const days = (facet.approvalDays || []).map((r) => r.days).sort((x, z) => x - z);
+  const medianApprovalDays = days.length
+    ? Math.round((days.length % 2 ? days[(days.length - 1) / 2] : (days[days.length / 2 - 1] + days[days.length / 2]) / 2) * 10) / 10
+    : null;
+
+  const oldest = facet.oldestInReview?.[0];
+  const totalCount = n(facet.total);
+  const withDocs = n(facet.withAnyDocument);
+
+  res.status(200).json({
+    success: true,
+    data: {
+      total: totalCount,
+      by_review_status: asMap(facet.byReviewStatus),
+      by_registry_status: asMap(facet.byRegistryStatus),
+      by_entity_type: asMap(facet.byEntityType),
+      by_country: (facet.byCountry || []).map((r) => ({ country: r._id, count: r.count })),
+      trend,
+      added_last_30_days: n(facet.addedLast30),
+      review_timing: {
+        median_days_to_approval: medianApprovalDays,
+        oldest_in_review: oldest
+          ? {
+              legal_name: oldest.legal_name || "Unnamed company",
+              days: Math.max(0, Math.floor((now - new Date(oldest.createdAt)) / DAY)),
+            }
+          : null,
+      },
+      document_coverage: {
+        // Share of the register carrying at least one document at all.
+        overall_pct: totalCount ? Math.round((withDocs / totalCount) * 100) : 0,
+        with_any_document: withDocs,
+        by_type: (facet.docCoverage || []).map((r) => ({
+          doc_type: r._id,
+          count: r.count,
+          pct: totalCount ? Math.round((r.count / totalCount) * 100) : 0,
+        })),
+      },
+      attention: {
+        ubo_unresolved: n(facet.uboUnresolved),
+        no_documents: n(facet.noDocuments),
+        docs_expired: n(facet.docsExpired),
+        docs_expiring_soon: n(facet.docsExpiringSoon),
+        docs_rejected: n(facet.docsRejected),
+        screening_pending: n(facet.screeningPending),
+      },
+      with_trust_holders: n(facet.withTrustHolders),
+      generated_at: now,
+    },
+  });
+});
+
+/**
+ * @desc   Create a standalone TrustKyc record.
+ * @route  POST /api/v1/customer/trust
+ * @access admin | client | branch | manager | officer
+ *
+ * Until docs/65 Step 57 a TrustKyc could only come into existence as a
+ * companion record created by the Company writer (`resolveTrustLinks`).
+ * That made "connect an existing trust" nearly useless — there was no way
+ * to save a trust on its own for another company to link to later. These
+ * writers close that gap. Same whitelist as the companion path
+ * (`pickTrustPayload`), so a trust saved here and a trust saved through a
+ * company submit accept exactly the same fields.
+ */
+exports.createTrustKyc = asyncHandler(async (req, res, next) => {
+  const name = req.body?.trust_details?.full_trust_name;
+  if (!name || !String(name).trim()) {
+    return next(new ErrorResponse("trust_details.full_trust_name is required", 400));
+  }
+  const doc = await TrustKyc.create(pickTrustPayload(req.body));
+  res.status(201).json({ success: true, data: doc });
+});
+
+/**
+ * @desc   Update an existing TrustKyc record.
+ * @route  PUT /api/v1/customer/trust/:id
+ * @access admin | client | branch | manager | officer
+ *
+ * findById + Object.assign + save() (not findByIdAndUpdate) so the model's
+ * pre-save hooks still run — same reason as updateCompanyKyc (Step 29).
+ */
+exports.updateTrustKyc = asyncHandler(async (req, res, next) => {
+  const doc = await TrustKyc.findById(req.params.id);
+  if (!doc) {
+    return next(new ErrorResponse("TrustKyc not found", 404));
+  }
+  if (
+    req.body?.trust_details &&
+    "full_trust_name" in req.body.trust_details &&
+    !String(req.body.trust_details.full_trust_name || "").trim()
+  ) {
+    return next(new ErrorResponse("trust_details.full_trust_name is required", 400));
+  }
+  Object.assign(doc, pickTrustPayload(req.body));
+  await doc.save();
+  res.status(200).json({ success: true, data: doc });
 });
 
 ///For Non individual by Type

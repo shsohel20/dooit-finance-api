@@ -12,8 +12,10 @@ const {
   createCustomerDummy,
   getCompanyKycs,
   getCompanyKyc,
+  getCompanyKycStats,
   createCompanyKyc,
   updateCompanyKyc,
+  ocrExtractCompany,
   updateCompanyReviewStatus,
   getCompanyKycAudit,
   addCompanyDocuments,
@@ -21,6 +23,9 @@ const {
   updateCompanyDocument,
   getTrustKycs,
   getTrustKyc,
+  createTrustKyc,
+  updateTrustKyc,
+  ocrExtractTrust,
   getNonIndividualKycs,
   createInviteFromQr,
   downloadQR,
@@ -37,6 +42,7 @@ const {
 } = require("../controllers/customerController");
 
 const Customer = require("../models/Customer");
+const ocrUpload = require("../middleware/ocrUpload");
 
 const router = express.Router();
 
@@ -189,6 +195,15 @@ router.put(
   authorize("admin", "client", "branch", "manager", "officer"),
   updateCompanyKyc,
 );
+// eKYB OCR pre-fill (docs/65 Step 48) — extraction only, no CompanyKyc
+// write; the wizard merges the result into its own local state.
+router.post(
+  "/company/ocr",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  ocrUpload.single("image"),
+  ocrExtractCompany,
+);
 // KYB review decision (docs/65 Step 31) — approve / escalate / decline with
 // history + audit; distinct from the registry status on the record itself.
 router.patch(
@@ -230,6 +245,15 @@ router.get(
   // never reads res.advancedResults.
   getCompanyKycs
 );
+// Portfolio analytics for the companies-list dashboard (docs/65 Step 58).
+// MUST stay above "/company/:id" — otherwise "stats" is captured as an id
+// and answered by getCompanyKyc as a 404.
+router.get(
+  "/company/stats",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  getCompanyKycStats,
+);
 router.get(
   "/company/:id",
   protect,
@@ -251,6 +275,31 @@ router.get(
   authorize("admin", "client", "branch"),
 
   getTrustKyc
+);
+// eKYB OCR pre-fill for a Trust Deed (docs/65 Step 50) — extraction only;
+// consumed by the company wizard's "held on behalf of a trust" form
+// (TrustFields), same pattern as /company/ocr.
+router.post(
+  "/trust/ocr",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  ocrUpload.single("image"),
+  ocrExtractTrust,
+);
+// Standalone trust writers (docs/65 Step 57) — a trust can now be saved on
+// its own, so another company can connect to it later. Declared after
+// "/trust/ocr" above so that literal path is never parsed as "/trust/:id".
+router.post(
+  "/trust",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  createTrustKyc,
+);
+router.put(
+  "/trust/:id",
+  protect,
+  authorize("admin", "client", "branch", "manager", "officer"),
+  updateTrustKyc,
 );
 
 router.get(

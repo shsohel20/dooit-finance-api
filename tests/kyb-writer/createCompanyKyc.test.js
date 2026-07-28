@@ -61,7 +61,22 @@ const formPayload = (name, reg) => ({
     beneficial_owners: [{ full_name: "John Carter", ownership_percent: 60, control_type: "ownership" }],
   },
   share_capital: [{ security_class: "Ordinary", amount_issued: 20, total_paid: 20, total_unpaid: 0, voting: true }],
-  shareholders: [{ holder_name: "CF Offshore Holdings LLC", units_held: 20, percent_held: 100, beneficially_held: false, fully_paid: true }],
+  // beneficially_held:false now requires a resolved beneficial_arrangement
+  // (docs/65 Step 43 — Trust/Nominee/Minor).
+  shareholders: [
+    {
+      holder_name: "CF Offshore Holdings LLC",
+      units_held: 20,
+      percent_held: 100,
+      beneficially_held: false,
+      fully_paid: true,
+      beneficial_arrangement: {
+        arrangement_type: "nominee",
+        beneficiary_type: "individual",
+        beneficiary: { full_name: "CF Offshore Holdings Ultimate Principal" },
+      },
+    },
+  ],
   related_entities: [{ relation: "parent", name: "CF Offshore Holdings LLC", percent_interest: 100, jurisdiction: "Delaware, US" }],
 });
 
