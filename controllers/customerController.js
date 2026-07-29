@@ -2,6 +2,9 @@ const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
 const asyncHandler = require("../middleware/async");
+// Whitelisted filter/sort/pagination builder shared by the company and trust
+// list endpoints (docs/65 Step 68).
+const { build: buildKybListQuery } = require("../middleware/kybListQuery");
 const ErrorResponse = require("../utils/errorResponse");
 
 const { hashToken, initialPassword } = require("../utils");
@@ -3454,48 +3457,15 @@ exports.updateCompanyDocument = asyncHandler(async (req, res, next) => {
   });
 });
 
-// Get many company KYC records (with filters, pagination, search)
+// Get many company KYC records (with filters, pagination, search).
+// Filter/sort/pagination building lives in middleware/kybListQuery.js
+// (docs/65 Step 68) — one whitelisted implementation shared with the trust
+// list. `req.kybQuery` is set by the route's middleware; the ?? fallback
+// keeps the controller callable directly (tests invoke it without a router).
 exports.getCompanyKycs = asyncHandler(async (req, res, next) => {
-  // Query params: page, limit, client, branch, customer, reg (registration number),
-  // uid, sequence, search (legal_name or trading_names), sort
-  const {
-    page = 1,
-    limit = 25,
-    client,
-    branch,
-    customer,
-    reg,
-    uid,
-    sequence,
-    search,
-    sort = "-createdAt",
-  } = req.query;
+  const { filter, sort, page: qPage, limit: qLimit, skip } =
+    req.kybQuery || buildKybListQuery("company", req.query);
 
-  const qPage = Math.max(parseInt(page, 10) || 1, 1);
-  // Cap page size — an unbounded ?limit= dumped the whole collection.
-  const qLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 200);
-
-  const filter = {};
-
-  if (client) filter.client = client;
-  if (branch) filter.branch = branch;
-  if (customer) filter.customer = customer;
-  if (uid) filter.uid = uid;
-  if (sequence) filter.sequence = Number(sequence);
-  if (reg)
-    filter["general_information.registration_number"] = String(reg).trim();
-
-  if (search) {
-    // escapeRegExp: user input is a literal, not a pattern — "A+B (Holdings)"
-    // must match itself, not throw or mis-match (docs/65 Step 30).
-    const rx = new RegExp(escapeRegExp(String(search).trim()), "i");
-    filter.$or = [
-      { "general_information.legal_name": rx },
-      { "general_information.trading_names": rx },
-    ];
-  }
-
-  const skip = (qPage - 1) * qLimit;
   const total = await CompanyKyc.countDocuments(filter);
   const pages = Math.ceil(total / qLimit);
 
@@ -3579,51 +3549,12 @@ exports.getCompanyKyc = asyncHandler(async (req, res, next) => {
 
 ///For Trust:
 
-// Get many trust KYC records
+// Get many trust KYC records. Same whitelisted query builder as the company
+// list (middleware/kybListQuery.js, docs/65 Step 68) — the two lists cannot
+// drift apart on filter names, search behaviour or sort safety.
 exports.getTrustKycs = asyncHandler(async (req, res, next) => {
-  const {
-    page = 1,
-    limit = 25,
-    client,
-    branch,
-    customer,
-    uid,
-    sequence,
-    abn,
-    reg,
-    search,
-    sort = "-createdAt",
-  } = req.query;
-
-  const qPage = Math.max(parseInt(page, 10) || 1, 1);
-  const qLimit = Math.min(Math.max(parseInt(limit, 10) || 25, 1), 200);
-
-  const filter = {};
-
-  if (client) filter.client = client;
-  if (branch) filter.branch = branch;
-  if (customer) filter.customer = customer;
-  if (uid) filter.uid = uid;
-  if (sequence) filter.sequence = Number(sequence);
-
-  // Trust registration filters
-  if (reg) {
-    filter["trust_details.trust_type.unregulated_trust.registration_number"] =
-      String(reg).trim();
-  }
-
-  if (abn) {
-    filter["trust_details.trust_type.self_managed_super_fund.abn"] =
-      String(abn).trim();
-  }
-
-  // search by trust name (escaped — literal match, docs/65 Step 30)
-  if (search) {
-    const rx = new RegExp(escapeRegExp(String(search).trim()), "i");
-    filter["trust_details.full_trust_name"] = rx;
-  }
-
-  const skip = (qPage - 1) * qLimit;
+  const { filter, sort, page: qPage, limit: qLimit, skip } =
+    req.kybQuery || buildKybListQuery("trust", req.query);
 
   const total = await TrustKyc.countDocuments(filter);
   const pages = Math.ceil(total / qLimit);
@@ -3701,6 +3632,86 @@ exports.getTrustKyc = asyncHandler(async (req, res, next) => {
     success: true,
     data: doc,
   });
+});
+
+/**
+ * @desc   The companies a trust holds an interest in — the reverse of the
+ *         company wizard's "held on behalf of a trust" link.
+ * @route  GET /api/v1/customer/trust/:id/companies
+ * @access admin | client | branch
+ *
+ * A company records its trust link on `shareholders[].holder_entity` with
+ * `holder_model: "TrustKyc"` (api/models/CompanyKyc.js). Nothing on TrustKyc
+ * points back, deliberately — one link, one source of truth — so the trust
+ * side has to ask this question by query. Without it the trust dossier can
+ * only ever show the parties INSIDE the trust, never what the trust owns,
+ * which is the half a reviewer actually needs to see (docs/65 Step 70).
+ *
+ * `beneficial_arrangement.trust_kyc` is included in the $or because the path
+ * exists on the schema; it is documented as never written, so in practice
+ * every match comes from the holder_entity ref. Matching both means a record
+ * created by some future writer can't quietly go missing from this view.
+ *
+ * Only the fields the graph and the badge draw are projected — the caller is
+ * rendering a map, not opening the files, and a trust with many holdings
+ * would otherwise ship a very large payload.
+ */
+exports.getCompaniesForTrust = asyncHandler(async (req, res, next) => {
+  const identifier = req.params.id;
+
+  // Resolve to the _id the company documents actually store. A uid is
+  // accepted because the trust pages route by whichever identifier they hold.
+  let trustId = null;
+  if (mongoose.Types.ObjectId.isValid(identifier)) {
+    trustId = new mongoose.Types.ObjectId(identifier);
+  } else {
+    const trust = await TrustKyc.findOne(
+      /^TRKYC_/i.test(identifier)
+        ? { uid: identifier }
+        : { "trust_details.full_trust_name": identifier },
+    )
+      .select("_id")
+      .lean();
+    if (!trust) {
+      return next(new ErrorResponse(`TrustKyc not found for identifier: ${identifier}`, 404));
+    }
+    trustId = trust._id;
+  }
+
+  const docs = await CompanyKyc.find({
+    $or: [
+      { shareholders: { $elemMatch: { holder_model: "TrustKyc", holder_entity: trustId } } },
+      { "shareholders.beneficial_arrangement.trust_kyc": trustId },
+    ],
+  })
+    .select(
+      "uid review_status general_information.legal_name general_information.entity_type " +
+        "general_information.country_of_incorporation general_information.registration_number " +
+        "shareholders directors_beneficial_owner.beneficial_owners appointments related_entities",
+    )
+    .lean();
+
+  // The holding itself is what makes this row meaningful, so it is computed
+  // here rather than leaving every client to re-derive it from shareholders[].
+  const data = docs.map((c) => {
+    const held = (c.shareholders || []).filter(
+      (s) =>
+        (s.holder_model === "TrustKyc" && String(s.holder_entity) === String(trustId)) ||
+        String(s.beneficial_arrangement?.trust_kyc || "") === String(trustId),
+    );
+    return {
+      ...c,
+      trust_holding: {
+        // A trust can appear on more than one share class, so these are sums.
+        percent_held: held.reduce((n, s) => n + (s.percent_held || 0), 0),
+        units_held: held.reduce((n, s) => n + (s.units_held || 0), 0),
+        security_classes: [...new Set(held.map((s) => s.security_class).filter(Boolean))],
+        holder_names: [...new Set(held.map((s) => s.holder_name).filter(Boolean))],
+      },
+    };
+  });
+
+  res.status(200).json({ success: true, count: data.length, trust: trustId, data });
 });
 
 /**

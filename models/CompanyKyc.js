@@ -391,6 +391,14 @@ CompanyKycSchema.index(
 
 CompanyKycSchema.index({ "identifiers.value": 1 }, { sparse: true });
 
+// The company -> trust link, indexed so it can be read backwards (docs/65
+// Step 70). GET /trust/:id/companies asks "which companies does this trust
+// hold?", which is a query on this exact path; without the index it is a
+// collection scan on every load of a trust dossier. Sparse because only
+// shareholder rows that name a linked entity carry it. Its absence was
+// flagged as the blocker for the reverse lookup at the end of Step 68.
+CompanyKycSchema.index({ "shareholders.holder_entity": 1 }, { sparse: true });
+
 // CompanyKycSchema.index({ customer: 1 });
 
 /**

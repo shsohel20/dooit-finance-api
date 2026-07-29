@@ -23,6 +23,7 @@ const {
   updateCompanyDocument,
   getTrustKycs,
   getTrustKyc,
+  getCompaniesForTrust,
   createTrustKyc,
   updateTrustKyc,
   ocrExtractTrust,
@@ -61,6 +62,7 @@ router.post(
 
 router.use(express.json({ limit: "100kb" }));
 const advancedCustomerResultsQueryOnly = require("../middleware/advancedCustomerResultsQueryOnly");
+const kybListQuery = require("../middleware/kybListQuery");
 // Protect all routes and allow only authorized roles (adjust as needed)
 
 router.route("/").get(
@@ -240,9 +242,11 @@ router.get(
   "/company/all",
   protect,
   authorize("admin", "client", "branch"),
-  // advancedResults removed (docs/65 Step 30): it ran a second, discarded
-  // query per call — getCompanyKycs builds and answers its own query and
-  // never reads res.advancedResults.
+  // advancedResults stays removed (docs/65 Step 30): it ran a second,
+  // discarded query per call, and it turns any leftover query param into a
+  // Mongo filter key. kybListQuery only BUILDS a whitelisted query onto
+  // req.kybQuery (docs/65 Step 68) — the controller still runs exactly one.
+  kybListQuery("company"),
   getCompanyKycs
 );
 // Portfolio analytics for the companies-list dashboard (docs/65 Step 58).
@@ -267,7 +271,17 @@ router.get(
   "/trust/all",
   protect,
   authorize("admin", "client", "branch"),
+  kybListQuery("trust"),
   getTrustKycs
+);
+// Reverse lookup: which companies this trust holds an interest in (docs/65
+// Step 70). Declared before "/trust/:id" for readability — Express matches on
+// segment count, so the order is not load-bearing here, unlike "/trust/ocr".
+router.get(
+  "/trust/:id/companies",
+  protect,
+  authorize("admin", "client", "branch"),
+  getCompaniesForTrust,
 );
 router.get(
   "/trust/:id",
