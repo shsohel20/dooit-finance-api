@@ -1031,7 +1031,7 @@ exports.getCraAuditTrail = asyncHandler(async (req, res) => {
 // InfoTrack-style Activity Audit Trail PDF
 exports.exportCraAuditPdf = asyncHandler(async (req, res, next) => {
   const ErrorResponse = require("../utils/errorResponse");
-  const puppeteer = require("puppeteer");
+  const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 
   const assessment = await IndividualRiskAssessment.findById(req.params.id).lean();
   if (!assessment) return next(new ErrorResponse("CRA record not found", 404));
@@ -1104,10 +1104,7 @@ exports.exportCraAuditPdf = asyncHandler(async (req, res, next) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await launchPdfBrowser();
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });

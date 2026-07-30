@@ -13,6 +13,8 @@ const {
   getClientBySlug,
   createDummyClient,
   downloadQR,
+  sendClientWelcomeEmail,
+  sendClientPasswordReset,
 } = require("../controllers/clientController");
 
 const Client = require("../models/Client");
@@ -75,6 +77,23 @@ router
     authorizeUserType("dooit"),
     authorizePermission("CLIENT.EDIT"),
     updateClientStatus
+  );
+
+// ── Resend onboarding emails (platform-level: dooit only) ─────────────────────
+router
+  .route("/:id/send-welcome")
+  .post(
+    authorizeUserType("dooit"),
+    authorizePermission("CLIENT.EDIT"),
+    sendClientWelcomeEmail
+  );
+
+router
+  .route("/:id/send-password-reset")
+  .post(
+    authorizeUserType("dooit"),
+    authorizePermission("CLIENT.EDIT"),
+    sendClientPasswordReset
   );
 
 // ── Risk questions (client updates their own; dooit updates any) ──────────────

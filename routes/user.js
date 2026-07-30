@@ -15,6 +15,7 @@ const {
   addMembership,
   updateMembership,
   deleteMembership,
+  scopeUserListByTenant,
 } = require("../controllers/userController");
 
 const User = require("../models/User");
@@ -32,8 +33,8 @@ router.use(authorize("admin"));
 // Pass skipClientFilter so advancedResults doesn't inject those stale filters.
 router
   .route("/")
-  .post(advancedResults(User, null, filterUserSection, { skipClientFilter: true }), getUsersPost)
-  .get(advancedResults(User, null, null, { skipClientFilter: true }), getUsers);
+  .post(scopeUserListByTenant, advancedResults(User, null, filterUserSection, { skipClientFilter: true }), getUsersPost)
+  .get(scopeUserListByTenant, advancedResults(User, null, null, { skipClientFilter: true }), getUsers);
 
 router.route("/new").post(createUser);
 router.route("/role/:role").get(getUsersByRole);

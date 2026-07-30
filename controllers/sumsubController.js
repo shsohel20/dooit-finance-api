@@ -23,8 +23,12 @@ const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 
 const Customer = require("../models/Customer");
-const { sumsubGet, sumsubPostForm, downloadBuffer, buildDocFormData } =
-  require("../utils/sumsubClient");
+const {
+  sumsubGet,
+  sumsubPostForm,
+  downloadBuffer,
+  buildDocFormData,
+} = require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 
 const {
@@ -35,6 +39,7 @@ const {
   triggerAmlCheck,
   handleKycResult,
   handleAmlResult,
+  handleVerificationChecks,
 } = require("../services/sumsubService");
 
 const {
@@ -58,14 +63,14 @@ const resolveCustomer = async (token, customerId) => {
 // docType → Sumsub idDocType + idDocSubType mapping
 // ─────────────────────────────────────────────────────────────────────────────
 const DOC_TYPE_MAP = {
-  id_front:      { idDocType: "ID_CARD",  idDocSubType: "FRONT_SIDE" },
-  id_back:       { idDocType: "ID_CARD",  idDocSubType: "BACK_SIDE"  },
-  passport:      { idDocType: "PASSPORT"                              },
-  drivers_front: { idDocType: "DRIVERS",  idDocSubType: "FRONT_SIDE" },
-  drivers_back:  { idDocType: "DRIVERS",  idDocSubType: "BACK_SIDE"  },
-  selfie:        { idDocType: "SELFIE"                                },
-  face:          { idDocType: "SELFIE"                                },
-  live_photo:    { idDocType: "SELFIE"                                },
+  id_front: { idDocType: "ID_CARD", idDocSubType: "FRONT_SIDE" },
+  id_back: { idDocType: "ID_CARD", idDocSubType: "BACK_SIDE" },
+  passport: { idDocType: "PASSPORT" },
+  drivers_front: { idDocType: "DRIVERS", idDocSubType: "FRONT_SIDE" },
+  drivers_back: { idDocType: "DRIVERS", idDocSubType: "BACK_SIDE" },
+  selfie: { idDocType: "SELFIE" },
+  face: { idDocType: "SELFIE" },
+  live_photo: { idDocType: "SELFIE" },
 };
 
 const isSelfieType = (docType) =>
@@ -99,16 +104,19 @@ exports.createApplicant = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
 
-    journey.provider = "sumsub";
+    journey.provider = "dooit";
     journey.providerRef = result.applicantId;
     journey.recordEvent({
       action: "applicant_created",
       note: `Applicant created: ${result.applicantId}`,
       actorRole: "customer",
-      payload: { applicantId: result.applicantId, inspectionId: result.inspectionId },
+      payload: {
+        applicantId: result.applicantId,
+        inspectionId: result.inspectionId,
+      },
       ip: req.ip,
       userAgent: req.get("user-agent"),
     });
@@ -118,7 +126,9 @@ exports.createApplicant = asyncHandler(async (req, res, next) => {
   const httpStatus = result.created ? 201 : 200;
   return res.status(httpStatus).json({
     success: true,
-    message: result.created ? "Sumsub applicant created" : "Applicant already exists",
+    message: result.created
+      ? "Sumsub applicant created"
+      : "Applicant already exists",
     data: {
       applicantId: result.applicantId,
       inspectionId: result.inspectionId,
@@ -163,24 +173,38 @@ exports.uploadDocument = asyncHandler(async (req, res, next) => {
     if (!doc?.url) continue;
 
     const docType = (doc.docType || "id_front").toLowerCase();
-    const sumsub = DOC_TYPE_MAP[docType] || { idDocType: "ID_CARD", idDocSubType: "FRONT_SIDE" };
+    const sumsub = DOC_TYPE_MAP[docType] || {
+      idDocType: "ID_CARD",
+      idDocSubType: "FRONT_SIDE",
+    };
 
     const metadata = {
       idDocType: sumsub.idDocType,
       ...(sumsub.idDocSubType && { idDocSubType: sumsub.idDocSubType }),
-      ...(doc.country && { country: toAlpha3(doc.country) ?? doc.country.toUpperCase() }),
+      ...(doc.country && {
+        country: toAlpha3(doc.country) ?? doc.country.toUpperCase(),
+      }),
     };
 
     let buffer, contentType;
     try {
       ({ buffer, contentType } = await downloadBuffer(doc.url));
     } catch (err) {
-      uploadResults.push({ docType, success: false, error: `Download failed: ${err.message}` });
+      uploadResults.push({
+        docType,
+        success: false,
+        error: `Download failed: ${err.message}`,
+      });
       continue;
     }
 
     const ext = contentType.split("/")[1]?.replace("jpeg", "jpg") || "jpg";
-    const formData = buildDocFormData(metadata, buffer, contentType, `${docType}.${ext}`);
+    const formData = buildDocFormData(
+      metadata,
+      buffer,
+      contentType,
+      `${docType}.${ext}`,
+    );
 
     const { status, data } = await sumsubPostForm(
       `/resources/applicants/${applicantId}/info/idDoc`,
@@ -210,7 +234,7 @@ exports.uploadDocument = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
 
     for (const result of uploadResults) {
@@ -221,7 +245,10 @@ exports.uploadDocument = asyncHandler(async (req, res, next) => {
         data: { sumsubUpload: result, checkedAt: new Date() },
         documents: [
           {
-            url: documents.find((d) => (d.docType || "").toLowerCase() === result.docType)?.url || "",
+            url:
+              documents.find(
+                (d) => (d.docType || "").toLowerCase() === result.docType,
+              )?.url || "",
             docType: result.docType,
             name: result.docType,
           },
@@ -276,7 +303,12 @@ exports.requestCheck = asyncHandler(async (req, res, next) => {
   const { customer, relation, relationIndex } = resolved;
 
   if (!customer.sumsubApplicantId) {
-    return next(new ErrorResponse("No Sumsub applicant. Call /sumsub/applicant first.", 400));
+    return next(
+      new ErrorResponse(
+        "No Sumsub applicant. Call /sumsub/applicant first.",
+        400,
+      ),
+    );
   }
 
   const { status, data } = await requestPendingReview(
@@ -312,7 +344,7 @@ exports.requestCheck = asyncHandler(async (req, res, next) => {
       branchId: relation.branch || null,
       relationIndex: relationIndex || 0,
       channel: relation.onboardingChannel || "Mobile App",
-      provider: "sumsub",
+      provider: "dooit",
     });
     journey.recordEvent({
       action: "check_requested",
@@ -342,7 +374,9 @@ exports.getApplicantStatus = asyncHandler(async (req, res, next) => {
   );
   if (!customer) return next(new ErrorResponse("Customer not found", 404));
   if (!customer.sumsubApplicantId) {
-    return next(new ErrorResponse("No Sumsub applicant for this customer", 404));
+    return next(
+      new ErrorResponse("No Sumsub applicant for this customer", 404),
+    );
   }
 
   const { status, data } = await getApplicant(customer.sumsubApplicantId);
@@ -392,7 +426,9 @@ exports.triggerAml = asyncHandler(async (req, res, next) => {
     );
   }
   if (!customer.sumsubApplicantId) {
-    return next(new ErrorResponse("No Sumsub applicant for this customer", 400));
+    return next(
+      new ErrorResponse("No Sumsub applicant for this customer", 400),
+    );
   }
 
   const triggered = await triggerAmlCheck(customer);
@@ -417,7 +453,9 @@ exports.getAmlCase = asyncHandler(async (req, res, next) => {
   );
   if (!customer) return next(new ErrorResponse("Customer not found", 404));
   if (!customer.sumsubApplicantId) {
-    return next(new ErrorResponse("No Sumsub applicant for this customer", 404));
+    return next(
+      new ErrorResponse("No Sumsub applicant for this customer", 404),
+    );
   }
 
   const { status, data } = await sumsubGet(
@@ -461,20 +499,15 @@ exports.getAmlCase = asyncHandler(async (req, res, next) => {
 //   customer.kycStatus === 'verified'  →  AML result  →  handleAmlResult
 // ─────────────────────────────────────────────────────────────────────────────
 exports.sumsubWebhook = asyncHandler(async (req, res) => {
-
   // console.log(req.headers)
   // console.log(req.body)
   // ── 1. Verify HMAC-SHA256 signature ───────────────────────────────────────
   const received = req.headers["x-payload-digest"];
-  const webhookSecret = process.env.NODE_ENV === "production"
-    ? process.env.SUMSUB_WEBHOOK_SECRET
-    : process.env.SUMSUB_WEBHOOK_SECRET2;
+  const webhookSecret = process.env.SUMSUB_WEBHOOK_SECRET;
   const expected = crypto
     .createHmac("sha256", webhookSecret || "")
     .update(req.body) // Buffer from express.raw()
     .digest("hex");
-
-     
 
   if (!received || received !== expected) {
     return res.status(403).json({ error: "Invalid webhook signature" });
@@ -488,8 +521,8 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: "Malformed JSON payload" });
   }
 
-
-  const { type, externalUserId, applicantId, reviewResult , reviewStatus} = payload;
+  const { type, externalUserId, applicantId, reviewResult, reviewStatus } =
+    payload;
 
   // Acknowledge non-review events immediately — Sumsub retries on non-200
   if (type !== "applicantReviewed") {
@@ -500,27 +533,65 @@ exports.sumsubWebhook = asyncHandler(async (req, res) => {
   const customer = await Customer.findById(externalUserId);
   if (!customer) {
     // Not our customer (multi-tenant / legacy) — acknowledge gracefully
-    return res.status(200).json({ received: true, ignored: true, reason: "customer_not_found" });
+    return res
+      .status(200)
+      .json({ received: true, ignored: true, reason: "customer_not_found" });
   }
 
   // ── 4. Route: KYC or AML? ──────────────────────────────────────────────────
   const effectiveApplicantId = applicantId || customer.sumsubApplicantId;
+  const reviewAnswer = reviewResult?.reviewAnswer;
 
   if (customer.kycStatus !== "verified") {
-    console.log('I am for here not verified')
-    // KYC result — customer hasn't been verified yet
-   
-    await handleKycResult(customer, reviewResult || {}, effectiveApplicantId, reviewStatus);
-  } else {
-    console.log('I am for here AML result')
-
-    // AML result — KYC already GREEN, this must be AML
-    await handleAmlResult(
+    // First review for this applicant → this is the KYC identity result.
+    await handleKycResult(
       customer,
-      reviewResult?.reviewAnswer,
+      reviewResult || {},
       effectiveApplicantId,
+      reviewStatus,
     );
+
+    // Only screen AML once identity passed. Running AML on a RED/RETRY applicant
+    // is meaningless and would flag a customer who was never actually onboarded.
+    // AML status is derived from the fetched hits inside handleAmlResult — never
+    // from `reviewAnswer` (a GREEN identity can still carry PEP/sanction hits).
+
+    await handleAmlResult(customer, effectiveApplicantId);
+  } else {
+    // KYC already verified → this webhook is an AML / ongoing-monitoring result.
+    await handleAmlResult(customer, effectiveApplicantId);
   }
 
+  // Persist the latest PERSON verification checks (identity/DVS breakdown) on the
+  // Customer. Runs on both paths, after handleAmlResult. Non-fatal on failure.
+  await handleVerificationChecks(customer, effectiveApplicantId);
+
   return res.status(200).json({ received: true });
+});
+
+exports.getVerificationResult = asyncHandler(async (req, res) => {
+  const { applicantId } = req.params;
+  console.log(applicantId);
+  try {
+    const { status, data } = await sumsubGet(
+      `/resources/checks/latest?applicantId=${applicantId}&type=PERSON`,
+    );
+    console.log(data);
+    console.log(status);
+
+    if (status === 200) {
+      const customer = await Customer.findOne({ sumsubApplicantId: applicantId });
+
+      if (!customer) {
+        return res.status(404).json({ error: "Customer Not Found" });
+      }
+      const checks = data?.checks || [];
+      customer.checks = checks; // full reassignment → tracked without markModified
+      await customer.save();
+      return res.status(status).json({ customer });
+    }
+    return res.status(status).json({ data });
+  } catch (err) {
+    console.error("[SumsubService] Failed to fetch AML case:", err.message);
+  }
 });

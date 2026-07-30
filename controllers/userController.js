@@ -43,6 +43,26 @@ exports.getUsersPost = asyncHandler(async (req, res, next) => {
   res.status(200).json(res.advancedResults);
 });
 
+// @desc   Scope the user list to the caller's tenant before advancedResults runs.
+//         User is identity-only (no client/branch), so we resolve the matching
+//         user IDs from UserType and inject them as a base filter. dooit/platform
+//         admins have no client/branch context and stay unscoped (see all users).
+exports.scopeUserListByTenant = asyncHandler(async (req, res, next) => {
+  const client = req.user?.client?._id ?? req.user?.clientBelongs ?? null;
+  const branch = req.user?.branch?._id ?? req.user?.branchBelongs ?? null;
+
+  // No tenant context (dooit / platform admin) → unscoped: list every user.
+  if (!client && !branch) return next();
+
+  const membershipFilter = { isActive: true };
+  if (client) membershipFilter.clientBelongs = client;
+  if (branch) membershipFilter.branchBelongs = branch;
+
+  const userIds = await UserType.distinct("user", membershipFilter);
+  req.advancedFilter = { _id: { $in: userIds } };
+  next();
+});
+
 // @desc   Create a new user + seed its first UserType membership
 // @route  POST /api/v1/user/new
 // @access Admin

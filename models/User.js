@@ -18,7 +18,7 @@ const UserSchema = new mongoose.Schema(
 
     name: {
       type: String,
-      trim: true,
+      trim: true, 
       // unique: true, //Never Need Unique
       required: [true, "Please add a  name"],
     },

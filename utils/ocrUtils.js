@@ -27,22 +27,51 @@ const DOC_TYPE_TO_CARD_TYPE = {
   national_id: "NID",
   id_front: "NID",
   id_back: "NID",
+  id_card: "NID",
+  identity_card: "NID",
   driving_license: "Driving License",
   driving_licence: "Driving License",
+  driver_license: "Driving License",
+  driver_licence: "Driving License",
   passport: "Passport",
   medicare: "Medical Card",
   medical_card: "Medical Card",
 };
 
+// UI card-type values that mean "driving licence" without saying so literally:
+// state/province variants ("nsw_dl", "dl_ontario", "act_heavy_vehicle_dl") and
+// spelled-out variants ("provisional_driver_license", "Driving License").
+const DL_VALUE_REGEX = /(^|_)dl($|_)|driv(er|ing).?s?.*licen[cs]e|licen[cs]e.*driv(er|ing)/i;
+
+/**
+ * normalizeCardType — map a UI card-type value onto one of the card_type
+ * values the OCR API accepts. Returns null when the value has no OCR
+ * equivalent (the caller decides whether to pass it through).
+ *
+ * @param {string|null} raw — e.g. "nsw_dl", "id_card", "Driving License"
+ * @returns {string|null}
+ */
+const normalizeCardType = (raw) => {
+  const key = raw?.toLowerCase?.().trim();
+  if (!key) return null;
+  if (DOC_TYPE_TO_CARD_TYPE[key]) return DOC_TYPE_TO_CARD_TYPE[key];
+  if (DL_VALUE_REGEX.test(key)) return "Driving License";
+  return null;
+};
+
 /**
  * resolveCardType — derive the OCR API's card_type from a docType string.
+ * An explicit caller-supplied cardType wins, but is normalized first so the
+ * OCR API receives a hint it recognizes (unknown values pass through as-is).
  *
  * @param {string|null} docType         — e.g. "id_front", "passport"
  * @param {string|null} explicitCardType — caller-supplied override
  * @returns {string|null}
  */
 const resolveCardType = (docType, explicitCardType) => {
-  if (explicitCardType) return explicitCardType;
+  if (explicitCardType) {
+    return normalizeCardType(explicitCardType) || explicitCardType;
+  }
   return DOC_TYPE_TO_CARD_TYPE[docType?.toLowerCase?.()] || null;
 };
 
@@ -106,6 +135,7 @@ const mergeOcrFields = (target, source) => {
 
 module.exports = {
   DOC_TYPE_TO_CARD_TYPE,
+  normalizeCardType,
   resolveCardType,
   callOcrApi,
   mergeOcrFields,

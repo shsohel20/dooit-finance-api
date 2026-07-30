@@ -20,7 +20,14 @@ const {
   triggerAml,
   getAmlCase,
   sumsubWebhook,
+  getVerificationResult,
 } = require("../controllers/sumsubController");
+
+const {
+  getAmlMatches,
+  updateAmlMatch,
+  bulkUpdateAmlMatches,
+} = require("../controllers/amlMatchController");
 
 const { protect, authorize } = require("../middleware/auth");
 
@@ -71,6 +78,34 @@ router.get(
   protect,
   authorize("admin", "client", "branch", "manager"),
   getAmlCase,
+);
+
+// Step 7: Per-match compliance review (analyst dispositions)
+router.get(
+  "/aml-matches/:customerId",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  getAmlMatches,
+);
+// Bulk disposition — MUST be declared before "/aml-matches/:id" so the literal
+// "bulk" segment is not captured as an :id param.
+router.patch(
+  "/aml-matches/bulk",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  bulkUpdateAmlMatches,
+);
+router.patch(
+  "/aml-matches/:id",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  updateAmlMatch,
+);
+router.get(
+  "/resources/checks/latest/:applicantId",
+  protect,
+  authorize("admin", "client", "branch", "manager"),
+  getVerificationResult,
 );
 
 module.exports = router;

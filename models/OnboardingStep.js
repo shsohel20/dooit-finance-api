@@ -29,13 +29,13 @@ const OnboardingStepSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Client",
       default: null,
-      index: true,
+      // index defined below via schema.index({ client: 1 }, { unique, sparse })
     },
     branch: {
       type: Schema.Types.ObjectId,
       ref: "Branch",
       default: null,
-      index: true,
+      // index defined below via schema.index({ branch: 1 }, { unique, sparse })
     },
     steps: { type: [StepSchema], default: [] },
   },

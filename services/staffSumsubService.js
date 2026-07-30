@@ -124,8 +124,8 @@ const ensureStaffApplicant = async (staff) => {
     applicantId: createData.id,
     note: "New applicant registered",
     meta: {
-      inspectionId:    createData.inspectionId || null,
-      reviewStatus:    createData.review?.reviewStatus || null,
+      inspectionId: createData.inspectionId || null,
+      reviewStatus: createData.review?.reviewStatus || null,
       requiredDocSets: createData.requiredIdDocs?.docSets || [],
     },
     at: new Date(),
@@ -219,9 +219,9 @@ const syncStaffApplicantStatus = async (staff) => {
 
     amlStatus =
       amlAnswer === "GREEN" ? "clear"
-      : amlAnswer === "YELLOW" ? "yellow"
-      : amlAnswer === "RED" ? "flagged"
-      : amlStatus;
+        : amlAnswer === "YELLOW" ? "yellow"
+          : amlAnswer === "RED" ? "flagged"
+            : amlStatus;
 
     staff.amlStatus = amlStatus;
     staff.amlRiskLabels = riskLabels;
@@ -234,9 +234,9 @@ const syncStaffApplicantStatus = async (staff) => {
     // ── sync into Staff.screening sub-doc ──────────────────────────────────
     staff.screening.status =
       amlStatus === "clear" ? "clear"
-      : amlStatus === "yellow" ? "yellow"
-      : amlStatus === "flagged" ? "flagged"
-      : staff.screening.status;
+        : amlStatus === "yellow" ? "yellow"
+          : amlStatus === "flagged" ? "flagged"
+            : staff.screening.status;
 
     staff.screening.pepMatch = staff.isPep;
     staff.screening.sanctionsMatch = staff.sanction;
@@ -258,8 +258,8 @@ const syncStaffApplicantStatus = async (staff) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DOC_TYPE_MAP = {
-  national_id:     "ID_CARD",
-  passport:        "PASSPORT",
+  national_id: "ID_CARD",
+  passport: "PASSPORT",
   drivers_license: "DRIVERS",
 };
 
@@ -282,9 +282,9 @@ const submitStaffDocuments = async (staff) => {
     throw new Error("Staff has no Sumsub applicant — call ensureStaffApplicant first");
   }
 
-  console.log(staff.documents)
+
   const idDocs = (staff.documents || []).filter((d) => DOC_TYPE_MAP[d.docType?.toLowerCase()]);
-  console.log(idDocs)
+
   if (!idDocs.length) return { submitted: 0, skipped: 0, results: [] };
 
   const sideCount = {};

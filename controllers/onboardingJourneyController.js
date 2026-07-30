@@ -23,6 +23,8 @@ const {
   pushOcrDocsToSumsub,
 } = require("../services/sumsubService");
 
+const { verifyDocFace, pickFaceVerifyPair } = require("../services/faceVerifyService");
+
 // ── Utilities ─────────────────────────────────────────────────────────────────
 const { fetchImageAsBase64, fetchImageData } = require("../utils/imageUtils");
 const {
@@ -557,11 +559,7 @@ exports.verifyDocAndFace = asyncHandler(async (req, res, next) => {
     );
   }
 
-  const findDoc = (...types) =>
-    documents.find((d) => d && d.url && types.includes(d.docType || d.type));
-
-  const docImage = findDoc("id_front", "id_back", "passport", "nid");
-  const selfieImage = findDoc("selfie", "face", "live_photo");
+  const { docImage, selfieImage } = pickFaceVerifyPair(documents);
 
   if (!docImage) {
     return next(
@@ -587,72 +585,27 @@ exports.verifyDocAndFace = asyncHandler(async (req, res, next) => {
   const clientId = relation.client;
   const branchId = relation.branch || null;
 
-  let image1, image2;
+  // Face match core lives in faceVerifyService (shared with the staff
+  // manual-import background chain). Throws with `.statusCode` on I/O errors.
+  let verdict;
   try {
-    [image1, image2] = await Promise.all([
-      fetchImageAsBase64(docImage.url),
-      fetchImageAsBase64(selfieImage.url),
-    ]);
+    verdict = await verifyDocFace({ docUrl: docImage.url, selfieUrl: selfieImage.url });
   } catch (err) {
-    return next(
-      new ErrorResponse(
-        `Failed to download image for verification: ${err.message}`,
-        400,
-      ),
-    );
+    return next(new ErrorResponse(err.message, err.statusCode || 502));
   }
 
-  const baseUrl = process.env.DOC_FACE_API || "http://31.97.71.194:5005";
-  let apiResult, upstreamStatus;
-
-  try {
-    const response = await axios.post(
-      `${baseUrl}/verify/`,
-      { app_id: 1, image_1: image1, image_2: image2 },
-      {
-        timeout: 60_000,
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        validateStatus: () => true,
-      },
-    );
-    upstreamStatus = response.status;
-    apiResult = parseApiResponseData(response.data);
-  } catch (err) {
-    return next(
-      new ErrorResponse(
-        `Face verification API unreachable: ${err.message}`,
-        isTransientNetworkError(err) ? 503 : 502,
-      ),
-    );
-  }
-
-  const result = apiResult?.data?.result || {};
-  const verificationStatus = result.verification_status; // 1 = match, 0 = no match
-  const similarity = result.similarity ?? 0;
-  const model = result.model || null;
-  const apiErrors =
-    Array.isArray(apiResult?.errors) && apiResult.errors.length
-      ? apiResult.errors
-      : null;
-  const apiCode = apiResult?.code ?? upstreamStatus;
-
-  const SIMILARITY_THRESHOLD = 60;
-
-  let stepStatus, rejectionReason;
-  if (apiErrors) {
-    stepStatus = "rejected";
-    rejectionReason =
-      apiErrors.join("; ") || apiResult?.message || "Verification failed";
-  } else if (verificationStatus === 1 && similarity >= SIMILARITY_THRESHOLD) {
-    stepStatus = "approved";
-  } else {
-    stepStatus = "rejected";
-    rejectionReason =
-      similarity < SIMILARITY_THRESHOLD
-        ? `Face similarity too low (${similarity.toFixed(1)}% < ${SIMILARITY_THRESHOLD}%)`
-        : "Face verification failed — faces do not match";
-  }
+  const {
+    verificationStatus,
+    similarity,
+    model,
+    apiCode,
+    apiErrors,
+    upstreamStatus,
+    rawResponse: apiResult,
+    stepStatus,
+    rejectionReason,
+  } = verdict;
+  const SIMILARITY_THRESHOLD = 40; //TODO
 
   const journey = await findOrCreateJourney({
     customerId: customer._id,

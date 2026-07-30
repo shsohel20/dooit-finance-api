@@ -69,6 +69,7 @@ const issue = require("./issue");
 // ── Phase 7: Executive Dashboard ─────────────────────────────────────────────
 const grcDashboard = require("./grc-dashboard");
 const ewraDashboard = require("./ewra-dashboard");
+const lawyerDashboard = require("./lawyer-dashboard");
 
 // ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
 const rgMapper = require("./rg-mapper");
@@ -87,7 +88,7 @@ const staff = require("./staff");
 
 // ── Global OCR ────────────────────────────────────────────────────────────────
 const ocr = require("./ocr");
-
+ 
 // ── GRC Notification Engine ───────────────────────────────────────────────────
 const appNotification = require("./app-notification");
 const monitoringRule = require("./monitoringRule");
@@ -168,6 +169,7 @@ router.use("/issue", issue);
 // ── Phase 7: Executive Dashboard ─────────────────────────────────────────────
 router.use("/grc-dashboard", grcDashboard);
 router.use("/ewra-dashboard", ewraDashboard);
+router.use("/lawyer-dashboard", lawyerDashboard);
 
 // ── Phase 8: RG Obligation Mapper ─────────────────────────────────────────────
 router.use("/rg-mapper", rgMapper);

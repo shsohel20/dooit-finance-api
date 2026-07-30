@@ -181,13 +181,17 @@ const findOrCreateJourney = async ({
  *   1. Any step rejected                  → journey = "rejected"
  *   2. All required steps approved        → journey = "approved"
  *   3. All required steps submitted|approved → journey = "submitted"
- *   4. fallbackStatus (optional)          → journey = fallbackStatus
+ *   4. Otherwise (mid-flow, nothing rejected) → journey = fallbackStatus || "in_progress"
+ *
+ * Rule 4 must ALWAYS assign — never leave the previous status in place. Otherwise
+ * clearing a rejection (e.g. a reviewer approves the last rejected step while
+ * other required steps are still pending) would leave the journey stuck on the
+ * old "rejected" even though no step is rejected any more.
  *
  * @param {OnboardingJourney} journey       — mutated in place, not saved
  * @param {Object}            [opts]
- * @param {string|null}       [opts.fallbackStatus] — status to set when none
- *   of the rules above match (e.g. "in_progress" after a staff review resets
- *   a step back to pending). Defaults to null = leave status unchanged.
+ * @param {string|null}       [opts.fallbackStatus] — status for the mid-flow
+ *   case (defaults to "in_progress").
  */
 const syncJourneyStatus = (journey, { fallbackStatus = null } = {}) => {
   const required = journey.steps.filter((s) => s.required);
@@ -208,8 +212,8 @@ const syncJourneyStatus = (journey, { fallbackStatus = null } = {}) => {
   } else if (allSubmittedOrApproved) {
     journey.status = "submitted";
     journey.submittedAt = journey.submittedAt || new Date();
-  } else if (fallbackStatus) {
-    journey.status = fallbackStatus;
+  } else {
+    journey.status = fallbackStatus || "in_progress";
   }
 };
 

@@ -6,6 +6,7 @@ const {
 } = require("../utils/riskAssessment");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const { roleEncryptionPlugin } = require("../utils/roleEncryptionPlugin");
+const { type } = require("os");
 
 const { Schema } = mongoose;
 
@@ -154,7 +155,19 @@ const CustomerSchema = new Schema(
         registeredAt: { type: Date, default: Date.now },
         source: { type: String, default: "api" }, // e.g. "in-branch", "web", "api", "agent"
         notes: { type: String, default: "" },
-        active: { type: Boolean, default: true },
+        active: { type: Boolean, default: false }, //TODO
+
+        relationModel: {
+          type: String,
+          trim: true,
+          index: true,
+          enum: ["Customer", "CompanyKyc", "NonIndividualKyc", "TrustKyc"],
+        },
+        relationId: {
+          type: Schema.Types.ObjectId,
+          index: true,
+          refPath: "relationModel",
+        },
 
         // --- INVITE: relation-scoped invite fields ---
         invitedBy: { type: Schema.Types.ObjectId, ref: "Users", default: null },
@@ -179,7 +192,7 @@ const CustomerSchema = new Schema(
     // uploaded documents
     documents: { type: [DocumentMetaSchema], default: [] },
 
-    country: { type: String, default: "Bangladesh" },
+    country: { type: String, default: "" },
     // kyc status: pending, in_review, verified, rejected
     kycStatus: {
       type: String,
@@ -242,6 +255,14 @@ const CustomerSchema = new Schema(
 
     // 🔐 controls READ behavior only
     isDataEncrypted: { type: Boolean, default: false },
+    // Osint Status 
+    osintStatus: { type: Boolean, default: false },
+
+    //Dvs Checked
+    checks:{
+    type: [Schema.Types.Mixed],
+     default: []
+    }
   },
   {
     timestamps: true,

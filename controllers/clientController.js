@@ -5,13 +5,15 @@ const Client = require("../models/Client");
 const User = require("../models/User");
 const UserType = require("../models/UserType");
 const EntityType = require("../models/EntityType");
-const { validateClientCreation, markOnboardingStep, initialPassword } = require("../utils");
+const { validateClientCreation, markOnboardingStep, initialPassword, generateRandomPassword, convertQueryString } = require("../utils");
 const ErrorResponse = require("../utils/errorResponse");
 const { generateQR } = require("../utils/qrService");
 const { createRiskRegisterFromClient } = require("./riskRegisterController");
 const { runInBackground } = require("../utils/backgroundJob");
 const { generateAMLDocsForClient } = require("../utils/amlDocGenService");
 const { hashForSearch } = require("../utils/encryption");
+const sendEmail = require("../utils/sendEmail");
+const { clientWelcomeHtml, clientCredentialsHtml } = require("../utils/email-template/clientEmailTemplate");
 
 /**
  * Simple filter helper similar to filterUserSection
@@ -70,15 +72,22 @@ exports.createClient = asyncHandler(async (req, res, next) => {
   console.log(req.body)
 
   let user = null;
+  let isNewUser = false;
+  let tempPassword = null;
 
   const userName = email;
   // Use emailHash for dedupe — plaintext email may be AES-encrypted at rest.
   user = await User.findOne({ emailHash: hashForSearch(email) });
   if (!user) {
+    isNewUser = true;
+    // Random one-time temporary password, emailed to the client. They are
+    // guided to replace it via the secure set-password link (see emails below).
+    // tempPassword = generateRandomPassword(12);
+    tempPassword = initialPassword;
     user = await User.create({
       name,
       email,
-      password: initialPassword, // TODO: replace with random password
+      password: tempPassword,
       isActive: true,
       userName,
     });
@@ -119,6 +128,146 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     succeed: true,
     data: client,
     id: client._id,
+  });
+
+  // ── Onboarding emails ──────────────────────────────────────────────────────
+  //  1) Welcome / onboarding email
+  //  2) Login credentials + secure password-setup / reset instructions
+  // Sent after the response is returned; any failure is logged, never surfaced
+  // to the client-creation request.
+  runInBackground(`clientOnboardingEmails:${client._id}`, async () => {
+    const base = String(req.body.clientUrl || process.env.FRONTEND_URL || "")
+      .replace(/\/+$/, "");
+    const loginUrl = `${base}/auth/login`;
+
+    // Generate a set-password token and persist it with a 24h onboarding window.
+    // Uses User.updateOne (not user.save) to avoid the password pre-save hook.
+    let setPasswordUrl = `${base}/auth/forgot-password`; // safe fallback link
+    try {
+      const resetToken = user.getResetPasswordToken();
+      await User.updateOne(
+        { _id: user._id },
+        {
+          resetPasswordToken: user.resetPasswordToken,
+          resetPasswordExpire: Date.now() + 24 * 60 * 60 * 1000,
+        }
+      );
+      const qry = {
+        resetToken
+      }
+      setPasswordUrl = `${base}/auth/reset-password?${convertQueryString(qry)}`;
+    } catch (err) {
+      console.error("[createClient] reset-token generation failed:", err.message);
+    }
+
+    // 1) Welcome / onboarding
+    try {
+      await sendEmail({
+        email,
+        subject: "Welcome to Dooit",
+        message: clientWelcomeHtml({ name, loginUrl }),
+      });
+    } catch (err) {
+      console.error("[createClient] welcome email failed:", err.message);
+    }
+
+    // 2) Credentials + password setup / reset
+    try {
+      await sendEmail({
+        email,
+        subject: "Your Dooit Login Details & Password Setup",
+        message: clientCredentialsHtml({
+          name,
+          email,
+          tempPassword, // null for pre-existing accounts → password row omitted
+          setPasswordUrl,
+          loginUrl,
+        }),
+      });
+    } catch (err) {
+      console.error("[createClient] credentials email failed:", err.message);
+    }
+  });
+});
+
+// @desc   Resend the welcome / onboarding email to an existing client
+// @route  POST /api/v1/clients/:id/send-welcome
+// @access Protected (dooit)
+exports.sendClientWelcomeEmail = asyncHandler(async (req, res, next) => {
+  const client = await Client.findById(req.params.id).populate("user", "name email");
+  if (!client) return next(new ErrorResponse("Client not found", 404));
+
+  const email = client.email || client.user?.email;
+  const name = client.name || client.user?.name;
+  if (!email)
+    return next(new ErrorResponse("This client has no email address on file", 400));
+
+  const base = String(req.body?.clientUrl || process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  const loginUrl = `${base}/auth/login`;
+
+  await sendEmail({
+    email,
+    subject: "Welcome to Dooit",
+    message: clientWelcomeHtml({ name, loginUrl }),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Welcome email sent to ${email}`,
+  });
+});
+
+// @desc   Resend the password-setup / reset email to an existing client
+// @route  POST /api/v1/clients/:id/send-password-reset
+// @access Protected (dooit)
+exports.sendClientPasswordReset = asyncHandler(async (req, res, next) => {
+  const client = await Client.findById(req.params.id).populate("user", "name email");
+  if (!client) return next(new ErrorResponse("Client not found", 404));
+
+  // Full user doc is needed for the reset-token helper.
+  const user = await User.findById(client.user?._id || client.user);
+  if (!user)
+    return next(new ErrorResponse("This client has no linked user account", 404));
+
+  const email = client.email || user.email;
+  const name = client.name || user.name;
+  if (!email)
+    return next(new ErrorResponse("This client has no email address on file", 400));
+
+  const base = String(req.body?.clientUrl || process.env.FRONTEND_URL || "").replace(/\/+$/, "");
+  const loginUrl = `${base}/auth/login`;
+
+  // Fresh 24h set-password link; falls back to forgot-password on failure.
+  let setPasswordUrl = `${base}/auth/forgot-password`;
+  try {
+    const resetToken = user.getResetPasswordToken();
+    await User.updateOne(
+      { _id: user._id },
+      {
+        resetPasswordToken: user.resetPasswordToken,
+        resetPasswordExpire: Date.now() + 24 * 60 * 60 * 1000,
+      }
+    );
+    setPasswordUrl = `${base}/auth/reset-password?${convertQueryString({ resetToken })}`;
+  } catch (err) {
+    console.error("[sendClientPasswordReset] reset-token generation failed:", err.message);
+  }
+
+  await sendEmail({
+    email,
+    subject: "Your Dooit Login Details & Password Setup",
+    message: clientCredentialsHtml({
+      name,
+      email,
+      tempPassword: null, // never re-expose a temporary password on resend
+      setPasswordUrl,
+      loginUrl,
+    }),
+  });
+
+  res.status(200).json({
+    success: true,
+    message: `Password reset email sent to ${email}`,
   });
 });
 

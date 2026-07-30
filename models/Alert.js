@@ -94,6 +94,13 @@ const AlertSchema = new Schema(
     analyst: { type: Schema.Types.ObjectId, ref: 'Users', default: null, index: true },
     transaction: { type: Schema.Types.ObjectId, ref: 'Transaction', default: null },
 
+    // Whether the alert came from the rule engine or an AI model.
+    alertOrigin: {
+      type: String,
+      enum: ["Rule Based", "AI Based"],
+      default: "Rule Based",
+    }, 
+
     // ── Multi-tenant ─────────────────────────────────────────────────────
     client: { type: Schema.Types.ObjectId, ref: 'Client', default: null, index: true },
     branch: { type: Schema.Types.ObjectId, ref: 'Branch', default: null, index: true },

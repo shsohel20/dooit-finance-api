@@ -483,15 +483,21 @@ exports.getStaffByRoleId = asyncHandler(async (req, res, next) => {
   const limit = parseInt(req.query.limit, 10) || 10;
   const skip = (page - 1) * limit;
 
+  // Scope the Staff query to the caller's tenant as well, so records are
+  // matched on both the resolved users and the Staff doc's own client/branch.
+  const staffFilter = { user: { $in: userIds } };
+  if (client) staffFilter.client = client;
+  if (branch) staffFilter.branch = branch;
+
   const [staff, total] = await Promise.all([
-    Staff.find({ user: { $in: userIds } })
+    Staff.find(staffFilter)
       .populate("user", "name userName email role isActive")
       .populate("client", "name")
       .populate("branch", "name")
       .skip(skip)
       .limit(limit)
       .sort("-createdAt"),
-    Staff.countDocuments({ user: { $in: userIds } }),
+    Staff.countDocuments(staffFilter),
   ]);
 
   return res.status(200).json({

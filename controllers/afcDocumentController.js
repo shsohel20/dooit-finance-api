@@ -3,7 +3,7 @@ const AfcDocument = require("../models/AfcDocument");
 const PolicyHub = require("../models/PolicyHub");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
-const puppeteer = require("puppeteer");
+const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 const { marked } = require("marked");
 const { importDocxToHtml, sanitizeForEditor } = require("../utils/docxImportService");
 const { convertHtmlToDocx } = require("../utils/docxExportService");
@@ -165,7 +165,7 @@ exports.downloadAfcDocumentPDF = asyncHandler(async (req, res, next) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    browser = await launchPdfBrowser();
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     const pdfBuffer = await page.pdf({ format: "A4" });

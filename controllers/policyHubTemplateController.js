@@ -3,7 +3,7 @@ const PolicyHubTemplate = require("../models/PolicyHubTemplate");
 const PolicyHub = require("../models/PolicyHub");
 const PolicyHubVersion = require("../models/PolicyHubVersion");
 const ErrorResponse = require("../utils/errorResponse");
-const puppeteer = require("puppeteer");
+const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 const { importDocxToHtml } = require("../utils/docxImportService");
 const { convertHtmlToDocx } = require("../utils/docxExportService");
 const { extractHeaderFooter } = require("../utils/docxSectionService");
@@ -326,10 +326,7 @@ exports.exportToPdf = asyncHandler(async (req, res, next) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
+    browser = await launchPdfBrowser();
     const page = await browser.newPage();
     await page.setContent(htmlContent, { waitUntil: "networkidle0" });
     const pdfBuffer = await page.pdf({ format: "A4" });

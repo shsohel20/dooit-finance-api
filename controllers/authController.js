@@ -11,6 +11,7 @@ const { hashForSearch } = require("../utils/encryption");
 const { resolveMembership } = require("../utils/resolveMembership");
 const { otpVerificationHtml, passwordResetHtml } = require("../utils/email-template/otpEmailTemplate");
 const { getRawEmail, getRawName } = require("../utils/rawUserFields");
+const { convertQueryString } = require("../utils");
 
 // ─── Token response ───────────────────────────────────────────────────────────
 // membership = the resolved UserType row (active hat); pass {} when unknown.
@@ -400,6 +401,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   #swagger.responses[404] = { description: 'Email not found', schema: { $ref: '#/definitions/ErrorResponse' } }
   #swagger.security = [] // public
 */
+  const { token = null, cid = null, client = null } = req?.body
   const user = await User.findOne({ emailHash: hashForSearch(req.body.email) });
   if (!user) {
     return next(new ErrorResponse("The email address is not valid", 404));
@@ -411,7 +413,26 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     { resetPasswordToken: user.resetPasswordToken, resetPasswordExpire: user.resetPasswordExpire }
   );
 
-  const resetUrl = `${req.body.clientUrl}/auth/reset-password?${resetToken}`;
+  let resetUrl = '';
+  const url = req?.body?.clientUrl ?? req.body.url ?? "";
+
+  if (token && cid) {
+    const qry = {
+      resetToken,
+      token,
+      cid,
+      client
+    }
+    resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
+
+  } else {
+    const qry = {
+      resetToken,
+
+    }
+    resetUrl = `${url}/auth/reset-password?${convertQueryString(qry)}`;
+
+  }
   const message = passwordResetHtml(resetUrl, await getRawName(user._id));
 
   try {
@@ -429,6 +450,7 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Email could not be sent", 500));
   }
 });
+
 
 // ─── Reset Password ───────────────────────────────────────────────────────────
 // @route  PUT /api/v1/auth/reset-password/:resettoken

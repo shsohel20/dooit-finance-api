@@ -1,18 +1,33 @@
 const mongoose = require("mongoose");
+const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
+const { hashForSearch } = require("../utils/encryption");
 
 const isEmpty = (v) =>
     v === undefined || v === null || v === "" || v === "null";
 
 const toBool = (v) => v === "true" || v === true;
 
+// Only stored scalar fields can be sorted at the DB level. Referenced fields
+// (user.name) and computed virtuals (riskLabel/riskScore) are excluded.
+const SORTABLE = new Set([
+    "createdAt",
+    "updatedAt",
+    "uid",
+    "country",
+    "kycStatus",
+    "sequence",
+]);
+
+const parseSort = (raw) => {
+    if (isEmpty(raw)) return "-createdAt";
+    const field = raw.startsWith("-") ? raw.slice(1) : raw;
+    return SORTABLE.has(field) ? raw : "-createdAt";
+};
+
 module.exports =
     ({ model, populate = null, searchFields = [] } = {}) =>
         async (req, res, next) => {
             try {
-                // const Customer = mongoose.model("Customer");
-
-                console.log(req?.user?.client?._id)
-                console.log(req?.user?.branch?._id)
                 const client = req?.user?.client?._id || null;
                 const branch = req?.user?.branch?._id || null;
 
@@ -26,57 +41,84 @@ module.exports =
                 if (branch) dbQuery["relations.branch"] = branch;
 
                 // simple indexed filters
-                [
-                    "kycStatus",
-                    "country",
-                    "isActive",
-                    "isPep",
-                    "sanction",
-                ].forEach((field) => {
-                    if (!isEmpty(req.query[field])) {
-                        dbQuery[field] =
-                            field === "isActive" ||
-                                field === "isPep" ||
-                                field === "sanction"
-                                ? toBool(req.query[field])
-                                : req.query[field];
-                    }
-                });
+                ["kycStatus", "country", "isActive", "isPep", "sanction"].forEach(
+                    (field) => {
+                        if (!isEmpty(req.query[field])) {
+                            dbQuery[field] =
+                                field === "isActive" ||
+                                    field === "isPep" ||
+                                    field === "sanction"
+                                    ? toBool(req.query[field])
+                                    : req.query[field];
+                        }
+                    },
+                );
 
-                // relation filters
-                if (!isEmpty(req.query.relationType)) {
-                    dbQuery["relations.type"] = req.query.relationType;
-                }
+                // relation type — accept both `type` (queue list) and `relationType`
+                const relType = req.query.relationType ?? req.query.type;
+                if (!isEmpty(relType)) dbQuery["relations.type"] = relType;
 
                 if (!isEmpty(req.query.clientId)) {
                     dbQuery["relations.client"] = req.query.clientId;
                 }
-
                 if (!isEmpty(req.query.branchId)) {
                     dbQuery["relations.branch"] = req.query.branchId;
                 }
 
+                // Customer ID — prefix/contains match (UI strips a leading '#')
+                if (!isEmpty(req.query.uid)) {
+                    const uid = String(req.query.uid).replace(/^#/, "").trim();
+                    if (uid) dbQuery.uid = new RegExp(uid, "i");
+                }
+
                 // -----------------------------
-                // 2. Deep text search
+                // 2. OR-group filters (combined via $and so they don't clobber)
                 // -----------------------------
+                const andGroups = [];
+
                 if (!isEmpty(req.query.q) && searchFields.length) {
                     const regex = new RegExp(req.query.q, "i");
-                    dbQuery.$or = searchFields.map((path) => ({
-                        [path]: regex,
-                    }));
+                    andGroups.push({ $or: searchFields.map((path) => ({ [path]: regex })) });
                 }
+
+                // Email filter — the account email lives on the encrypted Users
+                // ref (AES-256-GCM) and is looked up by HMAC hash, so an *exact*
+                // email matches the linked user via emailHash; partial input still
+                // substring-matches the customer's own KYC/metadata email fields.
+                if (!isEmpty(req.query.email)) {
+                    const email = String(req.query.email).trim();
+                    const regex = new RegExp(email, "i");
+                    const orGroup = [
+                        { "personalKyc.personal_form.contact_details.email": regex },
+                        { "metadata.email": regex },
+                    ];
+                    try {
+                        const User = mongoose.model("Users");
+                        const matched = await User.find({ emailHash: hashForSearch(email) })
+                            .select("_id")
+                            .lean();
+                        if (matched.length) {
+                            orGroup.push({ user: { $in: matched.map((u) => u._id) } });
+                        }
+                    } catch (e) {
+                        // Users model not registered / hash secret missing — fall back
+                        // to the customer-field substring match only.
+                    }
+                    andGroups.push({ $or: orGroup });
+                }
+
+                if (andGroups.length) dbQuery.$and = andGroups;
 
                 // -----------------------------
                 // 3. Base mongoose query
                 // -----------------------------
                 let baseQuery = model.find(dbQuery);
-
                 if (populate) baseQuery = baseQuery.populate(populate);
 
                 // -----------------------------
-                // 4. Sorting
+                // 4. Sorting (whitelisted)
                 // -----------------------------
-                const sort = req.query.sort || "-createdAt";
+                const sort = parseSort(req.query.sort);
                 baseQuery = baseQuery.sort(sort);
 
                 // -----------------------------
@@ -87,7 +129,7 @@ module.exports =
                 const skip = (page - 1) * limit;
 
                 // -----------------------------
-                // 6. In-memory filters (virtuals)
+                // 6. In-memory filters (computed risk virtuals)
                 // -----------------------------
                 const needsMemoryFilter =
                     !isEmpty(req.query.minRiskScore) ||
@@ -98,10 +140,16 @@ module.exports =
                 let results = [];
 
                 if (needsMemoryFilter) {
-                    // fetch all (DB-filtered)
-                    const docs = await baseQuery
-                        .lean({ virtuals: true })
-                        .exec();
+                    // riskLabel/riskScore are computed (no lean-virtuals plugin), so
+                    // fetch the DB-filtered set, compute risk per doc, then filter.
+                    const docs = await baseQuery.lean().exec();
+
+                    docs.forEach((doc) => {
+                        const ra = buildRiskAssessmentFromCustomer(doc);
+                        doc.riskScore = ra.riskScore;
+                        doc.riskLabel = ra.riskLabel;
+                        doc.riskAssessment = ra.riskAssessment;
+                    });
 
                     const filtered = docs.filter((doc) => {
                         if (
@@ -109,28 +157,22 @@ module.exports =
                             doc.riskScore < Number(req.query.minRiskScore)
                         )
                             return false;
-
                         if (
                             !isEmpty(req.query.maxRiskScore) &&
                             doc.riskScore > Number(req.query.maxRiskScore)
                         )
                             return false;
-
                         if (
                             !isEmpty(req.query.riskLabel) &&
                             doc.riskLabel !== req.query.riskLabel
                         )
                             return false;
-
                         return true;
                     });
 
                     totalRecords = filtered.length;
                     results = filtered.slice(skip, skip + limit);
-
-                    if (populate) {
-                        results = await model.populate(results, populate);
-                    }
+                    // docs are already populated (baseQuery.populate before .lean())
                 } else {
                     // DB-level pagination
                     totalRecords = await model.countDocuments(dbQuery);

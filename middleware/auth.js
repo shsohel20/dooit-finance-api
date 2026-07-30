@@ -9,6 +9,7 @@ const asyncHandler = require("./async");
 const { generateQR } = require("../utils/qrService");
 const { runWithRole } = require("../utils/roleEncryptionPlugin");
 const RolePermission = require("../models/RolePermission");
+const CompanyKyc = require("../models/CompanyKyc");
 
 exports.protect = asyncHandler(async (req, res, next) => {
   let token;
@@ -30,7 +31,9 @@ exports.protect = asyncHandler(async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
     // User is now identity-only — load just the user record (no scalar role/tenant fields).
-    const u = await User.findById(decoded.id).lean();
+    const u = await User.findById(decoded.id).populate('customer client branch').lean();
+
+
     if (!u) {
       return next(new ErrorResponse("Not authorize to access this route", 401));
     }
@@ -44,37 +47,69 @@ exports.protect = asyncHandler(async (req, res, next) => {
 
     // Load rich client/branch objects by the active tenant IDs from the token.
     // This is unambiguous even when a user belongs to several clients.
-    let [client, branch] = await Promise.all([
-      clientId ? Client.findById(clientId).lean() : Promise.resolve(null),
-      branchId ? Branch.findById(branchId).populate("client").lean() : Promise.resolve(null),
-    ]);
+    // let [client, branch] = await Promise.all([
+    //   clientId ? Client.findById(clientId).lean() : Promise.resolve(null),
+    //   branchId ? Branch.findById(branchId).populate("client").lean() : Promise.resolve(null),
+    // ]);
 
     // Fallback: if the JWT has no clientId/branchId (stale UserType seeded before
     // Client/Branch was created), discover by User reference and self-heal the UserType row.
-    if (!client && u.userType === "client") {
-      client = await Client.findOne({ user: u._id }).lean();
-      if (client && decoded.userTypeId) {
-        UserType.findOneAndUpdate(
-          { _id: decoded.userTypeId },
-          { $set: { clientBelongs: client._id } }
-        ).catch(() => { });
-      }
-    }
-    if (!branch && u.userType === "branch") {
-      branch = await Branch.findOne({ user: u._id }).populate("client").lean();
-      if (branch && decoded.userTypeId) {
-        UserType.findOneAndUpdate(
-          { _id: decoded.userTypeId },
-          { $set: { branchBelongs: branch._id, clientBelongs: branch.client?._id ?? null } }
-        ).catch(() => { });
-      }
-    }
+    // if (!client && u.userType === "client") {
+    //   client = await Client.findOne({ user: u._id }).lean();
+    //   if (client && decoded.userTypeId) {
+    //     UserType.findOneAndUpdate(
+    //       { _id: decoded.userTypeId },
+    //       { $set: { clientBelongs: client._id } }
+    //     ).catch(() => { });
+    //   }
+    // }
+    // if (!branch && u.userType === "branch") {
+    //   branch = await Branch.findOne({ user: u._id }).populate("client").lean();
+    //   if (branch && decoded.userTypeId) {
+    //     UserType.findOneAndUpdate(
+    //       { _id: decoded.userTypeId },
+    //       { $set: { branchBelongs: branch._id, clientBelongs: branch.client?._id ?? null } }
+    //     ).catch(() => { });
+    //   }
+    // }
 
-    const resolvedClientId = client?._id ?? clientId ?? null;
-    const resolvedBranchId = branch?._id ?? branchId ?? null;
+    //  "individual",
+    // "company",
+    // "partnership",
+    // "government_body",
+    // "association",
+    // "cooperative",
+    // "trust",
+
+
+
+    // let company = [];
+
+    // if (u?.customer) {
+    //   u.customer.relations.forEach(async (relation) => {
+    //     if (relation) {
+    //       const filterObj = {
+    //         client: relation.client,
+    //         branch: relation.branch,
+    //         customer: u?.customer._id,
+
+    //       };
+    //       const c = await CompanyKyc.find(filterObj)
+    //       company = c;
+    //     }
+    //   });
+    // }
+    // console.log(company)
+    // let [company, trust] = await Promise.all([
+    //   clientId ? Client.findById(clientId).lean() : Promise.resolve(null),
+    //   branchId ? Branch.findById(branchId).populate("client").lean() : Promise.resolve(null),
+    // ]);
+
+    const resolvedClientId = u.client?._id ?? null;
+    const resolvedBranchId = u.branch?._id ?? null;
 
     let qr = null;
-    if (resolvedClientId) {
+    if (resolvedClientId && (u.userType === 'client' || u.userType === 'branch')) {
       qr = await generateQR({
         clientId: resolvedClientId.toString(),
         branchId: resolvedBranchId ? resolvedBranchId.toString() : null,
@@ -85,10 +120,11 @@ exports.protect = asyncHandler(async (req, res, next) => {
     req.user = {
       ...u,
       id: u._id,
+
       clientBelongs: resolvedClientId,
       branchBelongs: resolvedBranchId,
-      client: client ?? branch?.client ?? null,
-      branch: branch ? { ...branch, client: branch.client?._id } : null,
+      client: u?.client ?? u?.branch?.client ?? null,
+      branch: u?.branch ? { ...u?.branch, client: branch.client?._id } : null,
       qr,
     };
 

@@ -29,6 +29,10 @@ const {
 } = require("../utils/sumsubClient");
 const { toAlpha3 } = require("../utils/countryUtils");
 const { syncJourneyStatus } = require("./journeyService");
+const {
+  upsertMatchesForCustomer,
+  recomputeCustomerAmlStatus,
+} = require("./amlMatchService");
 
 const LEVEL_NAME = () => process.env.SUMSUB_LEVEL_NAME || "kyc-level";
 
@@ -193,7 +197,7 @@ const ensureSumsubApplicant = async (customer) => {
       createData?.description ||
       createData?.message ||
       JSON.stringify(createData);
-    throw new Error(`Sumsub createApplicant failed (${createStatus}): ${msg}`);
+    throw new Error(`Dooit createApplicant failed (${createStatus}): ${msg}`); //Sumsub
   }
 
   customer.sumsubApplicantId = createData.id;
@@ -311,7 +315,10 @@ const handleKycResult = async (
   // ── Update all Sumsub-linked journeys ─────────────────────────────────────
   const journeys = await OnboardingJourney.find({
     customer: customer._id,
-    provider: "sumsub",
+    // "dooit" is the client-facing brand for our KYC provider. Match it plus
+    // any legacy "sumsub"-labelled journeys so webhook verdicts reach every
+    // journey (manual-import journeys are created as "dooit").
+    provider: { $in: ["sumsub", "dooit"] },
   });
 
   const providerData = {
@@ -367,14 +374,17 @@ const handleKycResult = async (
 /**
  * Process a Sumsub AML webhook result:
  *   - Fetches full AML case (riskLabels + hits)
- *   - Updates Customer.amlStatus, isPep, sanction, amlRiskLabels, amlHits
+ *   - Updates Customer.amlRiskLabels + amlHits (raw), amlCheckedAt, amlVendor
+ *   - Inserts an AmlMatch for each new hit only (existing matches, and any
+ *     analyst decisions on them, are left untouched)
+ *   - Derives Customer.amlStatus / isPep / sanction from the *matches*, NOT the
+ *     KYC review answer — a GREEN identity can still carry PEP/sanction hits
  *   - Updates OnboardingJourney review step
  *
  * @param {Customer} customer
- * @param {string}   reviewAnswer  — 'GREEN' | 'RED' | 'YELLOW'
  * @param {string}   applicantId
  */
-const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
+const handleAmlResult = async (customer, applicantId) => {
   // ── Fetch full AML case for riskLabels + hits ──────────────────────────────
   let riskLabels = [],
     hits = [],
@@ -393,34 +403,38 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
     console.error("[SumsubService] Failed to fetch AML case:", err.message);
   }
 
-  // ── Map to our amlStatus enum ──────────────────────────────────────────────
-  const amlStatus =
-    reviewAnswer === "GREEN"
-      ? "clear"
-      : reviewAnswer === "YELLOW"
-        ? "yellow"
-        : "flagged";
-
-  // ── Update Customer ────────────────────────────────────────────────────────
-  customer.amlStatus = amlStatus;
+  // ── Persist raw case data on the Customer (kept for back-compat / export) ───
   customer.amlRiskLabels = riskLabels;
   customer.amlHits = hits;
   customer.amlCheckedAt = new Date();
   customer.amlVendor = vendor;
-  if (riskLabels.includes("pep")) customer.isPep = true;
-  if (riskLabels.includes("sanctions")) customer.sanction = true;
   await customer.save();
+
+  // ── Insert new match records + derive amlStatus from them ───────────────────
+  // only new hits are added; existing dispositions are untouched. recompute sets amlStatus/isPep/sanction.
+  await upsertMatchesForCustomer(customer, hits);
+  const amlStatus = await recomputeCustomerAmlStatus(customer._id);
+  customer.amlStatus = amlStatus; // keep the in-memory doc consistent for callers
 
   // ── Update all Sumsub-linked journeys — review step ───────────────────────
   const journeys = await OnboardingJourney.find({
     customer: customer._id,
-    provider: "sumsub",
+    // "dooit" is the client-facing brand for our KYC provider. Match it plus
+    // any legacy "sumsub"-labelled journeys so webhook verdicts reach every
+    // journey (manual-import journeys are created as "dooit").
+    provider: { $in: ["sumsub", "dooit"] },
   });
 
-  const reviewStepStatus = amlStatus === "clear" ? "approved" : "rejected";
+  // clear → approved · flagged → rejected · yellow (needs review) → in_progress
+  const reviewStepStatus =
+    amlStatus === "clear"
+      ? "approved"
+      : amlStatus === "flagged"
+        ? "rejected"
+        : "in_progress";
   const amlNote =
     amlStatus !== "clear"
-      ? `AML screening: ${riskLabels.join(", ") || reviewAnswer}`
+      ? `AML screening: ${riskLabels.join(", ") || amlStatus}`
       : "AML screening: clear";
 
   for (const journey of journeys) {
@@ -432,7 +446,7 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
         vendor,
         checkedAt: new Date(),
       },
-      rejectionReason: amlStatus !== "clear" ? amlNote : undefined,
+      rejectionReason: amlStatus === "flagged" ? amlNote : undefined,
       bumpAttempt: false,
     });
     journey.recordEvent({
@@ -446,6 +460,45 @@ const handleAmlResult = async (customer, reviewAnswer, applicantId) => {
     syncJourneyStatus(journey);
     await journey.save();
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 6b. handleVerificationChecks  (called from webhook handler after handleAmlResult)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the latest PERSON verification checks for an applicant and persist the
+ * raw array on Customer.checks (used for the identity/DVS check breakdown).
+ *
+ * Failures are swallowed (logged only) so a checks-fetch problem never blocks
+ * the webhook 200 — the AML result has already been persisted by this point.
+ *
+ * @param {Customer} customer
+ * @param {string}   applicantId
+ * @returns {Promise<Array>} the persisted checks array (empty on failure)
+ */
+const handleVerificationChecks = async (customer, applicantId) => {
+  let checks = [];
+
+  try {
+    const { status, data } = await sumsubGet(
+      `/resources/checks/latest?applicantId=${applicantId}&type=PERSON`,
+    );
+    if (status === 200) {
+      checks = data?.checks || [];
+    }
+  } catch (err) {
+    console.error(
+      "[SumsubService] Failed to fetch verification checks:",
+      err.message,
+    );
+  }
+
+  // Full reassignment → Mongoose tracks this without markModified.
+  customer.checks = checks;
+  await customer.save();
+
+  return checks;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -715,6 +768,12 @@ const DOC_TYPE_TO_SUMSUB_SUBTYPE = {
   back: "BACK_SIDE",
 };
 
+// Sumsub only accepts FRONT_SIDE/BACK_SIDE on double-sided document types.
+// Single-sided docs (PASSPORT, etc.) must omit idDocSubType entirely —
+// the UI sends docType "id_front" even for passports, so the sub-type has
+// to be gated on the resolved idDocType, not the incoming docType.
+const DOUBLE_SIDED_DOC_TYPES = new Set(["ID_CARD", "DRIVERS", "RESIDENCE_PERMIT"]);
+
 /**
  * Build the Sumsub /info/idDoc metadata object from OCR results.
  *
@@ -732,8 +791,9 @@ const buildIdDocMetadata = (
 ) => {
   const cardTypeLower = (ocrCardType || "").toLowerCase();
   const idDocType = OCR_CARD_TYPE_TO_SUMSUB_DOC_TYPE[cardTypeLower] || "OTHER";
-  const idDocSubType =
-    DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null;
+  const idDocSubType = DOUBLE_SIDED_DOC_TYPES.has(idDocType)
+    ? DOC_TYPE_TO_SUMSUB_SUBTYPE[(docType || "").toLowerCase()] || null
+    : null;
 
   const rawCountry = ocrFields.issuing_country || fallbackCountry || null;
   const docCountry = rawCountry ? toAlpha3(rawCountry) || null : null;
@@ -801,6 +861,9 @@ const uploadDocToSumsub = (
   metadata,
 ) => {
   const form = buildDocFormData(metadata, imageBuffer, mimeType, filename);
+
+  console.log({form});
+  
   return sumsubPostForm(
     `/resources/applicants/${applicantId}/info/idDoc`,
     form,
@@ -927,6 +990,7 @@ module.exports = {
   triggerAmlCheck,
   handleKycResult,
   handleAmlResult,
+  handleVerificationChecks,
   syncApplicantFromOcr,
   buildIdDocMetadata,
   uploadDocToSumsub,

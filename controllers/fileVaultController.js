@@ -33,6 +33,7 @@ exports.uploadFile = asyncHandler(async (req, res, next) => {
     #swagger.responses[400] = { description: 'No file provided' }
     #swagger.responses[401] = { description: 'Unauthorized' }
   */
+
   if (!req.file) {
     return next(new ErrorResponse("Please upload a file", 400));
   }
@@ -40,6 +41,7 @@ exports.uploadFile = asyncHandler(async (req, res, next) => {
   const { buffer, originalname, mimetype } = req.file;
 
   const result = await fileVaultService.uploadFile(buffer, originalname, mimetype);
+
 
   res.status(200).json(
     result

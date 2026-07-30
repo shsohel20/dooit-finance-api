@@ -170,7 +170,7 @@ const ClientSchema = new Schema(
     // official identifiers
     registrationNumber: { type: String, trim: true, index: true, sparse: true },
     taxId: { type: String, trim: true, index: true, sparse: true },
-
+ 
     // contact info
     email: { type: String, trim: true, lowercase: true, index: true, sparse: true },
     phone: { type: String, trim: true },
@@ -197,6 +197,9 @@ const ClientSchema = new Schema(
 
     // Structured AUSTRAC questionnaire answers
     riskQuestions: { type: RiskQuestionsSchema, default: () => ({}) },
+
+    // Osint Status
+    osintStatus: { type: Boolean, default: false },
 
     settings: {
       type: Schema.Types.Mixed, default: {

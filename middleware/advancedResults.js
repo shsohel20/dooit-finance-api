@@ -285,8 +285,17 @@ const advancedResults =
           (match) => `$${match}`
         );
 
+        // Optional base/tenant scoping injected by a preceding middleware
+        // (e.g. scopeUserListByTenant). Merged into BOTH the find and the count
+        // so pagination totals stay consistent with the returned rows.
+        const baseFilter =
+          req.advancedFilter && typeof req.advancedFilter === "object"
+            ? req.advancedFilter
+            : {};
+        const parsedFilter = { ...JSON.parse(queryStr), ...baseFilter };
+
         // Base mongoose query (no pagination applied yet)
-        let baseQuery = model.find(JSON.parse(queryStr));
+        let baseQuery = model.find(parsedFilter);
 
         // Title-specific quick search (keeps compatibility with your existing logic)
         if (req.query.name && req.query.name.trim() !== "") {
@@ -355,7 +364,7 @@ const advancedResults =
         } else {
           // DB-level pagination
           // compute totalRecords correctly (title special-case handled elsewhere if needed)
-          const countQuery = model.countDocuments(JSON.parse(queryStr));
+          const countQuery = model.countDocuments(parsedFilter);
           totalRecords = await countQuery.exec();
 
           let pagedQuery = baseQuery.skip(startIndex).limit(limit);
