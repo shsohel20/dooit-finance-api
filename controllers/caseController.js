@@ -82,13 +82,24 @@ const populateCase = (query) =>
     .populate('assignedTo', 'name email avatar')
     .populate('reviewer', 'name email avatar')
     .populate('watchers', 'name email avatar')
-    .populate('linkedAlerts', 'uid caseType riskScore riskLabel status createdAt')
+    // ruleId/ruleName/explanation drive the "Alert Type" and "Detection Rule"
+    // stats on the case detail page.
+    .populate(
+      'linkedAlerts',
+      'uid caseType riskScore riskLabel status createdAt ruleId ruleName explanation alertOrigin'
+    )
     .populate({
+      // kycStatus/isPep/sanction/country back the customer-profile screening
+      // badges. Encrypted fields (name, phone) are deliberately excluded — a
+      // lean() query bypasses decryptForRole and would return ciphertext.
       path: 'linkedCustomers',
-      select: 'uid user personalKyc relations',
+      select: 'uid user personalKyc relations kycStatus isPep sanction country',
       populate: { path: 'user', select: 'name email photoUrl avatar' },
     })
-    .populate('linkedTransactions', 'uid amount currency convertedAmountAUD type status timestamp sender receiver riskScore riskFlags');
+    .populate(
+      'linkedTransactions',
+      'uid amount currency convertedAmountAUD type status timestamp sender receiver riskScore riskFlags channel'
+    );
 
 // Σ linked-transaction value in AUD (converted where available, else raw amount).
 const sumNetActivity = (txns) =>
@@ -223,6 +234,8 @@ exports.getCaseById = asyncHandler(async (req, res, next) => {
     caseDoc.decision === 'sar_filed' ||
     !!(await SMR.exists({ caseId: caseDoc._id, status: 'approved' }));
 
+  // Regulatory filings (ECDD/SMR/TTR/IFTI/GFS/RFI) are served by
+  // GET /cases/:id/reports — this endpoint stays the case document only.
   res.status(200).json({
     succeed: true,
     data: { ...caseDoc, relatedCases, netActivity, sarFiled },

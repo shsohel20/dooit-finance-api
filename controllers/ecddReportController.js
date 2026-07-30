@@ -4,7 +4,11 @@ const asyncHandler = require("../middleware/async");
 const Alert = require("../models/Alert");
 const EcddReport = require("../models/EcddReport");
 const ErrorResponse = require("../utils/errorResponse");
-const { hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
+const {
+  resolveCaseLinkage,
+  hasLinkageRef,
+  linkageOverrides,
+} = require("../utils/resolveCaseLinkage");
     const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 
 const csvParser = require("csv-parser");
@@ -145,10 +149,27 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
     }
   }
 
-  // Two origins:
-  //  • TM-origin (default): caseNumber must resolve to a TM Alert
-  //  • CRA-origin: riskAssessment supplied — backs a CRA ECDD gate; no Alert needed
-  let alert = null;
+  // Three origins:
+  //  • Case-origin: `caseId` picked in the form — attaches straight to the Case
+  //  • TM-origin:   caseNumber resolves to a TM Alert (Case derived if escalated)
+  //  • CRA-origin:  riskAssessment supplied — backs a CRA ECDD gate; no Alert needed
+  //
+  // Resolution goes through the same shared helper SMR/TTR/IFTI/GFS/RFI use.
+  // Resolve the two linkages separately: resolveCaseLinkage treats `caseId` and
+  // `caseNumber` as one ref (caseId wins), so passing both would silently drop
+  // the Alert. caseId is the hub, alert is provenance — keep both.
+  const alertLink = await resolveCaseLinkage({
+    caseNumber,
+    alertId: payload.alert || payload.alertId,
+  });
+  const caseLink = payload.caseId
+    ? await resolveCaseLinkage({ caseId: payload.caseId })
+    : null;
+
+  // An explicitly picked Case wins; otherwise fall back to Alert.linkedCase.
+  const resolvedCaseId = caseLink?.caseId || alertLink.caseId || null;
+
+  let alert = alertLink.alertDoc || null;
   let assessment = null;
 
   if (riskAssessmentId) {
@@ -160,28 +181,29 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
         new ErrorResponse(`Risk assessment not found: ${riskAssessmentId}`, 404)
       );
     }
-    if (caseNumber) alert = await Alert.findOne({ uid: caseNumber }); // optional here
-  } else {
-    alert = await Alert.findOne({ uid: caseNumber });
-
-    if (!alert) {
-      return next(
-        new ErrorResponse(
-          `Alert not found by CASE Number or Alert UID ${caseNumber}`,
-          404
-        )
-      );
-    }
+  } else if (!resolvedCaseId && !alert) {
+    // Nothing to attach to — neither an explicit Case nor a resolvable Alert.
+    return next(
+      new ErrorResponse(
+        `No Case or Alert found for reference ${payload.caseId || caseNumber}`,
+        404
+      )
+    );
   }
 
   const submitObj = {
     ...payload,
     client,
     branch,
-    caseId: alert?.linkedCase || null, // Case hub (null until alert is escalated)
-    alert: alert?._id || null,         // originating TM Alert (provenance)
+    caseId: resolvedCaseId,          // Case hub (explicit pick, else Alert.linkedCase)
+    alert: alertLink.alert || null,  // originating TM Alert (provenance)
     riskAssessment: assessment?._id || null,
-    customer: payload.customer || assessment?.customer || null,
+    customer:
+      payload.customer ||
+      caseLink?.customer ||
+      alertLink.customer ||
+      assessment?.customer ||
+      null,
     generatedBy: user || null,
   };
   const report = await EcddReport.create(submitObj);
