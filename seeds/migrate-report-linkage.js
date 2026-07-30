@@ -1,6 +1,6 @@
 // seeds/migrate-report-linkage.js
 //
-// Phase 2 of docs/43-CORE-ENTITY-LINKING-ROADMAP.md.
+// Phase 2 of docs/66-CORE-ENTITY-LINKING-ROADMAP.md.
 // Backfills the canonical linkage (Case = hub, Alert = provenance) onto EXISTING
 // report/RFI documents created before the Phase 1/3 model+controller changes.
 //

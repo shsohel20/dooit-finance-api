@@ -170,7 +170,7 @@ const RuleEngineSchema = new Schema(
                         type: String,
                         // 'create_report' (Phase 0 §10 Q2) auto-drafts a TTR/IFTI for analyst
                         // review. Schema-ready; execution lands when a rule-evaluation engine
-                        // that processes actions[] is built (none today — see doc 43 Phase 6).
+                        // that processes actions[] is built (none today — see doc 66 Phase 6).
                         enum: ['create_alert', 'assign', 'notify', 'escalate', 'block', 'create_report'],
                         required: true,
                     },

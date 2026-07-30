@@ -1,6 +1,6 @@
 // seeds/migrate-transaction-case-link.js
 //
-// Phase 5 of docs/43-CORE-ENTITY-LINKING-ROADMAP.md.
+// Phase 5 of docs/66-CORE-ENTITY-LINKING-ROADMAP.md.
 // Backfills Transaction.investigation.{case,caseId,flagged} from existing
 // Case.linkedTransactions[]. Idempotent — re-sets the same values on re-run.
 //

@@ -1,7 +1,7 @@
 // utils/transactionCaseLink.js
 //
 // Keeps Transaction.investigation.{case,caseId,flagged} in sync with
-// Case.linkedTransactions[]. Phase 5 of docs/43-CORE-ENTITY-LINKING-ROADMAP.md.
+// Case.linkedTransactions[]. Phase 5 of docs/66-CORE-ENTITY-LINKING-ROADMAP.md.
 
 /**
  * Point the given transactions at a Case (sets investigation.case + caseId + flagged).

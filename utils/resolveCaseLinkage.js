@@ -7,7 +7,7 @@ const mongoose = require("mongoose");
  *
  * Background: historically the report/RFI UI sent the *Alert* uid (AL-…) or
  * _id in `caseNumber`/`caseId`, and those fields were `ref: 'Alert'`. Reports
- * now reference the **Case** (see docs/43-CORE-ENTITY-LINKING-ROADMAP.md), so
+ * now reference the **Case** (see docs/66-CORE-ENTITY-LINKING-ROADMAP.md), so
  * this helper accepts the legacy identifiers, finds the Alert, and derives the
  * owning Case from `Alert.linkedCase`. It also accepts a real Case uid/_id, so
  * callers can migrate without breaking older clients.
