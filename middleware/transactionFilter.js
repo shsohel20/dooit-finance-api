@@ -86,7 +86,11 @@ const transactionFilter = (model) => async (req, res, next) => {
     const filter = {};
 
     if (client) filter.client = client;
-    if (branch) filter.branch = branch;
+    // Branch users must still see client-level rows that were never assigned to
+    // a branch. `$in: [branch, null]` matches the branch, an explicit null, and
+    // documents where the field is absent — and unlike `$or` it cannot collide
+    // with the `$or` the search filter builds below.
+    if (branch) filter.branch = { $in: [branch, null] };
 
     // Status — comma-separated OR repeated params: ?status=pending&status=completed
     const statusVals = toArray(req.query.status);
@@ -129,7 +133,6 @@ const transactionFilter = (model) => async (req, res, next) => {
     if (req.query.amountMin || req.query.amountMax) {
       filter.amount = {};
       if (req.query.amountMin) {
-        console.log(`${req.query.amountMin}`.bgRed)
         const v = parseFloat(req.query.amountMin);
         if (!isNaN(v)) filter.amount.$gte = v;
       }
