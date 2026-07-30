@@ -50,10 +50,27 @@ exports.createSMR = asyncHandler(async (req, res, next) => {
 
   // Resolve the investigation hub: accepts a Case id/uid OR a legacy Alert
   // id/uid, and derives the owning Case from Alert.linkedCase.
-  const link = await resolveCaseLinkage({
-    caseId: body.caseId,
+  //
+  // Resolved separately because resolveCaseLinkage collapses `caseId` and
+  // `caseNumber` into one ref (caseId wins) — sending both would drop the
+  // Alert. caseId is the hub, alert is provenance; keep both.
+  const alertLink = await resolveCaseLinkage({
     caseNumber: body.caseNumber,
+    alertId: body.alertId || body.alert,
   });
+  const caseLink = body.caseId
+    ? await resolveCaseLinkage({ caseId: body.caseId })
+    : null;
+
+  const link = {
+    // An explicitly picked Case wins; otherwise fall back to Alert.linkedCase.
+    caseId: caseLink?.caseId || alertLink.caseId || null,
+    alert: alertLink.alert || null,
+    customer: caseLink?.customer || alertLink.customer || null,
+    client: caseLink?.client || alertLink.client || null,
+    branch: caseLink?.branch || alertLink.branch || null,
+    caseNumber: alertLink.caseNumber || caseLink?.caseNumber || null,
+  };
 
   // create
   const smr = await SMR.create({
