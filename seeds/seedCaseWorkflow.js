@@ -24,6 +24,10 @@
  *   node seeds/seedCaseWorkflow.js --client=<id>   target a different client
  *   node seeds/seedCaseWorkflow.js --fresh         delete previous seed data first
  *   node seeds/seedCaseWorkflow.js --clean         delete previous seed data and exit
+ * cd api
+node seeds/seedCaseWorkflow.js --dry-run --rows=20 --client=6a447ec49effa00e718e4b45   # verify
+node seeds/seedCaseWorkflow.js --fresh   --rows=20 --client=6a447ec49effa00e718e4b45   # commit
+
  *
  * Everything created carries "SEED" inside its uid, which is how --fresh/--clean
  * find it. No non-seeded document is ever touched, except Alert.linkedCase /
@@ -53,6 +57,9 @@ const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 const argv = process.argv.slice(2);
 const FRESH = argv.includes("--fresh");
 const CLEAN_ONLY = argv.includes("--clean");
+// Build and validate every document without writing anything. Catches cast /
+// enum / required failures up front instead of part-way through a run.
+const DRY_RUN = argv.includes("--dry-run");
 
 // How many chains to create. Independent of how many customers exist — the
 // customer pool is cycled, so a client with 11 customers can still back 20
@@ -106,6 +113,28 @@ async function cleanSeedData() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Single write path for every document the seeder creates.
+ *
+ * Always validates first, so a cast/enum/required failure is reported against
+ * the model that caused it. Under --dry-run the validated instance is returned
+ * without saving — it still carries a generated _id, so the rest of the chain
+ * (alert → case → reports) links up and gets validated too.
+ */
+const persist = async (Model, doc) => {
+  const instance = new Model(doc);
+  try {
+    // Awaited rather than validateSync() so async validators (the unique-index
+    // check added by mongoose-unique-validator) finish before we disconnect,
+    // and so duplicate uids are caught too.
+    await instance.validate();
+  } catch (err) {
+    err.message = `${Model.modelName}: ${err.message}`;
+    throw err;
+  }
+  return DRY_RUN ? instance : Model.create(doc);
+};
+
 const displayName = (customer) => {
   const kyc = customer.personalKyc?.personal_form?.customer_details || {};
   const fromKyc = [kyc.given_name, kyc.surname].filter(Boolean).join(" ");
@@ -115,8 +144,20 @@ const displayName = (customer) => {
 const days = (n) => n * 24 * 60 * 60 * 1000;
 const iso = (d) => new Date(d);
 
+// TTR's AddressSchema keys the street as `fullStreetAddress`…
 const address = () => ({
   fullStreetAddress: "Level 12, 120 Collins Street",
+  city: "Melbourne",
+  state: "VIC",
+  postcode: "3000",
+  country: "Australia",
+});
+
+// …while SMR's uses `street`. Passing the wrong one is not an error — Mongoose
+// drops the unknown key in strict mode and leaves the address blank — so the
+// two shapes are kept separate deliberately.
+const smrAddress = () => ({
+  street: "Level 12, 120 Collins Street",
   city: "Melbourne",
   state: "VIC",
   postcode: "3000",
@@ -384,7 +425,7 @@ async function seed() {
     const when = new Date(Date.now() - i * 26 * 60 * 60 * 1000);
     const reference = `SEED-${STAMP}-${i + 1}`;
 
-    const txn = await Transaction.create({
+    const txn = await persist(Transaction, {
       ...tenant,
       uid: uid("TXN"),
       timestamp: when,
@@ -469,7 +510,7 @@ async function seed() {
 
     // 2 ── Alert ──────────────────────────────────────────────────────────────
     // uid keeps the AL- prefix so resolveCaseLinkage still identifies it.
-    const alert = await Alert.create({
+    const alert = await persist(Alert, {
       ...tenant,
       uid: uid("AL", "-"),
       transaction: txn._id,
@@ -495,7 +536,12 @@ async function seed() {
       closedAt: null,
       slaDeadline: new Date(when.getTime() + days(3)),
       slaStatus: v.slaStatus,
-      deduplicationKey: `${v.ruleId}:${customer._id}:${when.toISOString().slice(0, 10)}`,
+      // Has a unique index. The natural key (rule + customer + day) repeats
+      // across cycled rows and across re-runs, so the row identity is appended
+      // to keep every seeded alert distinct.
+      deduplicationKey: `${v.ruleId}:${customer._id}:${when
+        .toISOString()
+        .slice(0, 10)}:${STAMP}-${i + 1}`,
       activity: [
         {
           type: "activity",
@@ -530,7 +576,7 @@ async function seed() {
     bump("alerts");
 
     // 3 ── Case ───────────────────────────────────────────────────────────────
-    const caseDoc = await Case.create({
+    const caseDoc = await persist(Case, {
       client,
       branch,
       uid: uid("CA", "-"),
@@ -591,7 +637,7 @@ async function seed() {
 
     // 4 ── Reports ────────────────────────────────────────────────────────────
     // ECDD and SMR key the hub as `caseId`…
-    await EcddReport.create({
+    await persist(EcddReport, {
       ...link,
       uid: uid("ECDD"),
       caseId: caseDoc._id,
@@ -638,7 +684,7 @@ async function seed() {
     });
     bump("ecdd");
 
-    await SMR.create({
+    await persist(SMR, {
       ...link,
       uid: uid("SMR"),
       caseId: caseDoc._id,
@@ -659,33 +705,77 @@ async function seed() {
           name,
           otherNames: ["M. Hossain"],
           personDetails: { dateOfBirth: iso(Date.now() - days(365 * 34)), nationality: "Australian" },
-          businessAddress: address(),
+          businessAddress: smrAddress(),
           phoneNumbers: ["+61 400 000 000"],
           emails: ["seed.customer@example.com"],
           accounts: [{ type: "transaction", number: "AU-7842-0012-3345", institution: "Commonwealth Bank of Australia" }],
           digitalWallets: [{ type: "BTC", identifier: "bc1qseeddemowallet00000000000000000000" }],
           occupation: "Company Director",
-          beneficialOwners: [{ name }],
-          officeHolders: [{ name }],
+          beneficialOwners: [{ name, address: smrAddress() }],
+          officeHolders: [{ name, position: "Director" }],
           documentation: "Passport, Driver Licence",
-          identityVerification: { documentation: ["Passport"], electronicDataSource: ["Credit bureau"] },
+          identityVerification: {
+            documents: [{ type: "Passport", number: "PA1234567", country: "Australia", expiry: iso(Date.now() + days(365 * 4)) }],
+            electronicSources: [{ type: "Credit bureau", identifier: "EQ-88213" }],
+            deviceIdentifiers: [{ type: "browser", identifier: "dev-chrome-win11-8f3c" }],
+          },
           isCustomer: true,
           isAuthorisedAgent: false,
         },
       },
-      partD: { hasOtherParties: true, otherParties: [{ name: "Meridian Trade Solutions GmbH" }] },
-      partE: { hasUnidentifiedPersons: false, unidentifiedPersons: [] },
-      partF: { transactions: [{ reference, amount, currency: v.currency, date: when }] },
+      partD: {
+        hasOtherParties: true,
+        otherParties: [{ name: "Meridian Trade Solutions GmbH", businessAddress: smrAddress(), isCustomer: false }],
+      },
+      partE: {
+        hasUnidentifiedPersons: true,
+        unidentifiedPersons: [
+          { description: "Unidentified male depositing cash on the customer's behalf.", documentation: "Branch CCTV still" },
+        ],
+      },
+      partF: {
+        transactions: [
+          {
+            date: when,
+            type: v.txnType,
+            completed: v.txnStatus === "completed",
+            referenceNumber: reference,
+            totalAmount: { currencyCode: v.currency, amount },
+            cashAmount: { currencyCode: "AUD", amount: Math.round(amount / 2) },
+            foreignCurrencies: [{ currencyCode: "USD", amount: 5000 }],
+            digitalCurrencies: [
+              { type: "BTC", amount: 0.25, walletAddress: "bc1qseeddemowallet00000000000000000000" },
+            ],
+            sender: { name, institutions: [{ name: "Commonwealth Bank of Australia", address: smrAddress() }] },
+            payee: { name: "Meridian Trade Solutions GmbH", institutions: [{ name: "Deutsche Bank AG", address: smrAddress() }] },
+            beneficiary: { name: "Sigma Logistics BV", institutions: [{ name: "ABN AMRO Bank", address: smrAddress() }] },
+          },
+        ],
+      },
       partG: {
         likelyOffence: [v.offence],
         previousReports: [{ date: new Date(when.getTime() - days(180)), referenceNumber: `SMR-PRIOR-${i + 1}` }],
-        otherGovernmentBodies: ["AUSTRAC", "Australian Federal Police"],
+        // Embedded documents, not strings — a bare string fails to cast.
+        otherGovernmentBodies: [
+          {
+            name: "AUSTRAC",
+            address: smrAddress(),
+            dateReported: when,
+            informationProvided: "Suspicious matter report lodged electronically.",
+          },
+          {
+            name: "Australian Federal Police",
+            address: smrAddress(),
+            dateReported: when,
+            informationProvided: "Referral of associated account activity.",
+          },
+        ],
         attachments: ["smr-transaction-schedule.pdf"],
       },
       partH: {
         reportingEntity: {
           name: "Dooit Financial Services Pty Ltd",
-          address: address(),
+          address: smrAddress(),
           branchName: "Melbourne CBD",
           internalReference: caseDoc.uid,
           completedBy: {
@@ -717,7 +807,7 @@ async function seed() {
     bump("smr");
 
     // …TTR, IFTI, GFS and RFI key it as `case`.
-    await TTR.create({
+    await persist(TTR, {
       ...link,
       uid: uid("TTR"),
       case: caseDoc._id,
@@ -750,7 +840,7 @@ async function seed() {
       institutionCountry: isOrdering ? "Australia" : "Germany",
     });
 
-    await IFTI.create({
+    await persist(IFTI, {
       ...link,
       uid: uid("IFTI"),
       case: caseDoc._id,
@@ -793,7 +883,7 @@ async function seed() {
     });
     bump("ifti");
 
-    await GFS.create({
+    await persist(GFS, {
       ...link,
       uid: uid("GFS"),
       case: caseDoc._id,
@@ -841,7 +931,7 @@ async function seed() {
     });
     bump("gfs");
 
-    await RFI.create({
+    await persist(RFI, {
       ...link,
       uid: uid("RFI"),
       case: caseDoc._id,
