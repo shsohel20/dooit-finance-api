@@ -26,6 +26,12 @@ const {
 } = require("../services/journeyService");
 const OnboardingJourney = require("../models/OnboardingJourney");
 const { buildSeedJourney } = require("../utils/journeyUtils");
+const EcddReport = require("../models/EcddReport");
+const SMR = require("../models/SmrReport");
+const TTR = require("../models/TtrReport");
+const IFTI = require("../models/IftiReport");
+const GFS = require("../models/gfsReport");
+const RFI = require("../models/Rfi");
 
 exports.filterCustomerSection = (c, requestBody) => {
   if (!requestBody || !requestBody.name) return true;
@@ -92,6 +98,59 @@ exports.getCustomer = asyncHandler(async (req, res, next) => {
     success: true,
     data,
     journeys: journeyData,
+  });
+});
+
+// @desc   All compliance reports + RFI filed against a customer (360° view)
+// @route  GET /api/v1/customers/:id/reports
+// @access Private (admin | client | branch)
+exports.getCustomerReports = asyncHandler(async (req, res, next) => {
+  const customer = await Customer.findById(req.params.id).select("_id").lean();
+  if (!customer) {
+    return next(
+      new ErrorResponse(`Customer not found with id of ${req.params.id}`, 404),
+    );
+  }
+
+  // Tenant scope: a client/branch user only sees reports in their own tenant
+  // (a customer may be shared across clients via relations[]).
+  const scope = { customer: customer._id };
+  const clientId = req?.user?.client?._id || req?.user?.clientBelongs || null;
+  const branchId = req?.user?.branch?._id || req?.user?.branchBelongs || null;
+  if (clientId) scope.client = clientId;
+  if (branchId) scope.branch = branchId;
+
+  const [ecdd, smr, ttr, ifti, gfs, rfi] = await Promise.all([
+    EcddReport.find(scope)
+      .select("uid status createdAt caseId alert caseNumber")
+      .sort({ createdAt: -1 }).lean(),
+    SMR.find(scope)
+      .select("uid status createdAt caseId alert caseNumber")
+      .sort({ createdAt: -1 }).lean(),
+    TTR.find(scope)
+      .select("uid status createdAt case alert referenceNumber")
+      .sort({ createdAt: -1 }).lean(),
+    IFTI.find(scope)
+      .select("uid status createdAt case alert")
+      .sort({ createdAt: -1 }).lean(),
+    GFS.find(scope)
+      .select("uid status createdAt case alert customerUID")
+      .sort({ createdAt: -1 }).lean(),
+    RFI.find(scope)
+      .select("uid status createdAt case alert")
+      .sort({ createdAt: -1 }).lean(),
+  ]);
+
+  const counts = {
+    ecdd: ecdd.length, smr: smr.length, ttr: ttr.length,
+    ifti: ifti.length, gfs: gfs.length, rfi: rfi.length,
+  };
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+
+  res.status(200).json({
+    success: true,
+    data: { ecdd, smr, ttr, ifti, gfs, rfi },
+    summary: { counts, total },
   });
 });
 

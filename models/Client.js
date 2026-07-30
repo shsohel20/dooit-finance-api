@@ -73,8 +73,8 @@ const RiskQuestionsSchema = new Schema(
     assessDate: { type: Date },
     austrac_enrolled: { type: String, trim: true },
     austracEnrolmentRef: { type: String, trim: true },  // e.g. "ENR-20260001"
-    effectiveDate:       { type: String, trim: true },  // e.g. "1 July 2026"
-    documentDate:        { type: String, trim: true },  // e.g. "15 June 2026"
+    effectiveDate: { type: String, trim: true },  // e.g. "1 July 2026"
+    documentDate: { type: String, trim: true },  // e.g. "15 June 2026"
 
     // ── Compliance Officer (mirrors Client.legalRepresentative) ───────────────
     co_name: { type: String, trim: true },
@@ -198,7 +198,11 @@ const ClientSchema = new Schema(
     // Structured AUSTRAC questionnaire answers
     riskQuestions: { type: RiskQuestionsSchema, default: () => ({}) },
 
-    settings: { type: Schema.Types.Mixed, default: {} },
+    settings: {
+      type: Schema.Types.Mixed, default: {
+        color: "#000000"
+      }
+    },
     metadata: { type: Schema.Types.Mixed, default: {} },
   },
   {

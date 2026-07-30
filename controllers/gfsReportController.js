@@ -2,6 +2,7 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const GFS = require("../models/gfsReport");
+const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
 
 /**
@@ -108,11 +109,19 @@ exports.createGFS = asyncHandler(async (req, res, next) => {
     );
   }
 
+  const link = await resolveCaseLinkage({
+    caseId: body.caseId || body.case,
+    caseNumber: body.caseNumber || body.referenceNumber,
+  });
+
   // create document
   const gfs = await GFS.create({
     ...body,
     client,
     branch,
+    customer: body.customer || link.customer,
+    case: link.caseId, // Case hub (null until the alert is escalated)
+    alert: link.alert, // originating Alert (provenance)
     // ensure numeric defaults
     totalDeposited: Number(body.totalDeposited) || 0,
     totalWithdrawn: Number(body.totalWithdrawn) || 0,
@@ -194,6 +203,7 @@ exports.updateGFS = asyncHandler(async (req, res, next) => {
 
   // merge updates
   Object.assign(gfs, body);
+  if (hasLinkageRef(body)) Object.assign(gfs, await linkageOverrides(body, "case"));
   gfs.metadata = gfs.metadata || {};
   gfs.metadata.updatedBy = req.user?.id || gfs.metadata.updatedBy;
 

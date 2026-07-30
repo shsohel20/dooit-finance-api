@@ -54,12 +54,23 @@ const EcddReportSchema = new Schema(
     date: { type: Date, default: null },
 
     caseNumber: { type: String, trim: true, index: true, default: null },
+    // Investigation hub — the Case this ECDD belongs to. Null until the
+    // originating alert is escalated to a Case (then resolved via Alert.linkedCase).
     caseId: {
       type: Schema.Types.ObjectId,
-      ref: "Alert",
+      ref: "Case",
+      index: true,
       required: false,
       default: null,
-    }, //alertId
+    },
+    // Provenance — the TM Alert that triggered this ECDD (kept for traceability).
+    alert: {
+      type: Schema.Types.ObjectId,
+      ref: "Alert",
+      index: true,
+      required: false,
+      default: null,
+    },
 
     // CRA-origin ECDD: report backs a CRA ECDD gate decision instead of a TM alert
     riskAssessment: {
@@ -148,6 +159,9 @@ const EcddReportSchema = new Schema(
 //     next();
 //   }
 // });
+
+// Tenant-scoped list queries
+EcddReportSchema.index({ client: 1, status: 1, createdAt: -1 });
 
 EcddReportSchema.pre("save", async function (next) {
   if (this.isNew && !this.uid) {

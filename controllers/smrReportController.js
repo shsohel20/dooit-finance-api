@@ -2,6 +2,7 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const SMR = require("../models/SmrReport");
+const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
 const sendEmail = require("../utils/sendEmail");
 
@@ -47,12 +48,21 @@ exports.createSMR = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Missing required SMR parts", 400));
   }
 
-  // create
-  const smr = await SMR.create({
-    client,
-    branch,
+  // Resolve the investigation hub: accepts a Case id/uid OR a legacy Alert
+  // id/uid, and derives the owning Case from Alert.linkedCase.
+  const link = await resolveCaseLinkage({
     caseId: body.caseId,
     caseNumber: body.caseNumber,
+  });
+
+  // create
+  const smr = await SMR.create({
+    client: client || link.client,
+    branch: branch || link.branch,
+    customer: body.customer || link.customer,
+    caseId: link.caseId, // Case hub (null until the alert is escalated)
+    alert: link.alert,   // originating Alert (provenance)
+    caseNumber: body.caseNumber || link.caseNumber,
     partA: body.partA,
     partB: body.partB,
     partC: body.partC,
@@ -171,6 +181,7 @@ exports.updateSMR = asyncHandler(async (req, res, next) => {
     );
 
   Object.assign(smr, req.body);
+  if (hasLinkageRef(req.body)) Object.assign(smr, await linkageOverrides(req.body, "caseId"));
   smr.metadata = smr.metadata || {};
   smr.metadata.updatedBy = req.user?.id;
   smr.metadata.workflowHistory = smr.metadata.workflowHistory || [];

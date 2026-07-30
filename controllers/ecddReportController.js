@@ -4,6 +4,8 @@ const asyncHandler = require("../middleware/async");
 const Alert = require("../models/Alert");
 const EcddReport = require("../models/EcddReport");
 const ErrorResponse = require("../utils/errorResponse");
+const { hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
+    const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
 
 const csvParser = require("csv-parser");
 const { Parser: Json2CsvParser } = require("json2csv");
@@ -150,7 +152,6 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
   let assessment = null;
 
   if (riskAssessmentId) {
-    const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
     assessment = await IndividualRiskAssessment.findById(riskAssessmentId)
       .select("uid customer customerName client branch")
       .lean();
@@ -177,7 +178,8 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
     ...payload,
     client,
     branch,
-    caseId: alert?._id || null,
+    caseId: alert?.linkedCase || null, // Case hub (null until alert is escalated)
+    alert: alert?._id || null,         // originating TM Alert (provenance)
     riskAssessment: assessment?._id || null,
     customer: payload.customer || assessment?.customer || null,
     generatedBy: user || null,
@@ -239,7 +241,8 @@ exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
 
   const submitObj = {
     ...payload,
-    caseId: alert._id,
+    caseId: alert?.linkedCase || null, // Case hub (null until alert is escalated)
+    alert: alert._id,                  // originating TM Alert (provenance)
     client: alert?.client ?? null,
     branch: alert?.branch ?? null,
     analyst: alert?.analyst ?? null,
@@ -325,7 +328,13 @@ exports.updateEcddReport = asyncHandler(async (req, res, next) => {
     }
   }
 
-  const report = await EcddReport.findByIdAndUpdate(req.params.id, req.body, {
+  // Re-resolve linkage if the body carries a case/alert identifier.
+  let updateBody = req.body;
+  if (hasLinkageRef(req.body)) {
+    updateBody = { ...req.body, ...(await linkageOverrides(req.body, "caseId")) };
+  }
+
+  const report = await EcddReport.findByIdAndUpdate(req.params.id, updateBody, {
     new: true,
     runValidators: true,
   });

@@ -1,6 +1,7 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const TTR = require("../models/TtrReport");
+const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
 
@@ -31,9 +32,21 @@ exports.createTTR = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Missing required TTR parts", 400));
   }
 
+  const client = req?.user?.client?._id || null;
+  const branch = req?.user?.branch?._id || null;
+  const link = await resolveCaseLinkage({
+    caseId: body.caseId || body.case,
+    caseNumber: body.caseNumber || body.referenceNumber,
+  });
+
   const ttr = await TTR.create({
+    client: client || link.client,
+    branch: branch || link.branch,
+    customer: body.customer || link.customer,
+    case: link.caseId, // Case hub (null until the alert is escalated)
+    alert: link.alert, // originating Alert (provenance)
     completionDate: body.completionDate,
-    referenceNumber: body.referenceNumber,
+    referenceNumber: body.referenceNumber || link.caseNumber,
     partA: body.partA,
     partB: body.partB,
     partC: body.partC,
@@ -159,6 +172,7 @@ exports.updateTTR = asyncHandler(async (req, res, next) => {
     );
 
   Object.assign(ttr, req.body);
+  if (hasLinkageRef(req.body)) Object.assign(ttr, await linkageOverrides(req.body, "case"));
   ttr.metadata = ttr.metadata || {};
   ttr.metadata.updatedBy = req.user?.id;
   ttr.metadata.workflowHistory = ttr.metadata.workflowHistory || [];

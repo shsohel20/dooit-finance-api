@@ -173,13 +173,28 @@ const SMRSpec = new Schema(
     uid: { type: String, index: true }, // eg SMR_...
     sequence: { type: Number, index: true },
 
+    // ── Tenant + subject (multi-tenant isolation + 360° customer view) ──
+    client: { type: Schema.Types.ObjectId, ref: "Client", index: true, default: null },
+    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true, default: null },
+
+    // Investigation hub — the Case this SMR (Suspicious Matter Report) belongs to.
     caseId: {
       type: Schema.Types.ObjectId,
-      ref: "Alert",
+      ref: "Case",
+      index: true,
       required: false,
       default: null,
     },
-    caseNumber: { type: String, index: true, default: null }, // external reference
+    // Provenance — the Alert that triggered this SMR (kept for traceability).
+    alert: {
+      type: Schema.Types.ObjectId,
+      ref: "Alert",
+      index: true,
+      required: false,
+      default: null,
+    },
+    caseNumber: { type: String, index: true, default: null }, // external reference (Case.uid / legacy Alert.uid)
 
     status: {
       type: String,
@@ -256,6 +271,9 @@ const SMRSpec = new Schema(
 );
 
 // pre-save uid
+// Tenant-scoped list queries
+SMRSpec.index({ client: 1, status: 1, createdAt: -1 });
+
 SMRSpec.pre("save", function (next) {
   if (this.isNew && !this.uid) this.uid = `SMR_${Date.now()}`;
   next();

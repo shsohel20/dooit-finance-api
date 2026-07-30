@@ -130,7 +130,9 @@ const TransactionSchema = new Schema(
     relatedPartyFlag: { type: Boolean, default: false },
 
     investigation: {
-      caseId: { type: String, trim: true, index: true },
+      // Canonical link to the investigation Case (kept in sync with Case.linkedTransactions[]).
+      case: { type: Schema.Types.ObjectId, ref: "Case", default: null, index: true },
+      caseId: { type: String, trim: true, index: true }, // legacy/string ref (now the Case uid)
       flagged: { type: Boolean, default: false },
       investigatorNotes: { type: String, trim: true },
     },

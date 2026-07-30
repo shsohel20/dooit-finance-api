@@ -2,6 +2,7 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const IFTI = require("../models/IftiReport");
+const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
 
 /* -- Helpers -- */
@@ -143,9 +144,17 @@ exports.createIFTI = asyncHandler(async (req, res, next) => {
     body.transaction.totalAmount = Number(body.transaction.totalAmount) || 0;
   }
 
+  const link = await resolveCaseLinkage({
+    caseId: body.caseId || body.case,
+    caseNumber: body.caseNumber || body.referenceNumber,
+  });
+
   const doc = await IFTI.create({
-    client,
-    branch,
+    client: client || link.client,
+    branch: branch || link.branch,
+    customer: body.customer || link.customer,
+    case: link.caseId, // Case hub (null until the alert is escalated)
+    alert: link.alert, // originating Alert (provenance)
     transaction: body.transaction,
     orderingCustomer: body.orderingCustomer,
     beneficiaryCustomer: body.beneficiaryCustomer,
@@ -242,6 +251,7 @@ exports.updateIFTI = asyncHandler(async (req, res, next) => {
   const body = normalizeInput(req.body || {});
   // merge
   Object.assign(doc, body);
+  if (hasLinkageRef(body)) Object.assign(doc, await linkageOverrides(body, "case"));
   doc.metadata = doc.metadata || {};
   doc.metadata.updatedBy = req.user?.id;
   doc.metadata.workflowHistory = doc.metadata.workflowHistory || [];

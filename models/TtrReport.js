@@ -228,7 +228,15 @@ const MetadataSchema = new Schema(
 const TTRSchema = new Schema(
   {
     uid: { type: String, index: true, unique: true },
-    referenceNumber: { type: String, required: true, default: null }, // case id
+
+    // ── Canonical linkage (Case = hub, Alert = provenance) ──
+    client: { type: Schema.Types.ObjectId, ref: "Client", index: true, default: null },
+    branch: { type: Schema.Types.ObjectId, ref: "Branch", index: true, default: null },
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true, default: null },
+    case: { type: Schema.Types.ObjectId, ref: "Case", index: true, default: null },
+    alert: { type: Schema.Types.ObjectId, ref: "Alert", index: true, default: null },
+
+    referenceNumber: { type: String, required: true, default: null }, // legacy case ref (Case.uid / Alert.uid)
     status: {
       type: String,
       enum: ["draft", "submitted", "approved"],
@@ -251,6 +259,9 @@ const TTRSchema = new Schema(
 );
 
 /* Auto-generate uid */
+// Tenant-scoped list queries
+TTRSchema.index({ client: 1, status: 1, createdAt: -1 });
+
 TTRSchema.pre("save", function (next) {
   if (this.isNew && !this.uid) {
     this.uid = `TTR_${Date.now()}`;

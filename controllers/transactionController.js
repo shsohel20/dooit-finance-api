@@ -10,7 +10,7 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { Parser: CsvParser } = require("json2csv");
 const csv = require("csv-parser");
-const htmlPdf = require("html-pdf");
+const puppeteer = require("puppeteer");
 
 // ── shared helpers (mirrors transactionFilter.js) ──────────────────────────
 const _toArray = (param) => {
@@ -1310,14 +1310,24 @@ exports.downloadTransactionPdf = asyncHandler(async (req, res, next) => {
   if (!tx) return next(new ErrorResponse("Transaction not found", 404));
 
   const html = buildTxHtml(tx);
-  const options = { format: "A4", border: { top: "10mm", right: "10mm", bottom: "10mm", left: "10mm" } };
 
-  htmlPdf.create(html, options).toStream((err, pdfStream) => {
-    if (err) return next(new ErrorResponse("Error generating PDF", 500));
+  let browser;
+  try {
+    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      margin: { top: "10mm", right: "10mm", bottom: "10mm", left: "10mm" },
+    });
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `attachment; filename="transaction-${tx.uid || tx._id}.pdf"`);
-    pdfStream.pipe(res);
-  });
+    res.end(pdfBuffer);
+  } catch (err) {
+    return next(new ErrorResponse("Error generating PDF", 500));
+  } finally {
+    if (browser) await browser.close();
+  }
 });
 
 // bulk change statuses (accepts array of ids)

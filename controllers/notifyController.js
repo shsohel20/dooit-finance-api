@@ -70,6 +70,8 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
   const branch = req?.user?.branch?._id || null;
   const body = req.body || {};
 
+  console.log(body)
+
   const required = ["notifyFor", "notes"];
   for (const k of required) {
     if (!body[k]) return next(new ErrorResponse(`${k} is required`, 400));
@@ -104,10 +106,11 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
 
   await notify.save();
 
+  
   void (async () => {
     try {
       const notifyPopulateObject = await Notify.findById(notify._id).populate('createdBy updatedBy resourceId');
-      const reportApiEndPoint = `${reportAPI_risk}/risk/alert`;
+      const reportApiEndPoint = `${reportAPI_risk}/risk/alert`; //TODO
       const doc = Array.isArray(notifyPopulateObject.documents) ? notifyPopulateObject.documents[0] ?? null : null
       let payload = {
         customer: {},
@@ -155,7 +158,7 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
         riskLabel: riskLabel || "Unknown",
         activity: [{ title: "Initial Review", details: "Reviewed the transaction for possible fraud" }],
         activityNote: [{ note: "Customer contacted for verification" }],
-        status: "Active",
+        status: "new",
         createdBy: req.user?.id || null,
         settings: { priority: "urgent" },
         metadata: { ...payload, source: "system" },

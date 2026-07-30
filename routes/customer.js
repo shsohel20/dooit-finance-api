@@ -8,6 +8,7 @@ const {
   filterCustomerSection,
   getCustomers,
   getCustomer,
+  getCustomerReports,
   createCustomerDummy,
   getCompanyKycs,
   getCompanyKyc,
@@ -72,6 +73,11 @@ router.get(
 
 
 
+// Compliance reports (ECDD/SMR/TTR/IFTI/GFS/RFI) filed against this customer
+router
+  .route("/:id/reports")
+  .get(protect, authorize("admin", "client", "branch"), getCustomerReports);
+
 router
   .route("/:id")
   .get(protect, authorize("admin", "client", "branch"), getCustomer);
@@ -88,7 +94,7 @@ router.post(
   acceptInvite,
 );
 router.post(
-  "/dummy-create",
+  "/dummy/create",
 
   createCustomerDummy,
 );

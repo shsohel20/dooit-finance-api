@@ -57,7 +57,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
         UserType.findOneAndUpdate(
           { _id: decoded.userTypeId },
           { $set: { clientBelongs: client._id } }
-        ).catch(() => {});
+        ).catch(() => { });
       }
     }
     if (!branch && u.userType === "branch") {
@@ -66,7 +66,7 @@ exports.protect = asyncHandler(async (req, res, next) => {
         UserType.findOneAndUpdate(
           { _id: decoded.userTypeId },
           { $set: { branchBelongs: branch._id, clientBelongs: branch.client?._id ?? null } }
-        ).catch(() => {});
+        ).catch(() => { });
       }
     }
 

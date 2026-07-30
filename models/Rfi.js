@@ -30,7 +30,8 @@ const RFISchema = new Schema(
     sequence: { type: Number, index: true },
 
     // Links
-    case: { type: mongoose.Schema.ObjectId, ref: "Alert" }, // or "Case" if you have one
+    case: { type: mongoose.Schema.ObjectId, ref: "Case", index: true }, // investigation hub
+    alert: { type: mongoose.Schema.ObjectId, ref: "Alert", index: true }, // provenance — triggering alert
     client: { type: mongoose.Schema.ObjectId, ref: "Client" },
     branch: { type: mongoose.Schema.ObjectId, ref: "Branch" },
     customer: { type: mongoose.Schema.ObjectId, ref: "Customer" },
@@ -74,6 +75,9 @@ const RFISchema = new Schema(
 );
 
 // pre-save uid
+// Tenant-scoped list queries
+RFISchema.index({ client: 1, status: 1, createdAt: -1 });
+
 RFISchema.pre("save", function (next) {
   if (this.isNew && !this.uid) {
     this.uid = `RFI_${Date.now()}`;

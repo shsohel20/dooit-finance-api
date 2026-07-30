@@ -81,6 +81,10 @@ const GFSSchema = new Schema(
       default: null,
     },
 
+    // ── Canonical linkage (Case = hub, Alert = provenance) ──
+    case: { type: Schema.Types.ObjectId, ref: "Case", index: true, default: null },
+    alert: { type: Schema.Types.ObjectId, ref: "Alert", index: true, default: null },
+
     // suspicion meta
     suspicionType: { type: String, default: "" },
     suspicionReason: { type: String, default: "" },
@@ -139,6 +143,9 @@ const GFSSchema = new Schema(
 );
 
 /* pre-save uid */
+// Tenant-scoped list queries
+GFSSchema.index({ client: 1, status: 1, createdAt: -1 });
+
 GFSSchema.pre("save", function (next) {
   if (this.isNew && !this.uid) {
     this.uid = `GFS_${Date.now()}`;

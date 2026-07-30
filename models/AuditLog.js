@@ -18,16 +18,36 @@ const mongoose = require("mongoose");
  */
 const AuditLogSchema = new mongoose.Schema(
   {
-    // Which integration / subsystem produced this entry, e.g. "sumsub"
+    // Which integration / subsystem produced this entry, e.g. "sumsub", "case", "cra"
     service: {
       type: String,
-      required: true,
+      required: false,
+      default: "case",
       index: true,
     },
-    // Job or operation name, e.g. "ocr_info_sync", "ocr_doc_upload"
+    // Job or operation name, e.g. "ocr_info_sync", "case_created", "status_changed"
     action: {
       type: String,
       required: true,
+    },
+    // Human-readable detail message (used by case audit trail)
+    details: {
+      type: String,
+      default: null,
+    },
+    // Case this log entry belongs to (case audit trail)
+    case: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Case",
+      index: true,
+      default: null,
+    },
+    // User who performed the action (case audit trail)
+    user: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Users",
+      index: true,
+      default: null,
     },
     // External reference for the operation, e.g. Sumsub applicantId
     externalId: {
@@ -49,7 +69,8 @@ const AuditLogSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ["success", "failed"],
-      required: true,
+      required: false,
+      default: "success",
     },
     attempts: {
       type: Number,
@@ -94,5 +115,6 @@ const AuditLogSchema = new mongoose.Schema(
 );
 
 AuditLogSchema.index({ service: 1, action: 1, status: 1, createdAt: -1 });
+AuditLogSchema.index({ case: 1, createdAt: -1 });
 
 module.exports = mongoose.model("AuditLog", AuditLogSchema);

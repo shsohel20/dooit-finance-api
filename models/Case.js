@@ -104,6 +104,8 @@ const CaseSchema = new Schema(
         // assignedTo: primary responsible analyst (single field for dashboard queries)
         // watchers: additional team members receiving updates
         assignedTo: { type: Schema.Types.ObjectId, ref: 'Users', default: null, index: true },
+        // reviewer: the checker in the maker→checker (four-eyes) review flow.
+        reviewer:   { type: Schema.Types.ObjectId, ref: 'Users', default: null, index: true },
         watchers:   [{ type: Schema.Types.ObjectId, ref: 'Users' }],
         createdBy: {
             type:     Schema.Types.ObjectId,
@@ -174,6 +176,17 @@ CaseSchema.virtual('isOverdue').get(function () {
 CaseSchema.virtual('alertCount').get(function () {
     return Array.isArray(this.linkedAlerts) ? this.linkedAlerts.length : 0;
 });
+
+// ── Reverse report linkage (Phase 4) ─────────────────────────────────────────
+// Virtual populate keeps reports normalized — a case never re-saves when a
+// report is added. NOTE the foreignField differs by model: ECDD/SMR use `caseId`;
+// TTR/IFTI/GFS/RFI use `case`.
+CaseSchema.virtual('ecddReports', { ref: 'EcddReport', localField: '_id', foreignField: 'caseId' });
+CaseSchema.virtual('smrReports',  { ref: 'SMR',        localField: '_id', foreignField: 'caseId' });
+CaseSchema.virtual('ttrReports',  { ref: 'TTR',        localField: '_id', foreignField: 'case' });
+CaseSchema.virtual('iftiReports', { ref: 'IFTI',       localField: '_id', foreignField: 'case' });
+CaseSchema.virtual('gfsReports',  { ref: 'GFS',        localField: '_id', foreignField: 'case' });
+CaseSchema.virtual('rfis',        { ref: 'RFI',        localField: '_id', foreignField: 'case' });
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Plugins — AutoIncrement registered first so sequence is set before pre-save

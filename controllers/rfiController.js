@@ -4,6 +4,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const RFI = require("../models/Rfi");
 const Customer = require("../models/Customer");
 const Client = require("../models/Client");
+const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 // const User = require("../models/User");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
 const sendEmail = require("../utils/sendEmail");
@@ -68,11 +69,16 @@ exports.createRFI = asyncHandler(async (req, res, next) => {
     if (!customer) return next(new ErrorResponse("Customer not found", 404));
   }
 
+  // Resolve the investigation hub: `caseId` may be a Case id/uid or a legacy
+  // Alert id/uid — derive the owning Case + originating Alert.
+  const link = await resolveCaseLinkage({ caseId });
+
   const rfi = await RFI.create({
-    case: caseId,
-    client: clientId,
-    branch: branchId || null,
-    customer: customerId,
+    case: link.caseId, // Case hub (null until the alert is escalated)
+    alert: link.alert, // originating Alert (provenance)
+    client: clientId || link.client,
+    branch: (branchId || link.branch) || null,
+    customer: customerId || link.customer,
     primaryContactName,
     replyToEmail,
     requestedItems,
@@ -141,6 +147,7 @@ exports.updateRFI = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`RFI not found with id ${rfiId}`, 404));
 
   Object.assign(rfi, req.body);
+  if (hasLinkageRef(req.body)) Object.assign(rfi, await linkageOverrides(req.body, "case"));
   await rfi.save();
 
   res.status(200).json({ succeed: true, data: rfi });

@@ -7,6 +7,7 @@ const AuditLog = require("../models/AuditLog");
 const Customer = require("../models/Customer");
 const User = require("../models/User");
 const Transaction = require("../models/Transaction");
+const { linkTransactionsToCase } = require("../utils/transactionCaseLink");
 
 // Maps Alert.riskLabel → Case.priority
 const mapRiskToPriority = (riskLabel) => {
@@ -120,6 +121,20 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     createdBy: user,
     status: status || "new",
   });
+
+  // Telemetry: if this alert was fired by a RuleEngine rule, bump its counters.
+  // Best-effort — never block alert creation on a telemetry failure.
+  if (ruleRef) {
+    try {
+      const RuleEngine = require("../models/RuleEngine");
+      await RuleEngine.updateOne(
+        { _id: ruleRef },
+        { $set: { lastFiredAt: new Date() }, $inc: { hitCount: 1 } }
+      );
+    } catch (e) {
+      console.error("[alert] rule telemetry update failed:", e.message);
+    }
+  }
 
   res.status(201).json({ succeed: true, data: alert, id: alert._id });
 });
@@ -445,6 +460,11 @@ exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
     assignedTo: assignedTo || null,
     createdBy: req.user._id,
   });
+
+  // Sync the alert's transaction → Case (investigation.case + flagged)
+  if (alert.transaction) {
+    await linkTransactionsToCase([alert.transaction._id || alert.transaction], newCase);
+  }
 
   alert.status = "escalated_to_case";
   alert.linkedCase = newCase._id;

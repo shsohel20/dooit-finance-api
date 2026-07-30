@@ -8,6 +8,9 @@ const {
   assignInvestigators,
   updateWatchers,
   getCaseAlerts,
+  getCaseReports,
+  getCaseAnalytics,
+  fileSAR,
   linkAlerts,
   unlinkAlert,
   deleteCase,
@@ -33,6 +36,9 @@ router.use(protect);
 
 // ── Investigators list (before /:id to avoid routing conflict) ────────────────
 router.route('/investigators').get(authorize('admin', 'compliance_officer'), getInvestigators);
+
+// ── Analytics for the Case Manager dashboard (before /:id) ────────────────────
+router.route('/analytics').get(getCaseAnalytics);
 
 // ── Case list + creation ──────────────────────────────────────────────────────
 router
@@ -72,6 +78,12 @@ router
 router
   .route('/:id/alerts/:alertId')
   .delete(authorize('admin', 'compliance_officer'), unlinkAlert);
+
+// ── Reports (ECDD/SMR/TTR/IFTI/GFS/RFI attached to this case) ─────────────────
+router.route('/:id/reports').get(getCaseReports);
+
+// ── Record a SAR/SMR filing decision on the case ──────────────────────────────
+router.route('/:id/sar').post(fileSAR);
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
 router.route('/:id/notes').get(getCaseNotes).post(validateAddNote, addNote);

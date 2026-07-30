@@ -96,6 +96,11 @@ const IFTISchema = new Schema(
       default: null,
     },
 
+    // ── Canonical linkage (Case = hub, Alert = provenance) ──
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", index: true, default: null },
+    case: { type: Schema.Types.ObjectId, ref: "Case", index: true, default: null },
+    alert: { type: Schema.Types.ObjectId, ref: "Alert", index: true, default: null },
+
     transaction: { type: TransactionSchema, default: {} },
     orderingCustomer: { type: PersonSchema, default: {} },
     beneficiaryCustomer: { type: PersonSchema, default: {} },
@@ -125,6 +130,9 @@ const IFTISchema = new Schema(
 );
 
 /* Pre-save UID */
+// Tenant-scoped list queries
+IFTISchema.index({ client: 1, status: 1, createdAt: -1 });
+
 IFTISchema.pre("save", function (next) {
   if (this.isNew && !this.uid) this.uid = `IFTI_${Date.now()}`;
   next();
