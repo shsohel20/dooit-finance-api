@@ -53,6 +53,16 @@ const LINE_LABELS = {
   tax: "Tax",
 };
 
+// Brand colours extracted from dooit_Invoice.html
+//   Page background : #f2f2f3
+//   Card background : #ffffff
+//   Brand accent    : #5980a6  (logo suffix ".ai", blue rule, borders)
+//   Dark text       : #1d1f20 / #1d2d3d
+//   Muted text      : #999    / #d4d4d7
+//   Totals box fill : #eef6ff (border: #5980a6)
+//   Outside-plan    : #b45309 (amber, unchanged from original)
+//   Included line   : #5980a6 (was teal; now brand blue)
+
 /**
  * Render the invoice.
  *
@@ -60,7 +70,14 @@ const LINE_LABELS = {
  * @param {Object} opts      { accountName, accountEmail, brandName }
  * @returns {String} a self-contained HTML document
  */
-function renderInvoiceHtml(invoice, { accountName, brandName = "Dooit.ai" } = {}) {
+function renderInvoiceHtml(
+  invoice,
+  {
+    accountName,
+    brandName = "Dooit.ai",
+    brandLogoUrl = "https://dooit.ai/assets/img/logo.png",
+  } = {}
+) {
   const currency = invoice.currency || "AUD";
   const lines = [...(invoice.lineItems || [])].sort(
     (a, b) => (a.order ?? 0) - (b.order ?? 0)
@@ -69,6 +86,23 @@ function renderInvoiceHtml(invoice, { accountName, brandName = "Dooit.ai" } = {}
   const allowance = invoice.allowance || {};
   const isPaid = invoice.status === "paid";
   const isVoid = invoice.status === "void";
+
+  // Header brand mark. A hosted <img> is used when brandLogoUrl is set;
+  // brandName is kept as the img alt text so image-blocking email clients
+  // (Gmail/Outlook default to blocking remote images) still show the name.
+  // When no URL is given we fall back to the styled wordmark: brand name
+  // split at the last "." so "dooit.ai" renders dark "dooit" + blue ".ai".
+  const dotIdx = brandName.lastIndexOf(".");
+  const brandBase   = dotIdx > 0 ? brandName.slice(0, dotIdx) : brandName;
+  const brandSuffix = dotIdx > 0 ? brandName.slice(dotIdx)    : "";
+
+  const brandMark = brandLogoUrl
+    ? `<img src="${esc(brandLogoUrl)}" alt="${esc(brandName)}"
+         height="36"
+         style="height:36px;width:auto;max-width:200px;display:block;border:0;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic">`
+    : `<div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:36px;color:#1d1f20;letter-spacing:-.5px;line-height:1">
+         ${esc(brandBase)}<span style="color:#5980a6">${esc(brandSuffix)}</span>
+       </div>`;
 
   const rows = lines
     // `discount` and `tax` are totals-block concepts. They are still line items
@@ -81,27 +115,28 @@ function renderInvoiceHtml(invoice, { accountName, brandName = "Dooit.ai" } = {}
       // Excluded lines carry a real amount and are flagged in the sub-label
       // below, so a customer can see which charges fell outside their plan.
       const amount = l.isIncluded
-        ? `<span style="color:#0e766a;font-weight:700">Included</span>`
+        ? `<span style="color:#5980a6;font-weight:700">Included</span>`
         : money(l.amount, currency);
       return `
         <tr>
-          <td style="padding:10px 12px;border-bottom:1px solid #eef0f3">
-            <div style="font-size:13px;color:#25292f;font-weight:600">${esc(l.description)}</div>
-            <div style="font-size:11px;color:#98a0ab;margin-top:2px">
+          <td style="padding:11px 14px;border-bottom:1px solid #e8e9eb;vertical-align:top">
+            <div style="font-size:13px;color:#1d1f20;font-weight:600;line-height:1.3">${esc(l.description)}</div>
+            <div style="font-size:11px;color:#999;margin-top:2px;letter-spacing:.2px">
               ${esc(LINE_LABELS[l.lineType] || l.lineType)}${
                 l.isExcluded
-                  ? ` · <span style="color:#b45309;font-weight:700">outside your plan</span>`
+                  ? ` &nbsp;<span style="color:#b45309;font-weight:700;font-size:10px;` +
+                    `background:#fef3c7;padding:1px 5px;border-radius:3px">OUTSIDE PLAN</span>`
                   : ""
               }
             </div>
           </td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;color:#6b7280">
+          <td style="padding:11px 14px;border-bottom:1px solid #e8e9eb;text-align:right;font-size:13px;color:#4a515b;white-space:nowrap;vertical-align:top">
             ${l.quantity == null ? "—" : Number(l.quantity).toLocaleString("en-AU")}
           </td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;color:#6b7280">
+          <td style="padding:11px 14px;border-bottom:1px solid #e8e9eb;text-align:right;font-size:13px;color:#4a515b;white-space:nowrap;vertical-align:top">
             ${l.unitPrice == null ? "—" : money(l.unitPrice, currency)}
           </td>
-          <td style="padding:10px 12px;border-bottom:1px solid #eef0f3;text-align:right;font-size:13px;color:#12151a;font-weight:700">
+          <td style="padding:11px 14px;border-bottom:1px solid #e8e9eb;text-align:right;font-size:13px;color:#1d2d3d;font-weight:700;white-space:nowrap;vertical-align:top">
             ${amount}
           </td>
         </tr>`;
@@ -112,139 +147,170 @@ function renderInvoiceHtml(invoice, { accountName, brandName = "Dooit.ai" } = {}
     allowance.included == null && !allowance.used
       ? ""
       : `
-      <div style="margin-top:18px;padding:12px 14px;background:#f7f8f9;border-radius:10px">
-        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab">
+      <div style="margin-top:16px;padding:13px 16px;background:#f2f2f3;border-radius:8px;border-left:3px solid #5980a6">
+        <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#999;margin-bottom:5px">
           Allowance this period
         </div>
-        <div style="font-size:12.5px;color:#4a515b;margin-top:5px">
-          ${Number(allowance.used || 0).toLocaleString("en-AU")}
+        <div style="font-size:13px;color:#1d2d3d">
+          <strong style="color:#1d1f20">${Number(allowance.used || 0).toLocaleString("en-AU")}</strong>
           ${esc(allowance.unit || "applicant")}s used
           ${
             allowance.included == null
-              ? " · unlimited"
-              : ` of ${Number(allowance.included).toLocaleString("en-AU")} included`
+              ? " — <em>unlimited</em>"
+              : ` of <strong>${Number(allowance.included).toLocaleString("en-AU")}</strong> included`
           }
           ${
             allowance.overage
-              ? ` · <strong>${Number(allowance.overage).toLocaleString("en-AU")} over</strong>`
+              ? ` · <strong style="color:#b45309">${Number(allowance.overage).toLocaleString("en-AU")} over</strong>`
               : ""
           }
         </div>
       </div>`;
 
   return `<!doctype html>
-<html>
-<head><meta charset="utf-8"><title>${esc(invoice.invoiceNumber || "Invoice")}</title></head>
-<body style="margin:0;padding:24px;background:#ffffff;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
-  <div style="max-width:660px;margin:0 auto">
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>${esc(invoice.invoiceNumber || "Invoice")}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:32px 16px;background:#f2f2f3;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;-webkit-print-color-adjust:exact;print-color-adjust:exact">
+  <div style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:12px;box-shadow:0 2px 16px rgba(29,31,32,.08);overflow:hidden">
 
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
-      <div>
-        <div style="font-size:20px;font-weight:800;color:#12151a;letter-spacing:-.4px">${esc(brandName)}</div>
-        <div style="font-size:12px;color:#8a919b;margin-top:2px">AML/CTF compliance platform</div>
-      </div>
-      <div style="text-align:right">
-        <div style="font-size:19px;font-weight:800;color:#12151a">
-          ${esc(invoice.invoiceNumber || "Draft invoice")}
-        </div>
-        <div style="font-size:12px;color:#8a919b;margin-top:2px">Period ${esc(invoice.periodKey)}</div>
-        ${
-          isVoid
-            ? `<div style="margin-top:6px;display:inline-block;padding:3px 9px;border-radius:999px;background:#64748b1a;color:#475569;font-size:11px;font-weight:800">VOID</div>`
-            : isPaid
-              ? `<div style="margin-top:6px;display:inline-block;padding:3px 9px;border-radius:999px;background:#10b9811a;color:#047857;font-size:11px;font-weight:800">PAID</div>`
-              : ""
-        }
-      </div>
+    <!-- ── Header ── -->
+    <div style="padding:28px 32px 0">
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td style="vertical-align:top">
+            ${brandMark}
+            <div style="font-size:11px;color:#999;margin-top:8px;letter-spacing:.3px">AML/CTF compliance platform</div>
+          </td>
+          <td style="vertical-align:top;text-align:right">
+            <div style="font-family:'Barlow Condensed',sans-serif;font-weight:700;font-size:26px;color:#1d1f20;letter-spacing:-.3px;line-height:1">
+              ${esc(invoice.invoiceNumber || "Draft invoice")}
+            </div>
+            <div style="font-size:11px;color:#999;margin-top:4px">Period ${esc(invoice.periodKey || "")}</div>
+            ${
+              isVoid
+                ? `<div style="margin-top:6px;display:inline-block;padding:3px 10px;border-radius:4px;background:#d4d4d720;color:#999;font-size:11px;font-weight:700;letter-spacing:.5px;border:1px solid #d4d4d7">VOID</div>`
+                : isPaid
+                  ? `<div style="margin-top:6px;display:inline-block;padding:3px 10px;border-radius:4px;background:#eef6ff;color:#5980a6;font-size:11px;font-weight:700;letter-spacing:.5px;border:1px solid #5980a6">PAID</div>`
+                  : ""
+            }
+          </td>
+        </tr>
+      </table>
     </div>
 
-    <div style="height:1px;background:#eef0f3;margin:18px 0"></div>
+    <!-- ── Brand-blue rule (matches thumbnail) ── -->
+    <div style="height:3px;background:#5980a6;margin:20px 32px 0;border-radius:2px"></div>
 
-    <table style="width:100%;border-collapse:collapse">
-      <tr>
-        <td style="vertical-align:top;font-size:12.5px;color:#4a515b">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab;margin-bottom:4px">Billed to</div>
-          <div style="font-weight:700;color:#25292f">${esc(accountName || "—")}</div>
-          <div style="margin-top:2px">${esc(invoice.planSnapshot?.planName || "")}${
-            invoice.planSnapshot?.planVersion ? ` v${invoice.planSnapshot.planVersion}` : ""
-          }</div>
-        </td>
-        <td style="vertical-align:top;text-align:right;font-size:12.5px;color:#4a515b">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab;margin-bottom:4px">Dates</div>
-          <div>Service period: ${fmtDate(invoice.periodStart)} – ${fmtDate(invoice.periodEnd)}</div>
-          <div style="margin-top:2px">Issued: ${fmtDate(invoice.issuedAt)}</div>
-          <div style="margin-top:2px">Due: <strong>${fmtDate(invoice.dueAt)}</strong></div>
-        </td>
-      </tr>
-    </table>
-
-    <table style="width:100%;border-collapse:collapse;margin-top:18px">
-      <thead>
-        <tr style="background:#f7f8f9">
-          <th style="padding:8px 12px;text-align:left;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab">Description</th>
-          <th style="padding:8px 12px;text-align:right;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab">Qty</th>
-          <th style="padding:8px 12px;text-align:right;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab">Unit</th>
-          <th style="padding:8px 12px;text-align:right;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#98a0ab">Amount</th>
+    <!-- ── Billed-to / Dates ── -->
+    <div style="padding:20px 32px 0">
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td style="vertical-align:top;font-size:12.5px;color:#4a515b">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;margin-bottom:6px">Billed to</div>
+            <div style="font-size:14px;font-weight:700;color:#1d1f20">${esc(accountName || "—")}</div>
+            <div style="font-size:12px;color:#4a515b;margin-top:2px">
+              ${esc(invoice.planSnapshot?.planName || "")}${
+                invoice.planSnapshot?.planVersion ? ` v${invoice.planSnapshot.planVersion}` : ""
+              }
+            </div>
+          </td>
+          <td style="vertical-align:top;text-align:right;font-size:12.5px;color:#4a515b">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;margin-bottom:6px">Dates</div>
+            <div>Service period: ${fmtDate(invoice.periodStart)} – ${fmtDate(invoice.periodEnd)}</div>
+            <div style="margin-top:2px">Issued: ${fmtDate(invoice.issuedAt)}</div>
+            <div style="margin-top:2px">Due: <strong style="color:#1d1f20">${fmtDate(invoice.dueAt)}</strong></div>
+          </td>
         </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
+      </table>
+    </div>
 
-    ${allowanceBlock}
+    <!-- ── Line items ── -->
+    <div style="padding:20px 32px 0">
+      ${allowanceBlock}
+      <table style="width:100%;border-collapse:collapse;margin-top:${allowanceBlock ? "16px" : "0"}">
+        <thead>
+          <tr style="background:#f2f2f3">
+            <th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;border-radius:6px 0 0 6px">Description</th>
+            <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999">Qty</th>
+            <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999">Unit price</th>
+            <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;border-radius:0 6px 6px 0">Amount</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
 
-    <table style="width:100%;border-collapse:collapse;margin-top:18px">
-      <tr><td></td><td style="width:230px">
+    <!-- ── Totals (brand-blue box: #eef6ff fill, #5980a6 border) ── -->
+    <table style="width:100%;border-collapse:collapse;padding:20px 32px 0;margin-top:20px">
+      <tr><td></td><td style="width:260px;padding:0 32px 0 0">
+      <div style="background:#eef6ff;border:1.5px solid #5980a6;border-radius:8px;padding:16px 20px;min-width:240px">
         <table style="width:100%;border-collapse:collapse">
           <tr>
-            <td style="padding:4px 0;font-size:12.5px;color:#6b7280">Subtotal</td>
-            <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#25292f">${money(invoice.subtotal, currency)}</td>
+            <td style="padding:5px 0;font-size:12.5px;color:#4a515b">Subtotal</td>
+            <td style="padding:5px 0;text-align:right;font-size:12.5px;color:#1d2d3d">${money(invoice.subtotal, currency)}</td>
           </tr>
           ${
             toNumber(invoice.discount) > 0
-              ? `<tr><td style="padding:4px 0;font-size:12.5px;color:#6b7280">Discount${
-                  invoice.discountApplied?.type === "percentage"
-                    ? ` (${invoice.discountApplied.value}%)`
-                    : ""
-                }</td>
-                 <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#047857">−${money(invoice.discount, currency)}</td></tr>`
+              ? `<tr>
+                  <td style="padding:5px 0;font-size:12.5px;color:#4a515b">Discount${
+                    invoice.discountApplied?.type === "percentage"
+                      ? ` (${invoice.discountApplied.value}%)`
+                      : ""
+                  }</td>
+                  <td style="padding:5px 0;text-align:right;font-size:12.5px;color:#5980a6;font-weight:600">−${money(invoice.discount, currency)}</td>
+                </tr>`
               : ""
           }
           ${
             toNumber(invoice.tax) > 0
-              ? `<tr><td style="padding:4px 0;font-size:12.5px;color:#6b7280">Tax (${invoice.taxRatePercent || 0}%)</td>
-                 <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#25292f">${money(invoice.tax, currency)}</td></tr>`
+              ? `<tr>
+                  <td style="padding:5px 0;font-size:12.5px;color:#4a515b">GST (${invoice.taxRatePercent || 0}%)</td>
+                  <td style="padding:5px 0;text-align:right;font-size:12.5px;color:#1d2d3d">${money(invoice.tax, currency)}</td>
+                </tr>`
               : ""
           }
           <tr>
-            <td style="padding:8px 0 4px;border-top:1px solid #eef0f3;font-size:14px;font-weight:800;color:#12151a">Total</td>
-            <td style="padding:8px 0 4px;border-top:1px solid #eef0f3;text-align:right;font-size:14px;font-weight:800;color:#12151a">${money(invoice.total, currency)}</td>
+            <td style="padding:10px 0 5px;border-top:1.5px solid #5980a680;font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#1d2d3d">Total</td>
+            <td style="padding:10px 0 5px;border-top:1.5px solid #5980a680;text-align:right;font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:700;color:#1d2d3d">${money(invoice.total, currency)}</td>
           </tr>
           ${
             toNumber(invoice.amountPaid) > 0
-              ? `<tr><td style="padding:4px 0;font-size:12.5px;color:#6b7280">Paid</td>
-                 <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#047857">−${money(invoice.amountPaid, currency)}</td></tr>`
+              ? `<tr>
+                  <td style="padding:4px 0;font-size:12.5px;color:#4a515b">Amount paid</td>
+                  <td style="padding:4px 0;text-align:right;font-size:12.5px;color:#5980a6;font-weight:600">−${money(invoice.amountPaid, currency)}</td>
+                </tr>`
               : ""
           }
           <tr>
-            <td style="padding:4px 0;font-size:13px;font-weight:800;color:#12151a">Amount due</td>
-            <td style="padding:4px 0;text-align:right;font-size:13px;font-weight:800;color:${
-              toNumber(invoice.amountDue) > 0 ? "#b45309" : "#047857"
+            <td style="padding:4px 0;font-size:14px;font-weight:700;color:#1d1f20">Amount due</td>
+            <td style="padding:4px 0;text-align:right;font-size:14px;font-weight:700;color:${
+              toNumber(invoice.amountDue) > 0 ? "#b45309" : "#5980a6"
             }">${money(invoice.amountDue, currency)}</td>
           </tr>
         </table>
+      </div>
       </td></tr>
     </table>
 
+    <!-- ── Notes ── -->
     ${
       invoice.notes
-        ? `<div style="margin-top:18px;font-size:12px;color:#6b7280;white-space:pre-wrap">${esc(invoice.notes)}</div>`
+        ? `<div style="padding:18px 32px 0;font-size:12px;color:#4a515b;white-space:pre-wrap;line-height:1.6">${esc(invoice.notes)}</div>`
         : ""
     }
 
-    <div style="margin-top:22px;padding-top:12px;border-top:1px solid #eef0f3;font-size:11px;color:#98a0ab">
+    <!-- ── Footer ── -->
+    <div style="margin:18px 32px 0;padding:14px 0;border-top:1px solid #e8e9eb;font-size:10.5px;color:#999;padding-bottom:28px">
       ${esc(brandName)} · This invoice is generated from metered usage recorded against your subscription.
       Amounts are in ${esc(currency)}.
     </div>
+
   </div>
 </body>
 </html>`;
