@@ -13,7 +13,10 @@
 // Everything rendered comes from the invoice's OWN line items — the schema
 // stores each line's description, quantity and unit price precisely so the
 // document reproduces years later without loading the plan, the product
-// catalogue or the subscription (Invoice.js:12). Nothing here joins.
+// catalogue or the subscription (Invoice.js:12). The renderer itself never
+// queries anything; billToFromClient() below is a pure mapper for callers
+// that HAVE already loaded a Client doc (the billed party — see
+// mongoose-schema.md §0) and want its address/registration number rendered.
 
 const { launchPdfBrowser } = require("../../utils/puppeteerLaunch");
 const { toNumber } = require("../../utils/money");
@@ -64,10 +67,50 @@ const LINE_LABELS = {
 //   Included line   : #5980a6 (was teal; now brand blue)
 
 /**
+ * Build the `billTo` renderer option from a Client document.
+ *
+ * Client is the billed party in this system (userType `client` — the account
+ * admin — bills AS the company, not as themselves; see
+ * mongoose-schema.md §0), so the company's own name/address/registration
+ * number are the correct source for what appears on the invoice — never the
+ * individual admin user's.
+ *
+ * Client.address carries a SCHEMA DEFAULT (`country: "Bangladesh"`) that
+ * applies even when nobody ever filled the address in, because the field
+ * default fires on the subdocument itself (Client.js:24-37). Treating that
+ * bare default as a real address would print a country nobody entered onto a
+ * billing document, so a client with no street/city/state/zipcode on file is
+ * treated as having NO address — never partially rendered from the default.
+ *
+ * @param {Object} client  a Client document/lean object, or null/undefined
+ * @returns {{ name: ?string, addressLines: string[], regNo: ?string }}
+ *          an empty-shaped billTo when there is no client to read from
+ */
+function billToFromClient(client) {
+  if (!client) return {};
+  const a = client.address || {};
+  const hasRealAddress = !!(a.street || a.city || a.state || a.zipcode);
+  const addressLines = hasRealAddress
+    ? [a.street, [a.city, a.state, a.zipcode].filter(Boolean).join(" "), a.country].filter(
+        Boolean
+      )
+    : [];
+  return {
+    name: client.name || null,
+    addressLines,
+    regNo: client.registrationNumber || null,
+  };
+}
+
+/**
  * Render the invoice.
  *
  * @param {Object} invoice   an Invoice document or lean object
- * @param {Object} opts      { accountName, accountEmail, brandName }
+ * @param {Object} opts      { accountName, brandName, brandLogoUrl, issuer,
+ *                             billTo, supportUrl, supportLabel } — issuer
+ *                             defaults to dooit's own registered address;
+ *                             billTo is opt-in and shows nothing until a
+ *                             caller passes one (see billToFromClient).
  * @returns {String} a self-contained HTML document
  */
 function renderInvoiceHtml(
@@ -76,6 +119,20 @@ function renderInvoiceHtml(
     accountName,
     brandName = "Dooit.ai",
     brandLogoUrl = "https://dooit.ai/assets/img/logo.png",
+    // Issuer ("From") details — dooit's own registered address, the actual
+    // supplier of record. No ABN is set: none has been supplied, and per
+    // billToFromClient's own rule this file never invents one. A caller can
+    // still override or blank this out by passing its own `issuer`.
+    issuer = {
+      name: "Dooit.ai",
+      addressLines: ["74 Jasper Road", "Bentleigh VIC 3204", "Australia"],
+    }, // { name, addressLines: [], abn }
+    // Full postal address for the customer. Falls back to accountName alone
+    // when addressLines is empty, preserving the old behaviour.
+    billTo = {}, // { name, addressLines: [] }
+    // "Questions on your bill?" support link, shown in the footer.
+    supportUrl = null,
+    supportLabel = "Questions about your bill?",
   } = {}
 ) {
   const currency = invoice.currency || "AUD";
@@ -86,6 +143,15 @@ function renderInvoiceHtml(
   const allowance = invoice.allowance || {};
   const isPaid = invoice.status === "paid";
   const isVoid = invoice.status === "void";
+
+  const billToName = billTo.name || accountName || "—";
+  const billToLines = Array.isArray(billTo.addressLines) ? billTo.addressLines : [];
+  const issuerLines = Array.isArray(issuer.addressLines) ? issuer.addressLines : [];
+  const hasIssuer = !!(issuer.name || issuerLines.length || issuer.abn);
+  const billToRegNo = billTo.regNo || null;
+
+  // A multi-line address block body — escaped per line, <br>-joined.
+  const addressHtml = (arr) => arr.filter(Boolean).map((l) => esc(l)).join("<br>");
 
   // Header brand mark. A hosted <img> is used when brandLogoUrl is set;
   // brandName is kept as the img alt text so image-blocking email clients
@@ -207,14 +273,26 @@ function renderInvoiceHtml(
     <!-- ── Brand-blue rule (matches thumbnail) ── -->
     <div style="height:3px;background:#5980a6;margin:20px 32px 0;border-radius:2px"></div>
 
-    <!-- ── Billed-to / Dates ── -->
+    <!-- ── From / Bill to / Dates ── -->
     <div style="padding:20px 32px 0">
       <table style="width:100%;border-collapse:collapse">
         <tr>
-          <td style="vertical-align:top;font-size:12.5px;color:#4a515b">
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;margin-bottom:6px">Billed to</div>
-            <div style="font-size:14px;font-weight:700;color:#1d1f20">${esc(accountName || "—")}</div>
-            <div style="font-size:12px;color:#4a515b;margin-top:2px">
+          ${
+            hasIssuer
+              ? `<td style="vertical-align:top;font-size:12.5px;color:#4a515b;width:33%">
+                  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;margin-bottom:6px">From</div>
+                  ${issuer.name ? `<div style="font-size:13px;font-weight:700;color:#1d1f20">${esc(issuer.name)}</div>` : ""}
+                  ${issuerLines.length ? `<div style="margin-top:2px;line-height:1.5">${addressHtml(issuerLines)}</div>` : ""}
+                  ${issuer.abn ? `<div style="margin-top:4px;font-size:11.5px;color:#999">ABN ${esc(issuer.abn)}</div>` : ""}
+                </td>`
+              : ""
+          }
+          <td style="vertical-align:top;font-size:12.5px;color:#4a515b${hasIssuer ? ";width:33%" : ""}">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;margin-bottom:6px">Bill to</div>
+            <div style="font-size:14px;font-weight:700;color:#1d1f20">${esc(billToName)}</div>
+            ${billToLines.length ? `<div style="font-size:12px;margin-top:2px;line-height:1.5">${addressHtml(billToLines)}</div>` : ""}
+            ${billToRegNo ? `<div style="margin-top:2px;font-size:11.5px;color:#999">Reg. no. ${esc(billToRegNo)}</div>` : ""}
+            <div style="font-size:12px;color:#4a515b;margin-top:4px">
               ${esc(invoice.planSnapshot?.planName || "")}${
                 invoice.planSnapshot?.planVersion ? ` v${invoice.planSnapshot.planVersion}` : ""
               }
@@ -306,9 +384,19 @@ function renderInvoiceHtml(
     }
 
     <!-- ── Footer ── -->
-    <div style="margin:18px 32px 0;padding:14px 0;border-top:1px solid #e8e9eb;font-size:10.5px;color:#999;padding-bottom:28px">
-      ${esc(brandName)} · This invoice is generated from metered usage recorded against your subscription.
-      Amounts are in ${esc(currency)}.
+    <div style="margin:18px 32px 0;padding:14px 0;border-top:1px solid #e8e9eb;padding-bottom:28px">
+      ${
+        supportUrl
+          ? `<div style="font-size:12px;color:#1d2d3d;margin-bottom:8px">
+              ${esc(supportLabel)}
+              <a href="${esc(supportUrl)}" style="color:#5980a6;font-weight:600;text-decoration:none">${esc(supportUrl.replace(/^https?:\/\//, ""))}</a>
+            </div>`
+          : ""
+      }
+      <div style="font-size:10.5px;color:#999">
+        ${esc(brandName)} · This invoice is generated from metered usage recorded against your subscription.
+        Amounts are in ${esc(currency)}.
+      </div>
     </div>
 
   </div>
@@ -357,4 +445,9 @@ const isBrowserUnavailable = (err) =>
     err?.message || ""
   );
 
-module.exports = { renderInvoiceHtml, renderInvoicePdf, isBrowserUnavailable };
+module.exports = {
+  renderInvoiceHtml,
+  renderInvoicePdf,
+  isBrowserUnavailable,
+  billToFromClient,
+};

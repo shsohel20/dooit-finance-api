@@ -10,9 +10,10 @@
 // handle a failed send identically. A reminder that renders differently from
 // the invoice it is chasing is worse than no reminder.
 
-const { renderInvoiceHtml, renderInvoicePdf } = require("./invoiceDocument");
+const { renderInvoiceHtml, renderInvoicePdf, billToFromClient } = require("./invoiceDocument");
 const { resolveUserEmailById, maskEmail } = require("../../utils/resolveUserEmail");
 const sendEmail = require("../../utils/sendEmail");
+const Client = require("../../models/Client");
 
 /** True when this deployment can send mail at all. */
 const mailConfigured = () => !!process.env.SMTP_EMAIL;
@@ -44,7 +45,21 @@ async function deliverInvoiceEmail(invoice, { to = null, subject, introHtml = ""
     throw err;
   }
 
-  const html = renderInvoiceHtml(invoice, { accountName: account.name });
+  // Resolved by id rather than relying on the caller to have populated it —
+  // deliverInvoiceEmail is shared by the manual send and the dunning sweep,
+  // and both must render the same billTo regardless of what the caller's own
+  // query happened to load.
+  // invoice.client may arrive as a raw ObjectId or already populated,
+  // depending on the caller's own query — normalise to an id either way.
+  const clientId = invoice.client?._id || invoice.client;
+  const client = clientId
+    ? await Client.findById(clientId).select("name address registrationNumber").lean()
+    : null;
+
+  const html = renderInvoiceHtml(invoice, {
+    accountName: account.name,
+    billTo: billToFromClient(client),
+  });
 
   // The PDF is best-effort. Chrome failing to start is an infrastructure
   // problem; it must not stop the customer receiving an invoice they can read

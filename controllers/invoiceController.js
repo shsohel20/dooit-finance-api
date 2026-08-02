@@ -34,6 +34,7 @@ const {
   renderInvoiceHtml,
   renderInvoicePdf,
   isBrowserUnavailable,
+  billToFromClient,
 } = require("../services/billing/invoiceDocument");
 const { deliverInvoiceEmail } = require("../services/billing/invoiceMailer");
 
@@ -307,10 +308,18 @@ exports.downloadInvoicePdf = asyncHandler(async (req, res, next) => {
   const invoice = await Invoice.findOne({
     _id: req.params.id,
     ...scopeFor(req),
-  }).populate("user", "name email");
+  })
+    .populate("user", "name email")
+    // Client is the billed party (see billToFromClient's own docs), so its
+    // name/address/registrationNumber — not the individual admin's — are
+    // what belongs on the invoice.
+    .populate("client", "name address registrationNumber");
   if (!invoice) return next(new ErrorResponse("Invoice not found", 404));
 
-  const html = renderInvoiceHtml(invoice, { accountName: invoice.user?.name });
+  const html = renderInvoiceHtml(invoice, {
+    accountName: invoice.user?.name,
+    billTo: billToFromClient(invoice.client),
+  });
 
   let pdf;
   try {
