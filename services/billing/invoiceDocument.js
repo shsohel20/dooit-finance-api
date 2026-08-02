@@ -184,7 +184,7 @@ function renderInvoiceHtml(
         ? `<span style="color:#5980a6;font-weight:700">Included</span>`
         : money(l.amount, currency);
       return `
-        <tr>
+        <tr style="page-break-inside:avoid;break-inside:avoid">
           <td style="padding:11px 14px;border-bottom:1px solid #e8e9eb;vertical-align:top">
             <div style="font-size:13px;color:#1d1f20;font-weight:600;line-height:1.3">${esc(l.description)}</div>
             <div style="font-size:11px;color:#999;margin-top:2px;letter-spacing:.2px">
@@ -213,7 +213,7 @@ function renderInvoiceHtml(
     allowance.included == null && !allowance.used
       ? ""
       : `
-      <div style="margin-top:16px;padding:13px 16px;background:#f2f2f3;border-radius:8px;border-left:3px solid #5980a6">
+      <div style="margin-top:16px;padding:13px 16px;background:#f2f2f3;border-radius:8px;border-left:3px solid #5980a6;page-break-inside:avoid;break-inside:avoid">
         <div style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#999;margin-bottom:5px">
           Allowance this period
         </div>
@@ -274,7 +274,7 @@ function renderInvoiceHtml(
     <div style="height:3px;background:#5980a6;margin:20px 32px 0;border-radius:2px"></div>
 
     <!-- ── From / Bill to / Dates ── -->
-    <div style="padding:20px 32px 0">
+    <div style="padding:20px 32px 0;page-break-inside:avoid;break-inside:avoid">
       <table style="width:100%;border-collapse:collapse">
         <tr>
           ${
@@ -312,7 +312,10 @@ function renderInvoiceHtml(
     <div style="padding:20px 32px 0">
       ${allowanceBlock}
       <table style="width:100%;border-collapse:collapse;margin-top:${allowanceBlock ? "16px" : "0"}">
-        <thead>
+        <!-- table-header-group repeats this row on every printed page the
+             table spans, so a long invoice never continues under a page
+             break with no column headings visible. -->
+        <thead style="display:table-header-group">
           <tr style="background:#f2f2f3">
             <th style="padding:8px 14px;text-align:left;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;border-radius:6px 0 0 6px">Description</th>
             <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999">Qty</th>
@@ -320,14 +323,14 @@ function renderInvoiceHtml(
             <th style="padding:8px 14px;text-align:right;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;color:#999;border-radius:0 6px 6px 0">Amount</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody style="display:table-row-group">${rows}</tbody>
       </table>
     </div>
 
     <!-- ── Totals (brand-blue box: #eef6ff fill, #5980a6 border) ── -->
     <table style="width:100%;border-collapse:collapse;padding:20px 32px 0;margin-top:20px">
-      <tr><td></td><td style="width:260px;padding:0 32px 0 0">
-      <div style="background:#eef6ff;border:1.5px solid #5980a6;border-radius:8px;padding:16px 20px;min-width:240px">
+      <tr style="page-break-inside:avoid;break-inside:avoid"><td></td><td style="width:260px;padding:0 32px 0 0">
+      <div style="background:#eef6ff;border:1.5px solid #5980a6;border-radius:8px;padding:16px 20px;min-width:240px;page-break-inside:avoid;break-inside:avoid">
         <table style="width:100%;border-collapse:collapse">
           <tr>
             <td style="padding:5px 0;font-size:12.5px;color:#4a515b">Subtotal</td>
@@ -379,12 +382,12 @@ function renderInvoiceHtml(
     <!-- ── Notes ── -->
     ${
       invoice.notes
-        ? `<div style="padding:18px 32px 0;font-size:12px;color:#4a515b;white-space:pre-wrap;line-height:1.6">${esc(invoice.notes)}</div>`
+        ? `<div style="padding:18px 32px 0;font-size:12px;color:#4a515b;white-space:pre-wrap;line-height:1.6;page-break-inside:avoid;break-inside:avoid">${esc(invoice.notes)}</div>`
         : ""
     }
 
     <!-- ── Footer ── -->
-    <div style="margin:18px 32px 0;padding:14px 0;border-top:1px solid #e8e9eb;padding-bottom:28px">
+    <div style="margin:18px 32px 0;padding:14px 0;border-top:1px solid #e8e9eb;padding-bottom:28px;page-break-inside:avoid;break-inside:avoid">
       ${
         supportUrl
           ? `<div style="font-size:12px;color:#1d2d3d;margin-bottom:8px">
