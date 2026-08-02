@@ -1,0 +1,4353 @@
+{
+  "info": {
+    "_postman_id": "b0000000-0000-4000-a000-00000000beef",
+    "name": "Billing — Complete",
+    "description": "The whole billing module: **products → plans → subscriptions → usage → invoices → payments**.\n\nSupersedes `BillingProducts` and `BillingPlans`, which cover only steps 1–2.\n\n## Access model\n\n| | dooit | client |\n|---|---|---|\n| catalogue & plans | author, publish, version | read what is visible to them |\n| subscriptions | provision for anyone | **subscribe / change / cancel** own |\n| usage | record, bulk-ingest, reverse | read own |\n| invoices | close, issue, void | read own |\n| payments | record, retry, refund | read own |\n\nA client who guesses another account's id gets **404**, never 403 — existence is not disclosed.\n\n## Billing model (Model B)\n\nThe base fee buys a quota of **applicants**. Usage of products the plan entitles is\ncovered by that quota and bills nothing — those lines appear on the invoice at\n**A$0.00, marked \"included\"**. Only applicants beyond the allowance bill, at the\noverage price. The **6 · End-to-end** folder proves this: 818 metered events across\n200 applicants produce an invoice of exactly **A$1,900.00**.\n\nTwo rules sit alongside it:\n\n- **Usage outside the plan is charged at list price**, per event, and never\n  consumes the applicant allowance. It appears as its own invoice line flagged\n  `isExcluded`. A zero-amount line is therefore always `isIncluded` — already paid\n  for by the base fee. A line is never both.\n- **A negotiated discount** (percentage or fixed) lives on the *subscription*, not\n  in the frozen price snapshot, so dooit can renegotiate it. Each invoice copies\n  the discount it applied, so history stays reproducible. See **3b**.\n\n## Setup\n1. Set `URL` (default `http://localhost:6830`), and the four credential variables.\n2. Run **0 · Auth** — captures `{{token}}` and `{{clientToken}}`.\n3. Run **6 · End-to-end** top to bottom for a full pass over the module.\n\nEvery request asserts its status, so the collection runs as a smoke suite:\n\n```\nnewman run Billing.postman_collection.json --env-var URL=http://localhost:6830\n```\n\nReference: docs/billingmodule/mongoose-schema.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "dooit JWT — set by 0 · Auth"
+    },
+    {
+      "key": "clientToken",
+      "value": "",
+      "type": "string",
+      "description": "client JWT — set by 0 · Auth"
+    },
+    {
+      "key": "dooitEmail",
+      "value": "admin@dooit.ai",
+      "type": "string"
+    },
+    {
+      "key": "dooitPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "clientEmail",
+      "value": "client@example.com",
+      "type": "string"
+    },
+    {
+      "key": "clientPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "planId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "draftId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "clientUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "subscriptionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "usageId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "invoiceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "paymentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "periodKey",
+      "value": "",
+      "type": "string",
+      "description": "set by End-to-end · Close period"
+    }
+  ],
+  "item": [
+    {
+      "name": "0 · Auth",
+      "item": [
+        {
+          "name": "Login (dooit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (r.token) pm.collectionVariables.set('token', r.token);",
+                  "pm.test('token returned', () => pm.expect(r.token).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{dooitEmail}}\",\n  \"password\": \"{{dooitPassword}}\",\n  \"userType\": \"dooit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login (client)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json();",
+                  "if (r.token) pm.collectionVariables.set('clientToken', r.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{clientEmail}}\",\n  \"password\": \"{{clientPassword}}\",\n  \"userType\": \"client\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "1 · Products",
+      "description": "The metered SKU catalogue. dooit authors it; clients read it.",
+      "item": [
+        {
+          "name": "Seed the 22-product catalogue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "console.log('created', d.created, 'updated', d.updated);",
+                  "pm.test('no row failures', () => pm.expect(d.failed).to.have.lengthOf(0));",
+                  "pm.test('22 rows', () => pm.expect(d.created + d.updated).to.eql(22));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\n      \"name\": \"Customer Accounts\",\n      \"code\": \"customer_account\",\n      \"category\": \"Platform\",\n      \"unit\": \"account\",\n      \"defaultUnitPrice\": 55,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Identity Document Verification\",\n      \"code\": \"id_doc_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.79,\n      \"billable\": true\n    },\n    {\n      \"name\": \"AML Screening\",\n      \"code\": \"aml_screening\",\n      \"category\": \"Screening\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia DVS Verification\",\n      \"code\": \"aus_gov_dvs\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.68,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Liveness & Face match\",\n      \"code\": \"liveness_face_match\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.32,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Ongoing AML Monitoring\",\n      \"code\": \"ongoing_aml_monitoring\",\n      \"category\": \"Monitoring\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.08,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Proof of Address Verification\",\n      \"code\": \"proof_of_address\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 1.04,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Additional fields extraction\",\n      \"code\": \"additional_fields\",\n      \"category\": \"Data\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.06,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Applicant Risk Scoring: Individuals\",\n      \"code\": \"risk_scoring_individual\",\n      \"category\": \"Risk\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.0198,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia Residency Verification\",\n      \"code\": \"aus_residency\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 1.52,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia DVS Verification (visa)\",\n      \"code\": \"aus_gov_dvs_visa\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.68,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Phone Verification\",\n      \"code\": \"phone_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Email Verification\",\n      \"code\": \"email_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"SMS Notification Service - Tier 1\",\n      \"code\": \"sms_tier1\",\n      \"category\": \"Notifications\",\n      \"unit\": \"message\",\n      \"defaultUnitPrice\": 0.09,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Document attachment to questionnaire\",\n      \"code\": \"questionnaire_attachment\",\n      \"category\": \"Data\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.12,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Known face search\",\n      \"code\": \"known_face_search\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0,\n      \"billable\": false\n    },\n    {\n      \"name\": \"Crypto Transaction Monitoring\",\n      \"code\": \"crypto_tx_monitoring\",\n      \"category\": \"Monitoring\",\n      \"unit\": \"event\",\n      \"defaultUnitPrice\": 0.44,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Device Intelligence\",\n      \"code\": \"device_intelligence\",\n      \"category\": \"Risk\",\n      \"unit\": \"event\",\n      \"defaultUnitPrice\": 0.0065,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Email Risk Assessment\",\n      \"code\": \"email_risk\",\n      \"category\": \"Risk\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.09,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Face Authentication (per session)\",\n      \"code\": \"face_auth_session\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"session\",\n      \"defaultUnitPrice\": 0.173,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Payment Method Check Advanced\",\n      \"code\": \"payment_method_check_adv\",\n      \"category\": \"Screening\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.95,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Facial Age Estimation\",\n      \"code\": \"facial_age_estimation\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.021,\n      \"billable\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/bulk-import",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "bulk-import"
+              ]
+            },
+            "description": "Upsert by code — safe to re-run. Real prices from the AML Billing prototype."
+          },
+          "response": []
+        },
+        {
+          "name": "List products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "{ const d = pm.response.json().data; const v = d[0] && d[0]._id; if (v) pm.collectionVariables.set('productId', v); }",
+                  "const d = pm.response.json().data;",
+                  "pm.test('prices are plain numbers', () => d.forEach((p) =>",
+                  "  pm.expect(typeof p.defaultUnitPrice, p.code).to.eql('number')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product?limit=50&sort=category",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "sort",
+                  "value": "category"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "active | inactive | all"
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "billable",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "includeDeleted",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Category summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('all 8 categories', () =>",
+                  "  pm.expect(pm.response.json().data).to.have.lengthOf(8));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/categories",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "categories"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Product meta (enums)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/meta",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "meta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.test('uid', () => pm.expect(pm.response.json().data.uid).to.match(/^PRD-\\d{7}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Sanctions Recheck\",\n  \"code\": \"sanctions_recheck\",\n  \"category\": \"Screening\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 0.22\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"Updated from Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deactivate product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"inactive\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}/status",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}",
+                "status"
+              ]
+            },
+            "description": "Reports affectedPublishedPlans — frozen plans keep selling it."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}/status",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete product (409 if sold)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            },
+            "description": "Refused while a non-archived plan still includes it."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "2 · Plans",
+      "item": [
+        {
+          "name": "List plans",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan?limit=50&sort=order",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "sort",
+                  "value": "order"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "draft | published | archived | all"
+                },
+                {
+                  "key": "visibility",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "latestOnly",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Plan meta (enums)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/meta",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "meta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grantable client users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "{ const d = pm.response.json().data; const v = d[0] && d[0]._id; if (v) pm.collectionVariables.set('clientUserId', v); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/clients",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "clients"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create draft plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('planId', d._id);",
+                  "pm.test('parsed', () => { pm.expect(d.includedUsage).to.eql(5000); pm.expect(d.tiers[2].to).to.eql(null); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_growth\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"visibility\": \"public\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.71\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            },
+            "description": "Free-text volumes (\"5,000\", \"∞\", \"10%\") are normalised server-side."
+          },
+          "response": []
+        },
+        {
+          "name": "Update draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tagline\": \"Scaling compliance teams — updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Publish",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('published', () => pm.expect(pm.response.json().data.status).to.eql('published'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "publish"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "New version",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('draftId', pm.response.json().data._id);",
+                  "pm.test('draft v2', () => pm.expect(pm.response.json().data.version).to.eql(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/new-version",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "new-version"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Publish v2 (archives v1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('archived 1', () =>",
+                  "  pm.expect(pm.response.json().meta.archivedPreviousVersions).to.eql(1));",
+                  "pm.collectionVariables.set('planId', pm.collectionVariables.get('draftId'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{draftId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{draftId}}",
+                "publish"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Grant private access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{clientUserId}}\",\n  \"note\": \"Negotiated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility/{{clientUserId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility",
+                "{{clientUserId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Archive plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/archive",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "archive"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Delete draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{draftId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{draftId}}"
+              ]
+            },
+            "description": "Only drafts can be deleted; published plans must be archived."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3 · Subscriptions",
+      "description": "The one collection a CLIENT writes to. Note the client token on the writes.",
+      "item": [
+        {
+          "name": "Subscribe (as client)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('subscriptionId', d._id);",
+                  "pm.test('snapshot frozen', () => pm.expect(d.priceSnapshot.planCode).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"{{planId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription"
+              ]
+            },
+            "description": "Freezes the plan pricing into priceSnapshot — billing reads that, never the plan."
+          },
+          "response": []
+        },
+        {
+          "name": "My current subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/current",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "current"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List subscriptions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription?limit=50",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "planCode",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "user",
+                  "value": "",
+                  "disabled": true,
+                  "description": "dooit only"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Change plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"{{planId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/change-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "change-plan"
+              ]
+            },
+            "description": "Supersedes rather than mutates — a NEW subscription with its own snapshot."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel (at period end)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Testing\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/cancel",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "cancel"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Resume",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/resume",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "resume"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Pause (dooit only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Non-payment\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/pause",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "pause"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Apply a discount (dooit only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('stored', () => { pm.expect(b.data.discount.type).to.eql('percentage');",
+                  "  pm.expect(b.data.discount.value).to.eql(15); });",
+                  "pm.test('reports the previous value', () =>",
+                  "  pm.expect(b.meta.previous).to.have.property('type'));",
+                  "console.log('off the base fee:', b.meta.estimatedOnBaseFee);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"percentage\",\n  \"value\": 15,\n  \"reason\": \"Launch partner\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/discount",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "discount"
+              ]
+            },
+            "description": "Percentage or fixed, against the whole invoice SUBTOTAL. Takes effect at the\nnext close — invoices already produced copied the discount they applied, so\nthis never rewrites a total the customer has been shown.\n\nThat is also why the discount lives on the subscription and NOT in\npriceSnapshot: the snapshot is frozen, and a negotiated rate has to stay\nrenegotiable. Send { \"type\": \"none\" } to clear it."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "3b · Discount rules",
+      "description": "A concession on price is dooit-only, like pause — never self-service.",
+      "item": [
+        {
+          "name": "Assign a plan WITH a discount",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409 (already subscribed)', () =>",
+                  "  pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code === 201) pm.test('discount attached', () =>",
+                  "  pm.expect(pm.response.json().data.discount.value).to.eql(15));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"{{planId}}\",\n  \"user\": \"{{clientUserId}}\",\n  \"discount\": {\n    \"type\": \"percentage\",\n    \"value\": 15,\n    \"reason\": \"Launch partner\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription"
+              ]
+            },
+            "description": "dooit provisioning on a client's behalf, discount attached at assignment."
+          },
+          "response": []
+        },
+        {
+          "name": "Fixed amount instead",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('fixed', () =>",
+                  "  pm.expect(pm.response.json().data.discount.type).to.eql('fixed'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"fixed\",\n  \"value\": 250,\n  \"reason\": \"Service credit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/discount",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "discount"
+              ]
+            },
+            "description": "Capped at the subtotal at billing time — an invoice never goes negative."
+          },
+          "response": []
+        },
+        {
+          "name": "Clear it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('cleared', () => {",
+                  "  pm.expect(pm.response.json().data.discount.type).to.eql('none');",
+                  "  pm.expect(pm.response.json().meta.cleared).to.eql(true); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"none\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/discount",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "discount"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — a percentage over 100",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('says why', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/exceed 100/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"percentage\",\n  \"value\": 150\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/discount",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "discount"
+              ]
+            },
+            "description": "It would invert the invoice, so it is refused rather than clamped."
+          },
+          "response": []
+        },
+        {
+          "name": "403 — a client cannot discount itself",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"percentage\",\n  \"value\": 50\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/{{subscriptionId}}/discount",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "{{subscriptionId}}",
+                "discount"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — nor at subscribe time",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));",
+                  "pm.test('names the rule', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/only dooit/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"{{planId}}\",\n  \"discount\": {\n    \"type\": \"percentage\",\n    \"value\": 50\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription"
+              ]
+            },
+            "description": "Rejected, not ignored — silently dropping it would let a client believe they had bought at a discount."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "4 · Usage",
+      "description": "Append-only metering. Writes are dooit/system; a client never self-reports.",
+      "item": [
+        {
+          "name": "Record one event",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 200 (replay)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.collectionVariables.set('usageId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscription\": \"{{subscriptionId}}\",\n  \"productCode\": \"id_doc_verification\",\n  \"quantity\": 1,\n  \"externalId\": \"pm_single_1\",\n  \"applicantKey\": \"cust_pm_1\",\n  \"source\": {\n    \"system\": \"manual\",\n    \"refType\": \"Customer\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/usage",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage"
+              ]
+            },
+            "description": "The idempotency key is composed as source:externalId:productCode:ordinal."
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk ingest",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test('no failures', () => pm.expect(d.failed).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"events\": [\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"pm_bulk_1\",\n      \"applicantKey\": \"cust_pm_2\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"pm_bulk_1\",\n      \"applicantKey\": \"cust_pm_2\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"pm_bulk_2\",\n      \"applicantKey\": \"cust_pm_3\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/bulk",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "bulk"
+              ]
+            },
+            "description": "Note events 1 and 2 share an externalId but differ by product — both must record."
+          },
+          "response": []
+        },
+        {
+          "name": "List usage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/usage?limit=50",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "subscription",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "productCode",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "periodKey",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "recorded | billed | excluded | reversed | all"
+                },
+                {
+                  "key": "from",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Usage summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('periodKey', d.periodKey);",
+                  "pm.test('has totals', () => pm.expect(d.totals).to.have.property('distinctApplicants'));",
+                  "pm.test('reports usage outside the plan', () =>",
+                  "  pm.expect(d).to.have.property('excludedByProduct'));",
+                  "console.log('outside plan:', d.totals.excludedEvents, 'events =',",
+                  "  d.totals.excludedAmount);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/summary?subscription={{subscriptionId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "subscription",
+                  "value": "{{subscriptionId}}"
+                },
+                {
+                  "key": "periodKey",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "byProduct, byDay, and DISTINCT applicants — the allowance denominator.\n\n`byProduct` is ENTITLED usage; `excludedByProduct` is usage of products the\nplan does not cover, which bills at list price per event and never consumes\nthe applicant allowance. The split is on `exclusionReason`, not on status, so\na product does not jump buckets the moment its period closes."
+          },
+          "response": []
+        },
+        {
+          "name": "Pickable records (customers / cases)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "if (!pm.response.json().data.length)",
+                  "  console.log('empty —', pm.response.json().meta?.reason || 'no records');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/references?subscription={{subscriptionId}}&refType=Customer",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "references"
+              ],
+              "query": [
+                {
+                  "key": "subscription",
+                  "value": "{{subscriptionId}}"
+                },
+                {
+                  "key": "refType",
+                  "value": "Customer",
+                  "description": "Customer | Case"
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Backs the manual-entry picker so applicantKey is chosen, never typed."
+          },
+          "response": []
+        },
+        {
+          "name": "Reverse a record",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Duplicate check\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/{{usageId}}/reverse",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "{{usageId}}",
+                "reverse"
+              ]
+            },
+            "description": "Appends a NEGATIVE record. The original is never edited."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "5 · Invoices",
+      "item": [
+        {
+          "name": "Preview (writes nothing)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('not persisted', () => pm.expect(pm.response.json().meta.persisted).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/preview?subscription={{subscriptionId}}&periodKey={{periodKey}}&taxRatePercent=0",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "preview"
+              ],
+              "query": [
+                {
+                  "key": "subscription",
+                  "value": "{{subscriptionId}}"
+                },
+                {
+                  "key": "periodKey",
+                  "value": "{{periodKey}}"
+                },
+                {
+                  "key": "taxRatePercent",
+                  "value": "0"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Close period",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('invoiceId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscription\": \"{{subscriptionId}}\",\n  \"periodKey\": \"{{periodKey}}\",\n  \"taxRatePercent\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/close",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "close"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List invoices",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice?limit=50",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "draft | open | paid | overdue | void | all"
+                },
+                {
+                  "key": "subscription",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "periodKey",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Issue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                  "if (pm.response.code === 200) pm.test('numbered', () =>",
+                  "  pm.expect(pm.response.json().data.invoiceNumber).to.match(/^INV-\\d{4}-\\d{4}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dueDays\": 14\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/issue",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "issue"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Email it to the account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, 404 or 503 (SMTP)', () =>",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 404, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  const m = pm.response.json().meta;",
+                  "  console.log('sent to', m.sentTo, '| pdf attached:', m.pdfAttached);",
+                  "  pm.test('address is masked', () => pm.expect(m.sentTo).to.include('*'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"to\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/send",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "send"
+              ]
+            },
+            "description": "Renders the document, attaches it as a PDF and mails it. `to` overrides the\ndelivery address for a one-off (an accounts-payable mailbox) without changing\nwho the invoice is addressed to — leave it empty to use the account address.\n\nNeeds SMTP_EMAIL configured; 503 if this deployment cannot send mail.\nsentAt is NOT stamped when delivery fails, so the record never claims a\ncustomer was invoiced when nothing left the building."
+          },
+          "response": []
+        },
+        {
+          "name": "Download the PDF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, 404 or 503 (no browser)', () =>",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 404, 503]));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.test('content-type', () =>",
+                  "    pm.expect(pm.response.headers.get('Content-Type')).to.include('application/pdf'));",
+                  "  // Guards a real regression: page.pdf() returns a Uint8Array, and Express",
+                  "  // JSON-serialises anything that is not a Buffer — a clean 200 carrying",
+                  "  // {\"0\":37,\"1\":80,...} under a .pdf filename. Only the bytes catch it.",
+                  "  pm.test('really is a PDF', () =>",
+                  "    pm.expect(pm.response.stream.slice(0, 5).toString()).to.eql('%PDF-'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/pdf",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "pdf"
+              ]
+            },
+            "description": "Binary — the same renderer the emailed copy uses, so the attachment and the\ndownload can never disagree about a total.\n\nReturns 503 (not 500) when the host has no headless browser installed:\nthat is a deployment fault affecting every invoice, not a bad document."
+          },
+          "response": []
+        },
+        {
+          "name": "Sweep overdue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/sweep-overdue",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "sweep-overdue"
+              ]
+            },
+            "description": "Moves issued invoices past their due date to overdue."
+          },
+          "response": []
+        },
+        {
+          "name": "Void (releases its usage)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Postman run\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/void",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "void"
+              ]
+            },
+            "description": "DESTRUCTIVE for the run — released usage can be re-invoiced. Skip in a normal pass."
+          },
+          "response": []
+        },
+        {
+          "name": "Mark paid (break-glass)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/mark-paid",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "mark-paid"
+              ]
+            },
+            "description": "Flips status WITHOUT a payment record — nothing to refund or reconcile. Prefer 7 · Payments."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "6 · End-to-end (run in order)",
+      "description": "The whole money path, and the proof of Model B.\n\n818 metered events across 200 distinct applicants, against a plan with a\n5,000-applicant allowance, must invoice **A$1,900.00** — the base fee alone.\nEntitled usage appears at A$0.00 marked \"included\".",
+      "item": [
+        {
+          "name": "1. Meter 200 applicants x 2 products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "pm.test('all recorded', () =>",
+                  "  pm.expect(pm.response.json().data.failed).to.have.lengthOf(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"events\": [\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_0\",\n      \"applicantKey\": \"e2e_cust_0\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_0\",\n      \"applicantKey\": \"e2e_cust_0\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_1\",\n      \"applicantKey\": \"e2e_cust_1\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_1\",\n      \"applicantKey\": \"e2e_cust_1\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_2\",\n      \"applicantKey\": \"e2e_cust_2\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_2\",\n      \"applicantKey\": \"e2e_cust_2\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_3\",\n      \"applicantKey\": \"e2e_cust_3\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_3\",\n      \"applicantKey\": \"e2e_cust_3\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_4\",\n      \"applicantKey\": \"e2e_cust_4\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_4\",\n      \"applicantKey\": \"e2e_cust_4\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_5\",\n      \"applicantKey\": \"e2e_cust_5\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_5\",\n      \"applicantKey\": \"e2e_cust_5\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_6\",\n      \"applicantKey\": \"e2e_cust_6\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_6\",\n      \"applicantKey\": \"e2e_cust_6\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_7\",\n      \"applicantKey\": \"e2e_cust_7\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_7\",\n      \"applicantKey\": \"e2e_cust_7\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_8\",\n      \"applicantKey\": \"e2e_cust_8\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_8\",\n      \"applicantKey\": \"e2e_cust_8\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_9\",\n      \"applicantKey\": \"e2e_cust_9\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_9\",\n      \"applicantKey\": \"e2e_cust_9\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_10\",\n      \"applicantKey\": \"e2e_cust_10\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_10\",\n      \"applicantKey\": \"e2e_cust_10\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_11\",\n      \"applicantKey\": \"e2e_cust_11\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_11\",\n      \"applicantKey\": \"e2e_cust_11\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_12\",\n      \"applicantKey\": \"e2e_cust_12\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_12\",\n      \"applicantKey\": \"e2e_cust_12\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_13\",\n      \"applicantKey\": \"e2e_cust_13\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_13\",\n      \"applicantKey\": \"e2e_cust_13\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_14\",\n      \"applicantKey\": \"e2e_cust_14\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_14\",\n      \"applicantKey\": \"e2e_cust_14\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_15\",\n      \"applicantKey\": \"e2e_cust_15\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_15\",\n      \"applicantKey\": \"e2e_cust_15\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_16\",\n      \"applicantKey\": \"e2e_cust_16\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_16\",\n      \"applicantKey\": \"e2e_cust_16\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_17\",\n      \"applicantKey\": \"e2e_cust_17\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_17\",\n      \"applicantKey\": \"e2e_cust_17\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_18\",\n      \"applicantKey\": \"e2e_cust_18\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_18\",\n      \"applicantKey\": \"e2e_cust_18\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"id_doc_verification\",\n      \"externalId\": \"e2e_id_19\",\n      \"applicantKey\": \"e2e_cust_19\"\n    },\n    {\n      \"subscription\": \"{{subscriptionId}}\",\n      \"productCode\": \"aml_screening\",\n      \"externalId\": \"e2e_aml_19\",\n      \"applicantKey\": \"e2e_cust_19\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/bulk",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "bulk"
+              ]
+            },
+            "description": "40 events, 20 distinct applicants — one applicant using two products counts ONCE."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Summary — distinct applicants",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('periodKey', d.periodKey);",
+                  "console.log('applicants', d.totals.distinctApplicants, 'events', d.totals.events);",
+                  "pm.test('applicants < events (deduped)', () =>",
+                  "  pm.expect(d.totals.distinctApplicants).to.be.below(d.totals.events));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/usage/summary?subscription={{subscriptionId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "subscription",
+                  "value": "{{subscriptionId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "3. Preview the invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test('entitled usage is included at zero', () => {",
+                  "  const inc = d.lineItems.filter((l) => l.isIncluded);",
+                  "  pm.expect(inc).to.not.be.empty;",
+                  "  inc.forEach((l) => pm.expect(l.amount).to.eql(0));",
+                  "});",
+                  "// Anything outside the plan is charged, so it is NOT marked included.",
+                  "pm.test('the two zero-states are distinct', () =>",
+                  "  d.lineItems.forEach((l) =>",
+                  "    pm.expect(l.isIncluded && l.isExcluded, l.description).to.be.false));",
+                  "pm.test('total is the base fee', () => pm.expect(d.total).to.eql(1900));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/preview?subscription={{subscriptionId}}&periodKey={{periodKey}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "preview"
+              ],
+              "query": [
+                {
+                  "key": "subscription",
+                  "value": "{{subscriptionId}}"
+                },
+                {
+                  "key": "periodKey",
+                  "value": "{{periodKey}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4. Close the period",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code === 201) {",
+                  "  const d = pm.response.json().data;",
+                  "  pm.collectionVariables.set('invoiceId', d._id);",
+                  "  pm.test('A$1,900.00', () => pm.expect(d.total).to.eql(1900));",
+                  "  pm.test('allowance recorded', () => pm.expect(d.allowance.overage).to.eql(0));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscription\": \"{{subscriptionId}}\",\n  \"periodKey\": \"{{periodKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/close",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "close"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "5. Issue it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () => pm.expect(pm.response.code).to.be.oneOf([200, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dueDays\": 14\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/{{invoiceId}}/issue",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "{{invoiceId}}",
+                "issue"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. Record the payment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 200 (replay)', () => pm.expect(pm.response.code).to.be.oneOf([200, 201]));",
+                  "pm.collectionVariables.set('paymentId', pm.response.json().data._id);",
+                  "if (pm.response.code === 201) pm.test('invoice paid', () =>",
+                  "  pm.expect(pm.response.json().meta.invoiceStatus).to.eql('paid'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice\": \"{{invoiceId}}\",\n  \"method\": \"bank_transfer\",\n  \"transactionId\": \"e2e_txn_1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment"
+              ]
+            },
+            "description": "Omitting `amount` settles the whole outstanding balance."
+          },
+          "response": []
+        },
+        {
+          "name": "7. Partial refund",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code === 201) {",
+                  "  pm.test('partial', () => pm.expect(pm.response.json().meta.partial).to.eql(true));",
+                  "  pm.test('invoice reopened', () => pm.expect(pm.response.json().meta.invoiceStatus).to.eql('open'));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100,\n  \"reason\": \"Goodwill credit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/{{paymentId}}/refund",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "{{paymentId}}",
+                "refund"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "8. Reconciliation check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));",
+                  "const m = pm.response.json().meta;",
+                  "console.log('collected', m.collected, 'refunded', m.refunded, 'net', m.net);",
+                  "pm.test('net = collected - refunded', () =>",
+                  "  pm.expect(m.net).to.eql(+(m.collected - m.refunded).toFixed(2)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/for-invoice/{{invoiceId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "for-invoice",
+                "{{invoiceId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "7 · Payments",
+      "item": [
+        {
+          "name": "List payments",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/payment?limit=50",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "invoice",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "pending | paid | failed | refunded | all"
+                },
+                {
+                  "key": "type",
+                  "value": "",
+                  "disabled": true,
+                  "description": "payment | refund | all"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get payment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/{{paymentId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "{{paymentId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "For invoice (with totals)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/for-invoice/{{invoiceId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "for-invoice",
+                "{{invoiceId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Record a FAILED attempt",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set('paymentId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice\": \"{{invoiceId}}\",\n  \"amount\": 50,\n  \"method\": \"card\",\n  \"status\": \"failed\",\n  \"failureCode\": \"insufficient_funds\",\n  \"failureReason\": \"Insufficient balance\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment"
+              ]
+            },
+            "description": "The invoice stays owing; the attempt is kept for the dunning history."
+          },
+          "response": []
+        },
+        {
+          "name": "Retry it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"paid\",\n  \"transactionId\": \"pm_retry_1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/{{paymentId}}/retry",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "{{paymentId}}",
+                "retry"
+              ]
+            },
+            "description": "A NEW record chained via retryOf — the failed one is never edited."
+          },
+          "response": []
+        },
+        {
+          "name": "Refund",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 or 409', () => pm.expect(pm.response.code).to.be.oneOf([201, 409]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Duplicate charge\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment/{{paymentId}}/refund",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment",
+                "{{paymentId}}",
+                "refund"
+              ]
+            },
+            "description": "Its own record with a POSITIVE amount — `type` carries the direction."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "8 · Access control & validation (expected failures)",
+      "item": [
+        {
+          "name": "401 — no token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "200 — client CAN read the catalogue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            },
+            "description": "By design: the catalogue names the rows on their invoices."
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot create a product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Nope\",\n  \"code\": \"nope_x\",\n  \"category\": \"Risk\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot create a plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_nope\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"visibility\": \"public\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.71\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot record usage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscription\": \"{{subscriptionId}}\",\n  \"productCode\": \"id_doc_verification\",\n  \"externalId\": \"nope\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/usage",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "usage"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot close a period",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subscription\": \"{{subscriptionId}}\",\n  \"periodKey\": \"{{periodKey}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/close",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "close"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot record a payment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"invoice\": \"{{invoiceId}}\",\n  \"method\": \"card\",\n  \"amount\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/payment",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "payment"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "409 — duplicate product code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Dup\",\n  \"code\": \"id_doc_verification\",\n  \"category\": \"Verification\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — product code is immutable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"renamed\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — non-contiguous tier ladder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400', () => pm.response.to.have.status(400));",
+                  "pm.test('names the gap', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/gap or overlap/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_bad_tiers\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"visibility\": \"public\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": 0,\n      \"to\": 1000,\n      \"unitPrice\": 0.79\n    },\n    {\n      \"from\": 5000,\n      \"to\": null,\n      \"unitPrice\": 0.64\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.71\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "404 — unknown invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/invoice/000000000000000000000000",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "invoice",
+                "000000000000000000000000"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "404 — unknown subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/subscription/000000000000000000000000",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "subscription",
+                "000000000000000000000000"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

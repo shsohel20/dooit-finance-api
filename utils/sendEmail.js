@@ -24,6 +24,11 @@ const sendEmail = async (options) => {
     html: options.message, // html body
   };
 
+  // Optional nodemailer attachments ([{ filename, content, contentType }]).
+  // Added for emailed invoices; omitted by every existing caller, so the
+  // key stays absent unless one is actually passed.
+  if (options.attachments?.length) message.attachments = options.attachments;
+
   await transporter.sendMail(message);
 };
 

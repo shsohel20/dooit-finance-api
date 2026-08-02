@@ -1,0 +1,1368 @@
+{
+  "info": {
+    "_postman_id": "b1111111-0000-4000-a000-000000000001",
+    "name": "Billing — Products",
+    "description": "Billing product catalogue API (`/api/v1/product`).\n\n**Access model** — dooit authors the catalogue, clients read it:\n\n| | dooit | client |\n|---|---|---|\n| read (list, get, categories, meta) | yes | yes |\n| create / update / status / delete / bulk-import | yes | **403** |\n\nReads are open to clients on purpose: the catalogue names the rows on their\nusage table and invoices.\n\n## Setup\n1. Set `URL` (default `http://localhost:6830`).\n2. Run **Auth → Login (dooit)** — captures `{{token}}` automatically.\n3. Run **Auth → Login (client)** — captures `{{clientToken}}`, used by the\n   negative access-control tests.\n\nEvery request asserts its status code, so the whole collection can be run\nwith Newman as a smoke suite:\n\n```\nnewman run BillingProducts.postman_collection.json --env-var URL=http://localhost:6830\n```\n\nReference: docs/billingmodule/mongoose-schema.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "dooit JWT — set by Login (dooit)"
+    },
+    {
+      "key": "clientToken",
+      "value": "",
+      "type": "string",
+      "description": "client JWT — set by Login (client)"
+    },
+    {
+      "key": "dooitEmail",
+      "value": "admin@dooit.ai",
+      "type": "string"
+    },
+    {
+      "key": "dooitPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "clientEmail",
+      "value": "client@example.com",
+      "type": "string"
+    },
+    {
+      "key": "clientPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "type": "string",
+      "description": "set by Create Product"
+    },
+    {
+      "key": "productCode",
+      "value": "id_doc_verification",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "description": "Run these first — they capture the two JWTs the rest of the collection uses.",
+      "item": [
+        {
+          "name": "Login (dooit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "if (res.token) {",
+                  "  pm.collectionVariables.set('token', res.token);",
+                  "  console.log('dooit token captured');",
+                  "}",
+                  "pm.test('token returned', () => pm.expect(res.token).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{dooitEmail}}\",\n  \"password\": \"{{dooitPassword}}\",\n  \"userType\": \"dooit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Captures {{token}}. userType must be sent (body or x-user-type header)."
+          },
+          "response": []
+        },
+        {
+          "name": "Login (client)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "if (res.token) pm.collectionVariables.set('clientToken', res.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{clientEmail}}\",\n  \"password\": \"{{clientPassword}}\",\n  \"userType\": \"client\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Captures {{clientToken}} — used by the access-control tests."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Read (any authenticated user)",
+      "item": [
+        {
+          "name": "List products",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('has pagination', () => pm.expect(res.pagination).to.have.property('total'));",
+                  "pm.test('prices are plain numbers, not $numberDecimal', () => {",
+                  "  (res.data || []).forEach((p) => {",
+                  "    pm.expect(typeof p.defaultUnitPrice, p.code).to.eql('number');",
+                  "  });",
+                  "});",
+                  "if (res.data && res.data[0]) {",
+                  "  pm.collectionVariables.set('productId', res.data[0]._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product?page=1&limit=50&sort=name&category=&status=&billable=&search=&includeDeleted=",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "sort",
+                  "value": "name",
+                  "description": "name | -name | price | -price | category | created | -created"
+                },
+                {
+                  "key": "category",
+                  "value": "",
+                  "disabled": true,
+                  "description": "Platform | Verification | Screening | Biometrics | Monitoring | Risk | Data | Notifications"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "active | inactive | all"
+                },
+                {
+                  "key": "billable",
+                  "value": "",
+                  "disabled": true,
+                  "description": "true | false | all"
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "matches name, code, description"
+                },
+                {
+                  "key": "includeDeleted",
+                  "value": "",
+                  "disabled": true,
+                  "description": "true to include soft-deleted"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List — filter by category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('all rows are Verification', () => {",
+                  "  pm.response.json().data.forEach((p) =>",
+                  "    pm.expect(p.category).to.eql('Verification'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product?category=Verification",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ],
+              "query": [
+                {
+                  "key": "category",
+                  "value": "Verification"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List — search",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product?search=aml",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "aml"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Category summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('all 8 categories present', () =>",
+                  "  pm.expect(pm.response.json().data).to.have.lengthOf(8));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/categories",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "categories"
+              ]
+            },
+            "description": "Returns all 8 categories including empty ones, so the UI filter list is stable."
+          },
+          "response": []
+        },
+        {
+          "name": "Meta (enum values for forms)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test('has categories/units/meterSources', () => {",
+                  "  pm.expect(d.categories).to.be.an('array');",
+                  "  pm.expect(d.units).to.be.an('array');",
+                  "  pm.expect(d.meterSources).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/meta",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "meta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get product by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('uid looks like PRD-0000001', () =>",
+                  "  pm.expect(pm.response.json().data.uid).to.match(/^PRD-\\d{7}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Write (dooit only)",
+      "item": [
+        {
+          "name": "Create product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const res = pm.response.json();",
+                  "if (res.data?._id) pm.collectionVariables.set('productId', res.data._id);",
+                  "pm.test('price is a number', () =>",
+                  "  pm.expect(typeof res.data.defaultUnitPrice).to.eql('number'));",
+                  "pm.test('uid assigned', () => pm.expect(res.data.uid).to.match(/^PRD-\\d{7}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Identity Document Verification\",\n  \"code\": \"id_doc_verification\",\n  \"description\": \"Government ID document authenticity and data extraction.\",\n  \"category\": \"Verification\",\n  \"unit\": \"check\",\n  \"currency\": \"AUD\",\n  \"defaultUnitPrice\": 0.79,\n  \"billable\": true,\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            },
+            "description": "createdBy is taken from the JWT, never the body. Non-allow-listed fields (isDeleted, uid, createdBy) are ignored."
+          },
+          "response": []
+        },
+        {
+          "name": "Create — 4dp price (precision check)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('0.0065 preserved exactly', () =>",
+                  "  pm.expect(pm.response.json().data.defaultUnitPrice).to.eql(0.0065));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Device Intelligence\",\n  \"code\": \"device_intelligence\",\n  \"category\": \"Risk\",\n  \"unit\": \"event\",\n  \"defaultUnitPrice\": 0.0065\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            },
+            "description": "Decimal128 must round-trip A$0.0065 exactly — a float would not."
+          },
+          "response": []
+        },
+        {
+          "name": "Update product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('price updated', () =>",
+                  "  pm.expect(pm.response.json().data.defaultUnitPrice).to.eql(0.85));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"defaultUnitPrice\": 0.85,\n  \"description\": \"Updated description.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Deactivate product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('now inactive', () =>",
+                  "  pm.expect(pm.response.json().data.status).to.eql('inactive'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"inactive\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}/status",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}",
+                "status"
+              ]
+            },
+            "description": "Reports affectedPublishedPlans — published plans are frozen and keep selling the product, so only new plans are affected."
+          },
+          "response": []
+        },
+        {
+          "name": "Reactivate product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"active\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}/status",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Bulk import — full 22-product catalogue",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "console.log('created', d.created, 'updated', d.updated, 'failed', d.failed.length);",
+                  "pm.test('no row failures', () => pm.expect(d.failed).to.have.lengthOf(0));",
+                  "pm.test('22 rows processed', () =>",
+                  "  pm.expect(d.created + d.updated).to.eql(22));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\n      \"name\": \"Customer Accounts\",\n      \"code\": \"customer_account\",\n      \"category\": \"Platform\",\n      \"unit\": \"account\",\n      \"defaultUnitPrice\": 55,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Identity Document Verification\",\n      \"code\": \"id_doc_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.79,\n      \"billable\": true\n    },\n    {\n      \"name\": \"AML Screening\",\n      \"code\": \"aml_screening\",\n      \"category\": \"Screening\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia DVS Verification\",\n      \"code\": \"aus_gov_dvs\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.68,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Liveness & Face match\",\n      \"code\": \"liveness_face_match\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.32,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Ongoing AML Monitoring\",\n      \"code\": \"ongoing_aml_monitoring\",\n      \"category\": \"Monitoring\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.08,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Proof of Address Verification\",\n      \"code\": \"proof_of_address\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 1.04,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Additional fields extraction\",\n      \"code\": \"additional_fields\",\n      \"category\": \"Data\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.06,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Applicant Risk Scoring: Individuals\",\n      \"code\": \"risk_scoring_individual\",\n      \"category\": \"Risk\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.0198,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia Residency Verification\",\n      \"code\": \"aus_residency\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 1.52,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Australia DVS Verification (visa)\",\n      \"code\": \"aus_gov_dvs_visa\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.68,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Phone Verification\",\n      \"code\": \"phone_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Email Verification\",\n      \"code\": \"email_verification\",\n      \"category\": \"Verification\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.4,\n      \"billable\": true\n    },\n    {\n      \"name\": \"SMS Notification Service – Tier 1\",\n      \"code\": \"sms_tier1\",\n      \"category\": \"Notifications\",\n      \"unit\": \"message\",\n      \"defaultUnitPrice\": 0.09,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Document attachment to questionnaire\",\n      \"code\": \"questionnaire_attachment\",\n      \"category\": \"Data\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.12,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Known face search\",\n      \"code\": \"known_face_search\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0,\n      \"billable\": false\n    },\n    {\n      \"name\": \"Crypto Transaction Monitoring\",\n      \"code\": \"crypto_tx_monitoring\",\n      \"category\": \"Monitoring\",\n      \"unit\": \"event\",\n      \"defaultUnitPrice\": 0.44,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Device Intelligence\",\n      \"code\": \"device_intelligence\",\n      \"category\": \"Risk\",\n      \"unit\": \"event\",\n      \"defaultUnitPrice\": 0.0065,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Email Risk Assessment\",\n      \"code\": \"email_risk\",\n      \"category\": \"Risk\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.09,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Face Authentication (per session)\",\n      \"code\": \"face_auth_session\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"session\",\n      \"defaultUnitPrice\": 0.173,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Payment Method Check Advanced\",\n      \"code\": \"payment_method_check_adv\",\n      \"category\": \"Screening\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.95,\n      \"billable\": true\n    },\n    {\n      \"name\": \"Facial Age Estimation\",\n      \"code\": \"facial_age_estimation\",\n      \"category\": \"Biometrics\",\n      \"unit\": \"check\",\n      \"defaultUnitPrice\": 0.021,\n      \"billable\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/bulk-import",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "bulk-import"
+              ]
+            },
+            "description": "Upsert by code: creates on first run, updates on subsequent runs. Per-row failures are reported without aborting the batch. These are the real prices from the AML Billing prototype."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete product (soft)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 or 409', () =>",
+                  "  pm.expect(pm.response.code).to.be.oneOf([200, 409]));",
+                  "if (pm.response.code === 409) {",
+                  "  console.log('blocked (still sold by a plan):', pm.response.json().error);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            },
+            "description": "Returns 409 if any non-archived plan still includes the product."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Access control & validation (negative)",
+      "description": "These are expected to FAIL with the stated status code.",
+      "item": [
+        {
+          "name": "401 — no token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Should Not Exist\",\n  \"code\": \"should_not_exist\",\n  \"category\": \"Risk\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot bulk-import",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"products\": [\n    {\n      \"name\": \"Customer Accounts\",\n      \"code\": \"customer_account\",\n      \"category\": \"Platform\",\n      \"unit\": \"account\",\n      \"defaultUnitPrice\": 55,\n      \"billable\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/bulk-import",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "bulk-import"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "200 — client CAN read (by design)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            },
+            "description": "Clients must see the catalogue: it names the rows on their invoices."
+          },
+          "response": []
+        },
+        {
+          "name": "409 — duplicate code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('says already exists', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/already exists/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Duplicate\",\n  \"code\": \"{{productCode}}\",\n  \"category\": \"Verification\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 0.79\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — code is immutable",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('says immutable', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/immutable/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"renamed_code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}"
+              ]
+            },
+            "description": "Rejected loudly rather than silently ignored."
+          },
+          "response": []
+        },
+        {
+          "name": "400 — invalid category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad Category\",\n  \"code\": \"bad_category_test\",\n  \"category\": \"NotACategory\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — negative price",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Negative Price\",\n  \"code\": \"negative_price_test\",\n  \"category\": \"Risk\",\n  \"unit\": \"check\",\n  \"defaultUnitPrice\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ]
+            },
+            "description": "Decimal128 ignores Mongoose min/max, so this is caught by a custom validator in utils/money.js."
+          },
+          "response": []
+        },
+        {
+          "name": "400 — bad status value",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"banana\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/product/{{productId}}/status",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "{{productId}}",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "404 — unknown id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product/000000000000000000000000",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product",
+                "000000000000000000000000"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

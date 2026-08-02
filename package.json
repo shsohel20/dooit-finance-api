@@ -10,7 +10,8 @@
     "doc": "node swagger.js",
     "test": "jest --testPathPatterns=tests/training --runInBand --forceExit",
     "test:watch": "jest --testPathPatterns=tests/training --runInBand --watch",
-    "test:staff": "jest --testPathPatterns=tests/staff --runInBand --forceExit"
+    "test:staff": "jest --testPathPatterns=tests/staff --runInBand --forceExit",
+    "test:billing": "jest --testPathPatterns=tests/billing --runInBand --forceExit"
   },
   "jest": {
     "testEnvironment": "node",

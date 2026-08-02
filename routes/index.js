@@ -93,6 +93,14 @@ const ocr = require("./ocr");
 const appNotification = require("./app-notification");
 const monitoringRule = require("./monitoringRule");
 
+// ── Billing & Subscription ────────────────────────────────────────────────────
+const product = require("./product");
+const billingPlan = require("./billing-plan");
+const subscription = require("./subscription");
+const usage = require("./usage");
+const invoice = require("./invoice");
+const payment = require("./payment");
+
 // Mount routes
 router.use("/fileupload", fileUpload);
 router.use("/file-vault", fileVault);
@@ -190,5 +198,13 @@ router.use("/ocr", ocr);
 // ── GRC Notification Engine ───────────────────────────────────────────────────
 router.use("/app-notifications", appNotification);
 router.use("/monitoring-rule", monitoringRule);
+
+// ── Billing & Subscription ────────────────────────────────────────────────────
+router.use("/product", product);
+router.use("/billing-plan", billingPlan);
+router.use("/subscription", subscription);
+router.use("/usage", usage);
+router.use("/invoice", invoice);
+router.use("/payment", payment);
 
 module.exports = router;

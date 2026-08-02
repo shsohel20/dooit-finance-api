@@ -1,0 +1,1737 @@
+{
+  "info": {
+    "_postman_id": "b2222222-0000-4000-a000-000000000002",
+    "name": "Billing — Plans",
+    "description": "Billing plans API (`/api/v1/billing-plan`) — what dooit sells and clients buy.\n\n**Access model**\n\n| | dooit | client |\n|---|---|---|\n| list / get | every plan, incl. drafts | **published only**, public or granted |\n| create / edit / publish / version / archive / delete | yes | **403** |\n| eligibility (grant / revoke / list) | yes | **403** |\n\nA client who guesses a private `planId` gets **404**, not 403 — existence is\nnot disclosed.\n\n**Immutability** — a published plan is frozen. Editing returns 409; the path\nforward is `POST /:id/new-version`, which clones it to a draft. Publishing the\nnew version archives the old one automatically.\n\n## Setup\n1. Set `URL` (default `http://localhost:6830`).\n2. Run **Auth → Login (dooit)** and **Login (client)**.\n3. Run **Setup → Pick a product** — captures `{{productId}}`, needed to create a plan.\n4. Run the **Lifecycle** folder in order for a full draft → publish → version → archive pass.\n\nEvery request asserts its status, so the collection runs as a smoke suite:\n\n```\nnewman run BillingPlans.postman_collection.json --env-var URL=http://localhost:6830\n```\n\nCompanion: `BillingProducts.postman_collection.json`.\nReference: docs/billingmodule/mongoose-schema.md",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "URL",
+      "value": "http://localhost:6830",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "dooit JWT — set by Login (dooit)"
+    },
+    {
+      "key": "clientToken",
+      "value": "",
+      "type": "string",
+      "description": "client JWT — set by Login (client)"
+    },
+    {
+      "key": "dooitEmail",
+      "value": "admin@dooit.ai",
+      "type": "string"
+    },
+    {
+      "key": "dooitPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "clientEmail",
+      "value": "client@example.com",
+      "type": "string"
+    },
+    {
+      "key": "clientPassword",
+      "value": "CHANGE_ME",
+      "type": "string"
+    },
+    {
+      "key": "productId",
+      "value": "",
+      "type": "string",
+      "description": "set by Setup → Pick a product"
+    },
+    {
+      "key": "planId",
+      "value": "",
+      "type": "string",
+      "description": "set by Create draft"
+    },
+    {
+      "key": "draftId",
+      "value": "",
+      "type": "string",
+      "description": "set by New version"
+    },
+    {
+      "key": "clientUserId",
+      "value": "",
+      "type": "string",
+      "description": "set by List grantable clients"
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login (dooit)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "if (res.token) pm.collectionVariables.set('token', res.token);",
+                  "pm.test('token returned', () => pm.expect(res.token).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{dooitEmail}}\",\n  \"password\": \"{{dooitPassword}}\",\n  \"userType\": \"dooit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Login (client)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "if (res.token) pm.collectionVariables.set('clientToken', res.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{clientEmail}}\",\n  \"password\": \"{{clientPassword}}\",\n  \"userType\": \"client\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/auth/login",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Setup",
+      "description": "A plan references real products, so grab one id first.",
+      "item": [
+        {
+          "name": "Pick a product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test('at least one active product exists', () => pm.expect(d.length).to.be.above(0));",
+                  "if (d[0]) { pm.collectionVariables.set('productId', d[0]._id); console.log('productId', d[0]._id); }"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/product?limit=1&status=active",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "product"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "1"
+                },
+                {
+                  "key": "status",
+                  "value": "active"
+                }
+              ]
+            },
+            "description": "Captures {{productId}}. Seed the catalogue with the Products collection first."
+          },
+          "response": []
+        },
+        {
+          "name": "List grantable clients",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "if (d[0]) pm.collectionVariables.set('clientUserId', d[0]._id);",
+                  "pm.test('deduped by user', () => {",
+                  "  const ids = d.map((u) => u._id);",
+                  "  pm.expect(new Set(ids).size).to.eql(ids.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/clients?",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "clients"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Client users a private plan can be granted to. Captures {{clientUserId}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Read",
+      "item": [
+        {
+          "name": "List plans",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const res = pm.response.json();",
+                  "pm.test('has pagination', () => pm.expect(res.pagination).to.have.property('total'));",
+                  "pm.test('prices are plain numbers, not $numberDecimal', () => {",
+                  "  (res.data || []).forEach((p) =>",
+                  "    pm.expect(typeof p.basePrice, p.code).to.eql('number'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan?limit=50&sort=order",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "sort",
+                  "value": "order",
+                  "description": "-updatedAt | updatedAt | name | order | price | -price"
+                },
+                {
+                  "key": "status",
+                  "value": "",
+                  "disabled": true,
+                  "description": "draft | published | archived | all (dooit only)"
+                },
+                {
+                  "key": "visibility",
+                  "value": "",
+                  "disabled": true,
+                  "description": "public | private | all"
+                },
+                {
+                  "key": "code",
+                  "value": "",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "disabled": true,
+                  "description": "name, code, tagline"
+                },
+                {
+                  "key": "latestOnly",
+                  "value": "",
+                  "disabled": true,
+                  "description": "true collapses to newest version per code"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Plan meta (enums for the builder)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "['pricingModels','billingCycles','visibilities','slaTargets','supportLevels'].forEach((k) =>",
+                  "  pm.test(k + ' present', () => pm.expect(d[k]).to.be.an('array')));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/meta",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "meta"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get plan by id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('uid looks like PLN-0000001', () =>",
+                  "  pm.expect(pm.response.json().data.uid).to.match(/^PLN-\\d{7}$/));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Lifecycle (run in order)",
+      "description": "draft → publish → new version → publish (archives v1) → archive. Each step asserts the state transition it is responsible for.",
+      "item": [
+        {
+          "name": "1. Create draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('planId', d._id);",
+                  "pm.test('starts as draft v1', () => {",
+                  "  pm.expect(d.status).to.eql('draft');",
+                  "  pm.expect(d.version).to.eql(1);",
+                  "});",
+                  "pm.test('free-text volumes parsed', () => {",
+                  "  pm.expect(d.includedUsage).to.eql(5000);",
+                  "  pm.expect(d.tiers[1].from).to.eql(1001);",
+                  "  pm.expect(d.tiers[1].discountPercent).to.eql(10);",
+                  "  pm.expect(d.tiers[2].to).to.eql(null);",
+                  "});",
+                  "pm.test('product snapshot taken from the catalogue', () =>",
+                  "  pm.expect(d.products[0].code).to.be.a('string'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_growth\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.79\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            },
+            "description": "Always created as a draft — publishing is a separate, validated step. Free-text tier bands (\"1,000\", \"∞\", \"10%\") are normalised server-side."
+          },
+          "response": []
+        },
+        {
+          "name": "2. Update draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('price updated', () =>",
+                  "  pm.expect(pm.response.json().data.basePrice).to.eql(2100));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"basePrice\": 2100,\n  \"tagline\": \"Scaling compliance teams — updated\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            },
+            "description": "Drafts are freely editable. `code` is immutable and rejected with 400."
+          },
+          "response": []
+        },
+        {
+          "name": "3. Publish",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const b = pm.response.json();",
+                  "pm.test('now published', () => {",
+                  "  pm.expect(b.data.status).to.eql('published');",
+                  "  pm.expect(b.data.publishedAt).to.not.be.null;",
+                  "});",
+                  "pm.test('nothing to archive on first publish', () =>",
+                  "  pm.expect(b.meta.archivedPreviousVersions).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "publish"
+              ]
+            },
+            "description": "Validates name, at least one enabled product, a base price for flat/hybrid, and (for private plans) at least one eligible client."
+          },
+          "response": []
+        },
+        {
+          "name": "4. New version (clone to draft)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "const d = pm.response.json().data;",
+                  "pm.collectionVariables.set('draftId', d._id);",
+                  "pm.test('draft v2 with cleared publish stamps', () => {",
+                  "  pm.expect(d.status).to.eql('draft');",
+                  "  pm.expect(d.version).to.eql(2);",
+                  "  pm.expect(d.publishedAt).to.eql(null);",
+                  "});",
+                  "pm.test('commercials cloned', () =>",
+                  "  pm.expect(d.products.length).to.be.above(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/new-version",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "new-version"
+              ]
+            },
+            "description": "The only way to change a published plan. Captures {{draftId}}."
+          },
+          "response": []
+        },
+        {
+          "name": "5. Publish v2 (archives v1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('previous version archived', () =>",
+                  "  pm.expect(pm.response.json().meta.archivedPreviousVersions).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{draftId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{draftId}}",
+                "publish"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "6. Verify v1 is now archived",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('v1 archived', () =>",
+                  "  pm.expect(pm.response.json().data.status).to.eql('archived'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "7. Archive v2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('archived', () =>",
+                  "  pm.expect(pm.response.json().data.status).to.eql('archived'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{draftId}}/archive",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{draftId}}",
+                "archive"
+              ]
+            },
+            "description": "Removes it from the catalogue. Existing subscriptions are unaffected."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Private plans & eligibility",
+      "item": [
+        {
+          "name": "Create a private draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('planId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bespoke\",\n  \"code\": \"plan_bespoke\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"private\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": false,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.79\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Publish without grants → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('explains why', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/eligible client/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "publish"
+              ]
+            },
+            "description": "A private plan nobody can buy is a misconfiguration, not a valid state."
+          },
+          "response": []
+        },
+        {
+          "name": "Grant access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('active', () => pm.expect(pm.response.json().data.status).to.eql('active'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user\": \"{{clientUserId}}\",\n  \"note\": \"Negotiated Q3 2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility"
+              ]
+            },
+            "description": "Upsert: re-granting a revoked user reactivates the row rather than duplicating it."
+          },
+          "response": []
+        },
+        {
+          "name": "List access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('one row per user', () => {",
+                  "  const ids = pm.response.json().data.map((g) => String(g.user?._id ?? g.user));",
+                  "  pm.expect(new Set(ids).size).to.eql(ids.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Publish now succeeds",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "publish"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Revoke access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('revoked', () => pm.expect(pm.response.json().data.status).to.eql('revoked'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility/{{clientUserId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility",
+                "{{clientUserId}}"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Access control & validation (negative)",
+      "description": "These are expected to FAIL with the stated status code.",
+      "item": [
+        {
+          "name": "401 — no token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "200 — client CAN list (published only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('no drafts leak', () => {",
+                  "  (pm.response.json().data || []).forEach((p) =>",
+                  "    pm.expect(p.status, p.code).to.eql('published'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            },
+            "description": "A client sees only published plans that are public or granted to them."
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot create",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_should_not_exist\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.79\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot read the access list",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}/eligibility",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}",
+                "eligibility"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "403 — client cannot list grantable users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{clientToken}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/clients",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "clients"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "409 — edit a published plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('points at new-version', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/immutable|new-version/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"basePrice\": 9999\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            },
+            "description": "Published plans are frozen. Use POST /:id/new-version instead."
+          },
+          "response": []
+        },
+        {
+          "name": "409 — duplicate code + version",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_bespoke\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.79\n    }\n  ],\n  \"version\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — non-contiguous tier ladder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('names the gap', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/gap or overlap/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_bad_tiers\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": 0,\n      \"to\": 1000,\n      \"unitPrice\": 0.79\n    },\n    {\n      \"from\": 5000,\n      \"to\": null,\n      \"unitPrice\": 0.64\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"{{productId}}\",\n      \"enabled\": true,\n      \"includedQuantity\": 5000,\n      \"unitPrice\": 0.79\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            },
+            "description": "Bands must be contiguous — the gap 1,000→5,000 is rejected."
+          },
+          "response": []
+        },
+        {
+          "name": "400 — unknown productId",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('names the product', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/unknown or deleted product/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_bad_product\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": [\n    {\n      \"productId\": \"000000000000000000000000\",\n      \"enabled\": true\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "400 — publish with no enabled product",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created — an empty draft is allowed', () =>",
+                  "  pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('draftId', pm.response.json().data._id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Growth\",\n  \"code\": \"plan_no_products\",\n  \"tagline\": \"Scaling compliance teams\",\n  \"description\": \"For teams onboarding up to 5,000 applicants a month.\",\n  \"visibility\": \"public\",\n  \"accentColor\": \"#0e766a\",\n  \"popular\": true,\n  \"pricingModel\": \"hybrid\",\n  \"billingCycle\": \"monthly\",\n  \"currency\": \"AUD\",\n  \"basePrice\": 1900,\n  \"isCustomPriced\": false,\n  \"annualDiscountPercent\": 15,\n  \"includedUsage\": \"5,000\",\n  \"includedUnit\": \"applicant\",\n  \"overagePrice\": 0.68,\n  \"tiers\": [\n    {\n      \"from\": \"0\",\n      \"to\": \"1,000\",\n      \"unitPrice\": 0.79,\n      \"discountPercent\": \"0%\"\n    },\n    {\n      \"from\": \"1,001\",\n      \"to\": \"10,000\",\n      \"unitPrice\": 0.71,\n      \"discountPercent\": \"10%\"\n    },\n    {\n      \"from\": \"10,001\",\n      \"to\": \"∞\",\n      \"unitPrice\": 0.64,\n      \"discountPercent\": \"19%\"\n    }\n  ],\n  \"seatsLabel\": \"Up to 25 seats\",\n  \"slaTarget\": \"99.5%\",\n  \"supportLevel\": \"priority\",\n  \"products\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan"
+              ]
+            },
+            "description": "Create succeeds (drafts may be incomplete); publishing it would fail."
+          },
+          "response": []
+        },
+        {
+          "name": "400 — …and publishing it is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400 Bad Request', () => pm.response.to.have.status(400));",
+                  "pm.test('explains why', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/at least one enabled product/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{draftId}}/publish",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{draftId}}",
+                "publish"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "409 — delete a published plan",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('suggests archiving', () =>",
+                  "  pm.expect(pm.response.json().error).to.match(/archive/i));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/{{planId}}",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "{{planId}}"
+              ]
+            },
+            "description": "Only drafts can be deleted; published plans must be archived."
+          },
+          "response": []
+        },
+        {
+          "name": "404 — unknown plan id",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404 Not Found', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "disabled": false
+              }
+            ],
+            "url": {
+              "raw": "{{URL}}/api/v1/billing-plan/000000000000000000000000",
+              "host": [
+                "{{URL}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "billing-plan",
+                "000000000000000000000000"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

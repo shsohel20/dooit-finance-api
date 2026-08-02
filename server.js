@@ -93,6 +93,12 @@ const server = app.listen(
 const { startCraReviewNotificationJob } = require("./utils/craReviewNotifications");
 startCraReviewNotificationJob();
 
+// Billing cycle — closes ended periods into draft invoices, rolls subscriptions
+// forward, expires cancel-at-period-end ones and flags overdue invoices.
+// Produces DRAFTS only unless BILLING_AUTO_ISSUE=true.
+const { startBillingCycleJob } = require("./services/billing/billingCycleJob");
+startBillingCycleJob();
+
 //Handle unhandled promise rejection
 process.on("unhandledRejection", (err, promise) => {
   console.log(`Error: ${err.message}`.red);
