@@ -18,6 +18,7 @@ const {
   deleteEcddReport,
   getEcddReportByCaseNumber,
   createPublicEcddReport,
+  exportEcddReportPdf,
 } = require("../controllers/ecddReportController");
 // protect all SMR routes and allow only admin by default
 // router.use(protect);
@@ -100,5 +101,12 @@ router.delete("/:id", deleteEcddReport);
  * Note: this should be placed before the '/:id' route to avoid conflict
  */
 router.get("/case/:caseNumber", protect, getEcddReportByCaseNumber);
+
+/**
+ * Filing-grade PDF of a single report
+ * GET /api/v1/ecdd-report/:id/export-pdf
+ * Placed before any bare '/:id' handler so the suffix is not swallowed.
+ */
+router.get("/:id/export-pdf", protect, exportEcddReportPdf);
 
 module.exports = router;

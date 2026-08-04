@@ -315,7 +315,12 @@ exports.getEcddReportByCaseNumber = asyncHandler(async (req, res, next) => {
     .populate("customer")
     .populate("analyst")
     .populate("generatedBy")
-    .populate("transaction");
+    .populate("transaction")
+    // Linkage refs carry the uid the analyst actually recognises; unpopulated
+    // they reach the UI as bare ObjectIds and render as raw hex.
+    .populate("caseId", "uid title status")
+    .populate("alert", "uid status riskScore riskLabel")
+    .populate("riskAssessment", "uid riskScore riskLabel ecddStatus");
 
   if (!report) {
     return next(
@@ -573,3 +578,355 @@ exports.exportEcddReportCsv = asyncHandler(async (req, res, next) => {
 
   pass.end();
 });
+
+// @desc   Export a single ECDD report as a filing-grade PDF
+// @route  GET /api/v1/ecdd-report/:id/export-pdf
+// @access Private
+//
+// The on-screen ECDD view is a working surface; this is the artefact that gets
+// filed, attached to a case pack, or handed to a regulator. It therefore carries
+// its own provenance (report UID, case, alert, preparing officer, timestamp) and
+// a page footer, so a printed page stays self-identifying once separated from
+// the rest of the pack.
+//
+// Narrative sections fall back to the AI bundle on `metadata` — the same
+// precedence the UI uses, so the PDF and the screen never disagree.
+// Document composition is separated from transport so the layout can be
+// rendered and inspected without launching a browser or hitting the route.
+// Exported for that reason; the handler below is its only caller in production.
+const buildEcddReportHtml = (report) => {
+  const ai = report.metadata?.ecddReport || {};
+  const txn = report.transaction || {};
+
+  const esc = (s) =>
+    String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
+
+  // Every empty value renders as an em dash rather than "undefined" — a filed
+  // report must not look like a rendering fault.
+  const val = (v) => (v === 0 ? "0" : v ? esc(v) : "&mdash;");
+
+  const fmtDate = (d) =>
+    d && !Number.isNaN(new Date(d).getTime())
+      ? new Date(d).toLocaleDateString("en-AU", {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+        })
+      : "&mdash;";
+
+  const fmtDateTime = (d) =>
+    new Date(d).toLocaleString("en-AU", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+  const money = (n) =>
+    Number.isFinite(Number(n))
+      ? "$" + Number(n).toLocaleString("en-AU", { maximumFractionDigits: 2 })
+      : "&mdash;";
+
+  // Crypto figures are quantities, not currency — 4.25 ETH is not $4.25.
+  const qty = (n, ticker) =>
+    Number.isFinite(Number(n))
+      ? Number(n).toLocaleString("en-AU", { maximumFractionDigits: 8 }) + " " + ticker
+      : "&mdash;";
+
+  const row = (label, value) => "<tr><th>" + label + "</th><td>" + value + "</td></tr>";
+
+  // The generated narratives are markdown — emphasis is written as **…**.
+  // Rendered raw, a filed report shows literal asterisks around every name and
+  // figure, so the emphasis is promoted to real bold. Escaping happens first,
+  // so this can never introduce markup from the underlying text.
+  const narrative = (text) =>
+    text
+      ? '<p class="narr">' +
+        esc(text)
+          .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+          .replace(/\n/g, "<br/>") +
+        "</p>"
+      : '<p class="narr muted">Not recorded.</p>';
+
+  const flag = (yes) =>
+    yes
+      ? '<span class="flag flag-yes">YES</span>'
+      : '<span class="flag flag-no">NO</span>';
+
+  const isPep = String(report.isPEP || "No") === "Yes";
+  const isSanctioned = String(report.isSanctioned || "No") === "Yes";
+
+  const partyRows =
+    [
+      ["Sender", txn.sender],
+      ["Receiver", txn.receiver],
+      ["Beneficiary", txn.beneficiary],
+      ["Intermediary", txn.intermediary],
+    ]
+      .filter(([, p]) => p && p.name)
+      .map(
+        ([role, p]) =>
+          "<tr><td>" + role + "</td><td>" + val(p.name) + "</td><td>" +
+          val([p.institution, p.institutionCountry].filter(Boolean).join(", ")) +
+          '</td><td class="mono">' + val(p.account) + "</td></tr>"
+      )
+      .join("") ||
+    '<tr><td colspan="4" class="muted">No counterparties recorded.</td></tr>';
+
+  // Only rendered when a transaction is actually linked — an empty section
+  // reads as missing evidence rather than as "no transaction in scope".
+  const transactionSection = txn && txn.uid
+    ? `
+  <h2>5. Transaction in scope</h2>
+  <table class="kv">
+    ${row("Transaction UID", '<span class="mono">' + val(txn.uid) + "</span>")}
+    ${row("Reference", val(txn.reference))}
+    ${row("Date", fmtDate(txn.timestamp))}
+    ${row("Amount", esc(txn.currency || "") + " " + Number(txn.amount || 0).toLocaleString("en-AU"))}
+    ${row("Type", val([txn.type, txn.subtype].filter(Boolean).join(" / ")))}
+    ${row("Channel", val(txn.channel))}
+    ${row("Status", val(txn.status))}
+    ${row("Purpose", val(txn.purpose))}
+    ${row("Risk score", val(txn.riskScore))}
+    ${row("Risk flags", val((txn.riskFlags || []).join(", ")))}
+    ${row("Narrative", val(txn.narrative))}
+  </table>
+
+  <h3>Parties</h3>
+  <table class="grid">
+    <thead><tr><th>Role</th><th>Name</th><th>Institution</th><th>Account</th></tr></thead>
+    <tbody>${partyRows}</tbody>
+  </table>`
+    : "";
+
+  const forensicRow =
+    txn && txn.forensic && txn.forensic.walletCluster
+      ? "<tr><td>Forensic wallet screening</td><td>" +
+        flag(Number(txn.forensic.chainalysisScore) >= 60) +
+        "</td><td>" +
+        val(txn.forensic.walletCluster) +
+        (txn.forensic.notes ? " &mdash; " + esc(txn.forensic.notes) : "") +
+        "</td></tr>"
+      : "";
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+  @page { size: A4; margin: 18mm 14mm 20mm; }
+  /* A filed document is always light. Without this the renderer applies the
+     viewer's colour scheme and a dark-mode host produces dark-on-dark output. */
+  :root { color-scheme: only light; }
+  * { box-sizing: border-box; }
+  html, body { background: #ffffff; }
+  body { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; font-size: 9.5px;
+         color: #313132; margin: 0; -webkit-print-color-adjust: exact;
+         print-color-adjust: exact; }
+
+  .masthead { border-bottom: 2px solid #005964; padding-bottom: 10px; margin-bottom: 14px; overflow: hidden; }
+  .masthead .brand { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: #005964; font-weight: bold; }
+  .masthead h1 { font-size: 17px; margin: 4px 0 2px; color: #313132; }
+  .masthead .sub { color: #696969; font-size: 9px; }
+  .masthead .right { float: right; text-align: right; font-size: 8.5px; color: #696969; }
+  .status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 8px;
+            font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em;
+            background: #fff6de; color: #8a6400; border: 1px solid #f6e0a8; }
+
+  h2 { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; color: #005964;
+       border-bottom: 1px solid #e8ebeb; padding-bottom: 4px; margin: 16px 0 8px;
+       page-break-after: avoid; }
+  h3 { font-size: 9.5px; color: #313132; margin: 12px 0 5px; page-break-after: avoid; }
+
+  table { width: 100%; border-collapse: collapse; }
+  table.kv th { text-align: left; width: 32%; background: #f6f8f8; color: #4a4a4d;
+                font-weight: 600; padding: 4px 8px; border: 1px solid #e8ebeb; vertical-align: top; }
+  table.kv td { padding: 4px 8px; border: 1px solid #e8ebeb; vertical-align: top; }
+  table.grid th { background: #005964; color: #fff; text-align: left; padding: 5px 8px; font-size: 8.5px; }
+  table.grid td { border: 1px solid #e8ebeb; padding: 4px 8px; vertical-align: top; }
+  table.grid tr:nth-child(even) td { background: #fafbfb; }
+  tr { page-break-inside: avoid; }
+
+  .narr { font-size: 9.5px; line-height: 1.55; color: #4a4a4d; margin: 0 0 8px; text-align: justify; }
+  .muted { color: #ababab; }
+  .mono { font-family: Consolas, "Courier New", monospace; font-size: 8.5px; word-break: break-all; }
+  .flag { display: inline-block; padding: 1px 7px; border-radius: 9px; font-size: 8px; font-weight: bold; }
+  .flag-yes { background: #fdf1f7; color: #ca2f7f; border: 1px solid #f6dbe8; }
+  .flag-no  { background: #f0fbf5; color: #199335; border: 1px solid #cceedd; }
+  .notice { margin-top: 16px; padding: 8px 10px; background: #fafbfb; border: 1px solid #e8ebeb;
+            font-size: 8px; color: #696969; line-height: 1.5; }
+</style></head><body>
+
+  <div class="masthead">
+    <div class="right">
+      <div><strong>${val(report.uid)}</strong></div>
+      <div>Generated ${fmtDateTime(new Date())}</div>
+    </div>
+    <div class="brand">${esc((report.client && report.client.name) || "Dooit.ai")} &middot; Compliance</div>
+    <h1>Enhanced Customer Due Diligence Report</h1>
+    <div class="sub">
+      Case ${val(report.caseNumber)} &nbsp;&middot;&nbsp;
+      <span class="status">${val(report.status || "Pending")}</span>
+    </div>
+  </div>
+
+  <h2>1. Report particulars</h2>
+  <table class="kv">
+    ${row("Report UID", '<span class="mono">' + val(report.uid) + "</span>")}
+    ${row("Case number", '<span class="mono">' + val(report.caseNumber) + "</span>")}
+    ${row("Prepared by", val(report.analystName) + (report.position ? " &mdash; " + esc(report.position) : ""))}
+    ${row("Analysis date", fmtDate(report.date))}
+    ${row("Analysis period", fmtDate(report.accountCreationDate) + " to " + fmtDate(report.analysisEndDate))}
+    ${row("Report status", val(report.status))}
+  </table>
+
+  <h2>2. Customer profile</h2>
+  <table class="kv">
+    ${row("Full name", val(report.fullName || report.customerName))}
+    ${row("Customer UID", '<span class="mono">' + val(report.customer && report.customer.uid) + "</span>")}
+    ${row("Contact", val(ai.email))}
+    ${row("Onboarding date", fmtDate(report.onboardingDate))}
+    ${row("Account created", fmtDate(report.accountCreationDate))}
+    ${row("Account purpose", val(report.accountPurpose))}
+    ${row("Expected volume", money(report.expectedVolume))}
+    ${row("Annual income", money(report.annualIncome))}
+    ${row("Registered address", val(report.registeredAddress))}
+    ${row("Distinct IP locations", val(report.ipLocations))}
+  </table>
+
+  <h2>3. Business information</h2>
+  <table class="kv">
+    ${row("Beneficial owner", val(report.beneficialOwner))}
+    ${row("Directors", val(report.directors))}
+    ${row("Company name", val(ai.company_name))}
+    ${row("ABN", val(report.abn))}
+    ${row("Related party", val(report.relatedParty))}
+  </table>
+
+  <h2>4. Screening outcome</h2>
+  <table class="grid">
+    <thead><tr><th style="width:38%">Check</th><th style="width:14%">Result</th><th>Basis</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Politically exposed person</td>
+        <td>${flag(isPep)}</td>
+        <td>${isPep ? "Match recorded &mdash; enhanced due diligence required" : "No match recorded"}</td>
+      </tr>
+      <tr>
+        <td>Sanctions screening</td>
+        <td>${flag(isSanctioned)}</td>
+        <td>${esc(ai.sanction_source || "Powered by ComplyAdvantage CSOM")}</td>
+      </tr>
+      ${forensicRow}
+    </tbody>
+  </table>
+
+  ${transactionSection}
+
+  <h2>6. Financial activity</h2>
+  <table class="kv">
+    ${row("Total deposits (AUD)", money(report.totalDepositsAUD))}
+    ${row("Withdrawals &mdash; USDT", qty(report.totalWithdrawalsUSDT, "USDT"))}
+    ${row("Withdrawals &mdash; ETH", qty(report.totalWithdrawalsETH, "ETH"))}
+    ${row("Withdrawals &mdash; BTC", qty(report.totalWithdrawalsBTC, "BTC"))}
+  </table>
+  <h3>Deposit detail</h3>
+  ${narrative(report.depositDetails)}
+  <h3>Withdrawal detail</h3>
+  ${narrative(report.withdrawalDetails)}
+
+  <h2>7. Profile summary</h2>
+  ${narrative(report.profileSummary || ai.profile_summary)}
+
+  <h2>8. Transaction analysis</h2>
+  ${narrative(report.transactionAnalysis || ai.transaction_analysis)}
+
+  <h2>9. Behavioural analysis</h2>
+  ${narrative(report.behavioralAnalysis || ai.behavioral_analysis)}
+
+  <h2>10. Recommendation</h2>
+  ${narrative(report.recommendation || ai.recommendation)}
+  ${report.additionalInfo ? "<h3>Additional information</h3>" + narrative(report.additionalInfo) : ""}
+
+  <h2>11. Reference</h2>
+  <table class="kv">
+    ${row("Report UID", '<span class="mono">' + val(report.uid) + "</span>")}
+    ${row("Case", '<span class="mono">' + val(report.caseId || report.caseNumber) + "</span>")}
+    ${row("Originating alert", '<span class="mono">' + val(report.alert) + "</span>")}
+    ${row("Customer UID", '<span class="mono">' + val(report.customer && report.customer.uid) + "</span>")}
+    ${row("Transaction UID", '<span class="mono">' + val(txn.uid) + "</span>")}
+    ${row("Prepared by", val((report.generatedBy && report.generatedBy.name) || report.analystName))}
+    ${row("Record created", fmtDate(report.createdAt))}
+    ${row("Last updated", fmtDate(report.updatedAt))}
+  </table>
+
+  <div class="notice">
+    <strong>Confidential &mdash; compliance record.</strong>
+    This report is generated from platform data for the stated analysis period and has not been
+    independently verified against external records unless noted. It is prepared to support
+    obligations under the AML/CTF Act 2006 and is intended solely for the recipient institution
+    and, where applicable, AUSTRAC. Unauthorised disclosure may constitute tipping off under s123.
+  </div>
+
+</body></html>`;
+
+  return html;
+};
+
+exports.buildEcddReportHtml = buildEcddReportHtml;
+
+exports.exportEcddReportPdf = asyncHandler(async (req, res, next) => {
+  const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
+
+  const report = await EcddReport.findById(req.params.id)
+    .populate("customer")
+    .populate("analyst")
+    .populate("generatedBy")
+    .populate("transaction")
+    .populate("client")
+    .lean();
+
+  if (!report) {
+    return next(
+      new ErrorResponse(`ECDD Report not found with id ${req.params.id}`, 404)
+    );
+  }
+
+  const esc = (s) =>
+    String(s ?? "").replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
+    );
+
+  const html = buildEcddReportHtml(report);
+
+  let browser;
+  try {
+    browser = await launchPdfBrowser();
+    const page = await browser.newPage();
+    await page.setContent(html, { waitUntil: "networkidle0" });
+
+    const pdfBuffer = await page.pdf({
+      format: "A4",
+      printBackground: true,
+      // Page numbering matters once the report is printed and separated from
+      // the case pack — a reader must be able to tell a page is missing.
+      displayHeaderFooter: true,
+      headerTemplate: "<div></div>",
+      footerTemplate:
+        '<div style="width:100%; font-size:7px; color:#8a8a8a; padding:0 14mm;' +
+        'font-family: Helvetica, Arial, sans-serif; display:flex; justify-content:space-between;">' +
+        "<span>ECDD " + esc(report.uid || "") + " &middot; " + esc(report.caseNumber || "") + "</span>" +
+        '<span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>' +
+        "</div>",
+      margin: { top: "18mm", bottom: "20mm", left: "14mm", right: "14mm" },
+    });
+
+    const safeName = String(report.uid || report._id).replace(/[^A-Za-z0-9._-]/g, "_");
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", 'attachment; filename="ECDD_' + safeName + '.pdf"');
+    res.send(Buffer.from(pdfBuffer));
+  } finally {
+    if (browser) await browser.close();
+  }
+});
+
