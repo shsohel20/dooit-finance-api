@@ -11,6 +11,7 @@ const {
   submitSMR,
   approveSMR,
   filterSMRSection,
+  exportSmrReportPdf,
 } = require("../controllers/smrReportController");
 
 const SMR = require("../models/SmrReport");
@@ -53,6 +54,9 @@ router.route("/dummy").post(createDummySMR);
 // submit & approve
 router.route("/:id/submit").put(submitSMR);
 router.route("/:id/approve").put(approveSMR);
+
+// filing-grade PDF of a single report
+router.route("/:id/export-pdf").get(exportSmrReportPdf);
 
 // CRUD
 router.route("/:id").get(getSMR).put(updateSMR).delete(deleteSMR);
