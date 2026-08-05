@@ -10,7 +10,10 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { Parser: CsvParser } = require("json2csv");
 const csv = require("csv-parser");
-const puppeteer = require("puppeteer");
+// Never call puppeteer.launch() directly — the container needs the hardened
+// launch options in this helper (writable HOME for crashpad, /dev/shm off).
+// See docs/56-PUPPETEER-DOCKER-CRASHPAD-FIX.md.
+const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 
 // ── shared helpers (mirrors transactionFilter.js) ──────────────────────────
 const _toArray = (param) => {
@@ -1004,329 +1007,516 @@ exports.importTransactionsCsv = asyncHandler(async (req, res, next) => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Download single transaction as PDF
 // GET /api/v1/transaction/:id/pdf
+//
+// Compliance-grade single-transaction report. Every value reaching the template
+// is HTML-escaped: narrative, party names and investigator notes are all
+// operator-supplied free text, and a stray "<" silently truncates the render.
 // ─────────────────────────────────────────────────────────────────────────────
-function buildTxHtml(tx) {
-  const fmt = (v) => (v !== undefined && v !== null && v !== "" ? String(v) : "—");
-  const fmtDate = (v) => v ? new Date(v).toLocaleString("en-AU", { dateStyle: "long", timeStyle: "short" }) : "—";
-  const fmtAmt = (amount, currency) =>
-    amount != null
-      ? `${fmt(currency)}&nbsp;${Number(amount).toLocaleString("en-AU", { minimumFractionDigits: 2 })}`
-      : "—";
 
-  const score = Math.min(tx.riskScore || 0, 100);
-  const riskColor = score >= 70 ? "#dc2626" : score >= 40 ? "#d97706" : "#16a34a";
-  const riskLabel = score >= 70 ? "HIGH RISK" : score >= 40 ? "MEDIUM RISK" : "LOW RISK";
-  const riskBg = score >= 70 ? "#fef2f2" : score >= 40 ? "#fffbeb" : "#f0fdf4";
-  const riskBorder = score >= 70 ? "#fecaca" : score >= 40 ? "#fde68a" : "#bbf7d0";
+const _HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const escHtml = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => _HTML_ESCAPES[c]);
 
-  const statusCfg = {
-    pending: { bg: "#fefce8", text: "#854d0e", border: "#fde68a", dot: "#f59e0b" },
-    completed: { bg: "#f0fdf4", text: "#166534", border: "#bbf7d0", dot: "#22c55e" },
-    failed: { bg: "#fef2f2", text: "#991b1b", border: "#fecaca", dot: "#ef4444" },
-    cancelled: { bg: "#f9fafb", text: "#374151", border: "#e5e7eb", dot: "#9ca3af" },
+// Fields encrypted at rest are stored as "<iv>:<authTag>:<ciphertext>" hex. A
+// lean() read can hand one back undecrypted; printing that blob onto a report
+// is worse than printing nothing, so fall back instead.
+const _CIPHERTEXT_RE = /^[0-9a-f]{32}:[0-9a-f]{32}:[0-9a-f]*$/i;
+const plainOr = (value, fallback = "") =>
+  value && !_CIPHERTEXT_RE.test(String(value)) ? String(value) : fallback;
+
+const RISK_BANDS = [
+  { min: 70, label: "High Risk", color: "#b91c1c", bg: "#fef2f2", border: "#fecaca" },
+  { min: 40, label: "Medium Risk", color: "#b45309", bg: "#fffbeb", border: "#fde68a" },
+  { min: 0, label: "Low Risk", color: "#15803d", bg: "#f0fdf4", border: "#bbf7d0" },
+];
+
+const STATUS_STYLES = {
+  pending: { bg: "#fffbeb", text: "#92400e", border: "#fde68a", dot: "#f59e0b" },
+  completed: { bg: "#f0fdf4", text: "#166534", border: "#bbf7d0", dot: "#22c55e" },
+  failed: { bg: "#fef2f2", text: "#991b1b", border: "#fecaca", dot: "#ef4444" },
+  cancelled: { bg: "#f8fafc", text: "#334155", border: "#e2e8f0", dot: "#94a3b8" },
+};
+
+function buildTxHtml(tx, meta = {}) {
+  const DASH = "&mdash;";
+  const has = (v) => v !== undefined && v !== null && String(v).trim() !== "";
+  const text = (v) => (has(v) ? escHtml(v) : DASH);
+  const date = (v) => {
+    if (!v) return DASH;
+    const d = new Date(v);
+    return Number.isNaN(d.getTime())
+      ? DASH
+      : escHtml(d.toLocaleString("en-AU", { dateStyle: "long", timeStyle: "short" }));
   };
-  const sc = statusCfg[tx.status] || statusCfg.pending;
+  const num = (v) =>
+    Number(v).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const amount = (v, currency) =>
+    has(v) && Number.isFinite(Number(v))
+      ? `${escHtml(String(currency || "").toUpperCase())}&nbsp;${num(v)}`
+      : DASH;
+  const titled = (v) =>
+    has(v)
+      ? escHtml(String(v).replace(/[_-]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase()))
+      : DASH;
 
-  const row = (label, value, mono = false) =>
-    value && value !== "—"
-      ? `<tr>
-           <td class="tl">${label}</td>
-           <td class="tv">${mono ? `<code>${value}</code>` : value}</td>
-         </tr>`
+  // A row renders only when it holds a value, and a section only when it has
+  // rows — so the report never prints a heading over blank space.
+  const row = (label, value, opts = {}) => {
+    if (!has(value)) return "";
+    const v = opts.html ? value : escHtml(value);
+    return `<tr><td class="tl">${escHtml(label)}</td><td class="tv">${
+      opts.mono ? `<code>${v}</code>` : v
+    }</td></tr>`;
+  };
+  const table = (rows) => (rows.trim() ? `<table class="detail-table">${rows}</table>` : "");
+  const section = (title, inner) =>
+    inner && inner.trim()
+      ? `<section class="block"><h2 class="section-head">${escHtml(title)}</h2>${inner}</section>`
       : "";
 
-  const partyCard = (label, party, accentColor) => {
-    if (!party?.name && !party?.account) return "";
+  const score = Math.max(0, Math.min(Number(tx.riskScore) || 0, 100));
+  const band = RISK_BANDS.find((b) => score >= b.min) || RISK_BANDS[RISK_BANDS.length - 1];
+  const status = String(tx.status || "pending").toLowerCase();
+  const sc = STATUS_STYLES[status] || STATUS_STYLES.pending;
+
+  const partyCard = (label, party, accent) => {
+    if (!party || (!has(party.name) && !has(party.account) && !has(party.institution))) return "";
+    const line = (k, v, mono) =>
+      has(v)
+        ? `<div class="party-line"><span class="party-key">${escHtml(k)}</span>` +
+          `<span class="party-val${mono ? " mono" : ""}">${escHtml(v)}</span></div>`
+        : "";
     return `
-    <div class="party-card" style="border-left:4px solid ${accentColor}">
-      <div class="party-label" style="color:${accentColor}">${label}</div>
-      <div class="party-name">${fmt(party.name)}</div>
-      ${party.account ? `<div class="party-meta"><span class="party-tag">Account</span><code>${fmt(party.account)}</code></div>` : ""}
-      ${party.institution ? `<div class="party-meta"><span class="party-tag">Institution</span>${fmt(party.institution)}</div>` : ""}
-      ${party.institutionCountry ? `<div class="party-meta"><span class="party-tag">Country</span>${fmt(party.institutionCountry)}</div>` : ""}
-      ${party.address ? `<div class="party-meta"><span class="party-tag">Address</span>${fmt(party.address)}</div>` : ""}
-    </div>`;
+      <div class="party-card" style="border-top:3px solid ${accent}">
+        <div class="party-role" style="color:${accent}">${escHtml(label)}</div>
+        <div class="party-name">${text(party.name)}</div>
+        ${line("Account", party.account, true)}
+        ${line("Institution", party.institution)}
+        ${line("BIC / SWIFT", party.bic, true)}
+        ${line("Country", party.institutionCountry)}
+        ${line("Address", party.address)}
+      </div>`;
   };
 
-  const genDate = new Date().toLocaleString("en-AU", { dateStyle: "long", timeStyle: "short" });
+  // Two cards per row via a table — print pagination handles table rows far
+  // more predictably than a wrapped flex/grid container.
+  const cards = [
+    partyCard("Sender / Originator", tx.sender, "#1d4ed8"),
+    partyCard("Receiver", tx.receiver, "#15803d"),
+    partyCard("Beneficiary", tx.beneficiary, "#7c3aed"),
+    partyCard("Intermediary", tx.intermediary, "#0e7490"),
+  ].filter(Boolean);
+
+  const partyPairs = cards.reduce((acc, card, i) => {
+    if (i % 2 === 0) acc.push([card]);
+    else acc[acc.length - 1].push(card);
+    return acc;
+  }, []);
+
+  const partyGrid = cards.length
+    ? `<table class="party-table"><tbody>${partyPairs
+        .map(
+          (pair) =>
+            `<tr>${pair.map((c) => `<td>${c}</td>`).join("")}${
+              pair.length === 1 ? "<td></td>" : ""
+            }</tr>`
+        )
+        .join("")}</tbody></table>`
+    : "";
+
+  const flags = (tx.riskFlags || []).filter(has);
+  const flagChips = flags.length
+    ? `<div class="chip-row">${flags
+        .map((f) => `<span class="chip chip-risk">${titled(f)}</span>`)
+        .join("")}</div>`
+    : `<p class="muted">No risk indicators were raised against this transaction.</p>`;
+
+  const generatedAt = date(meta.generatedAt || Date.now());
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>Transaction ${fmt(tx.uid)}</title>
-  <style>
-    @page { size: A4; margin: 0; }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: Arial, Helvetica, sans-serif; font-size: 12.5px; color: #1e293b; background: #fff; }
+<meta charset="utf-8">
+<title>Transaction Report ${text(tx.uid)}</title>
+<style>
+  /* Liberation/DejaVu are the fonts installed in the API image; naming them
+     first keeps container output metrically identical to Windows dev. */
+  :root {
+    --ink: #0f172a; --body: #334155; --muted: #64748b; --line: #e2e8f0;
+    --brand: #1d4ed8; --brand-deep: #0f172a;
+  }
+  @page { size: A4; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Liberation Sans", Arial, Helvetica, sans-serif;
+    font-size: 10.5px; line-height: 1.45; color: var(--body);
+    background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .mono, code { font-family: "DejaVu Sans Mono", "Liberation Mono", Consolas, monospace; }
+  code {
+    font-size: 9.5px; background: #eff6ff; color: #1e40af;
+    padding: 1px 5px; border-radius: 3px; border: 1px solid #dbeafe;
+  }
+  .muted { color: var(--muted); font-size: 10px; font-style: italic; }
 
-    /* ── Top banner ── */
-    .banner {
-      background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 60%, #1d4ed8 100%);
-      padding: 28px 36px 24px;
-      position: relative;
-      overflow: hidden;
-    }
-    .banner::after {
-      content: "";
-      position: absolute;
-      right: -40px; top: -40px;
-      width: 220px; height: 220px;
-      border-radius: 50%;
-      background: rgba(255,255,255,.04);
-    }
-    .banner-top { display: flex; justify-content: space-between; align-items: flex-start; }
-    .banner-title { color: #fff; font-size: 22px; font-weight: 700; letter-spacing: -.3px; }
-    .banner-sub   { color: #93c5fd; font-size: 11.5px; margin-top: 3px; font-family: monospace; letter-spacing: .03em; }
-    .banner-type  {
-      background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2);
-      color: #e0f2fe; font-size: 11px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: .08em; padding: 4px 12px; border-radius: 99px;
-    }
-    .banner-meta { display: flex; gap: 24px; margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,.12); }
-    .banner-kv   { display: flex; flex-direction: column; gap: 2px; }
-    .banner-kv .k { color: #7dd3fc; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
-    .banner-kv .v { color: #f0f9ff; font-size: 13px; font-weight: 700; }
+  /* ── Masthead ── */
+  .masthead {
+    background: linear-gradient(120deg, #0f172a 0%, #17325c 55%, #1d4ed8 100%);
+    color: #fff; border-radius: 8px; padding: 18px 22px 16px; margin-bottom: 14px;
+  }
+  .mast-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .mast-title { font-size: 18px; font-weight: 700; letter-spacing: -.2px; }
+  .mast-sub { color: #bfdbfe; font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; margin-top: 3px; }
+  .mast-uid { color: #e0f2fe; font-size: 11px; margin-top: 7px; }
+  .mast-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+  .badge-type {
+    background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.28); color: #f0f9ff;
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+    padding: 3px 11px; border-radius: 99px;
+  }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 11px; border-radius: 99px;
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+    border: 1px solid ${sc.border}; background: ${sc.bg}; color: ${sc.text};
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: ${sc.dot}; }
+  .mast-figures { display: flex; gap: 26px; margin-top: 14px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,.16); }
+  .fig .k { display: block; color: #93c5fd; font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; }
+  .fig .v { display: block; color: #fff; font-size: 12.5px; font-weight: 700; margin-top: 2px; }
 
-    /* ── Status pill ── */
-    .status-pill {
-      display: inline-flex; align-items: center; gap: 6px;
-      padding: 5px 14px; border-radius: 99px; font-size: 12px; font-weight: 700;
-      text-transform: uppercase; letter-spacing: .06em;
-      border: 1.5px solid ${sc.border}; background: ${sc.bg}; color: ${sc.text};
-    }
-    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: ${sc.dot}; }
+  /* ── Document control ── */
+  .control-table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+  .control-table td {
+    border: 1px solid var(--line); padding: 7px 10px; width: 33.33%;
+    background: #f8fafc; vertical-align: top;
+  }
+  .ck { display: block; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .cv { display: block; font-size: 10.5px; font-weight: 600; color: var(--ink); margin-top: 2px; }
 
-    /* ── Body ── */
-    .body { padding: 24px 36px 20px; }
+  /* ── Sections ── */
+  .block { margin-bottom: 16px; }
+  .section-head {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--brand); margin-bottom: 8px; page-break-after: avoid;
+  }
+  .section-head::before { content: ""; width: 3px; height: 13px; background: var(--brand); border-radius: 2px; flex-shrink: 0; }
+  .section-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
-    /* ── Flow card ── */
-    .flow-card {
-      display: flex; align-items: stretch; gap: 0;
-      border: 1.5px solid #e2e8f0; border-radius: 12px; overflow: hidden;
-      margin-bottom: 24px; box-shadow: 0 1px 4px rgba(0,0,0,.06);
-    }
-    .flow-party { flex: 1; padding: 16px 18px; background: #f8fafc; }
-    .flow-party.receiver { background: #f0fdf4; }
-    .flow-party-lbl { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #64748b; margin-bottom: 6px; }
-    .flow-party-name { font-size: 15px; font-weight: 700; color: #0f172a; }
-    .flow-party-acct { font-family: monospace; font-size: 11px; color: #64748b; margin-top: 3px; }
-    .flow-party-bank { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-    .flow-center {
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      padding: 16px 20px; background: #fff; border-left: 1.5px solid #e2e8f0; border-right: 1.5px solid #e2e8f0;
-      min-width: 130px;
-    }
-    .flow-arrow-icon { font-size: 20px; color: #22c55e; margin-bottom: 6px; }
-    .flow-amount { font-size: 17px; font-weight: 800; color: #0f172a; text-align: center; line-height: 1.2; }
-    .flow-aud   { font-size: 10.5px; color: #64748b; margin-top: 3px; text-align: center; }
+  /* ── Value flow ── */
+  .flow { width: 100%; border-collapse: collapse; border: 1px solid var(--line); border-radius: 6px; page-break-inside: avoid; }
+  .flow td { padding: 13px 15px; vertical-align: middle; }
+  .flow .leg { width: 37%; background: #f8fafc; }
+  .flow .leg.to { background: #f0fdf4; }
+  .flow .mid { width: 26%; text-align: center; border-left: 1px solid var(--line); border-right: 1px solid var(--line); }
+  .leg-lbl { font-size: 8.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .leg-name { font-size: 12px; font-weight: 700; color: var(--ink); margin-top: 4px; }
+  .leg-meta { font-size: 9.5px; color: var(--muted); margin-top: 2px; }
+  .flow-amt { font-size: 14px; font-weight: 800; color: var(--ink); margin-top: 4px; }
+  .flow-aud { font-size: 9px; color: var(--muted); margin-top: 2px; }
 
-    /* ── Section heading ── */
-    .section-head {
-      display: flex; align-items: center; gap: 8px;
-      font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
-      color: #1d4ed8; margin: 22px 0 10px;
-    }
-    .section-head::before {
-      content: ""; display: block; width: 4px; height: 16px;
-      background: linear-gradient(180deg, #1d4ed8, #60a5fa);
-      border-radius: 2px; flex-shrink: 0;
-    }
-    .section-head::after {
-      content: ""; flex: 1; height: 1px; background: #e2e8f0;
-    }
+  /* ── Detail tables ── */
+  .detail-table { width: 100%; border-collapse: collapse; }
+  .detail-table td { padding: 6px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+  .detail-table tr:nth-child(odd) td { background: #f8fafc; }
+  .tl { width: 32%; font-weight: 600; color: #475569; }
+  .tv { color: var(--ink); }
 
-    /* ── Detail table ── */
-    .detail-table { width: 100%; border-collapse: collapse; }
-    .detail-table tr:nth-child(odd) td { background: #f8fafc; }
-    .detail-table tr td { padding: 8px 10px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
-    .tl { width: 36%; font-size: 11.5px; font-weight: 600; color: #475569; }
-    .tv { font-size: 12px; color: #0f172a; }
-    code { font-family: monospace; font-size: 11px; background: #eff6ff; color: #1d4ed8; padding: 1px 5px; border-radius: 3px; border: 1px solid #dbeafe; }
+  /* ── Risk ── */
+  .risk-card {
+    border: 1px solid ${band.border}; background: ${band.bg};
+    border-radius: 6px; padding: 14px 16px; page-break-inside: avoid;
+  }
+  .risk-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 9px; }
+  .risk-score { font-size: 30px; font-weight: 800; color: ${band.color}; line-height: 1; }
+  .risk-score small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .risk-badge {
+    padding: 4px 12px; border-radius: 99px; font-size: 9.5px; font-weight: 700;
+    letter-spacing: .08em; text-transform: uppercase; background: ${band.color}; color: #fff;
+  }
+  .risk-track { height: 8px; background: rgba(15,23,42,.09); border-radius: 99px; overflow: hidden; }
+  .risk-fill { height: 8px; width: ${score}%; background: ${band.color}; border-radius: 99px; }
+  .risk-scale { display: flex; justify-content: space-between; font-size: 8.5px; color: var(--muted); margin-top: 4px; }
 
-    /* ── Risk card ── */
-    .risk-card {
-      border: 1.5px solid ${riskBorder}; border-radius: 10px;
-      background: ${riskBg}; padding: 16px 18px; margin-bottom: 4px;
-    }
-    .risk-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-    .risk-score { font-size: 36px; font-weight: 900; color: ${riskColor}; line-height: 1; }
-    .risk-score span { font-size: 14px; font-weight: 400; color: #64748b; }
-    .risk-badge {
-      padding: 4px 12px; border-radius: 99px; font-size: 11px; font-weight: 800;
-      letter-spacing: .06em; background: ${riskColor}; color: #fff;
-    }
-    .risk-bar-track { background: #e2e8f0; border-radius: 99px; height: 10px; overflow: hidden; }
-    .risk-bar-fill  { height: 10px; border-radius: 99px; background: linear-gradient(90deg, ${riskColor}aa, ${riskColor}); width: ${score}%; }
-    .risk-label-row { display: flex; justify-content: space-between; font-size: 10px; color: #64748b; margin-top: 4px; }
+  /* ── Chips ── */
+  .chip-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 9px; }
+  .chip { font-size: 9px; font-weight: 600; padding: 2px 9px; border-radius: 4px; }
+  .chip-risk { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+  .flag-note {
+    display: inline-block; font-size: 9.5px; font-weight: 700; padding: 2px 9px;
+    border-radius: 4px; background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;
+  }
+  .flag-warn { background: #fffbeb; color: #92400e; border-color: #fde68a; }
 
-    /* ── Party cards ── */
-    .party-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .party-card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 13px 14px; background: #fff; }
-    .party-label { font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; margin-bottom: 5px; }
-    .party-name  { font-size: 13.5px; font-weight: 700; color: #0f172a; }
-    .party-meta  { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; font-size: 11px; color: #475569; }
-    .party-tag   { font-size: 9.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: .04em; width: 60px; flex-shrink: 0; }
+  /* ── Parties ── */
+  .party-table { width: 100%; border-collapse: separate; border-spacing: 8px 8px; margin: -8px; }
+  .party-table td { width: 50%; vertical-align: top; }
+  .party-card { border: 1px solid var(--line); border-radius: 6px; padding: 11px 13px; page-break-inside: avoid; }
+  .party-role { font-size: 8.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .09em; }
+  .party-name { font-size: 12px; font-weight: 700; color: var(--ink); margin: 3px 0 5px; }
+  .party-line { display: flex; gap: 8px; font-size: 9.5px; margin-top: 2px; }
+  .party-key { width: 74px; flex-shrink: 0; color: var(--muted); font-weight: 600; }
+  .party-val { color: #334155; }
 
-    /* ── Flag badges ── */
-    .flag-red  { display:inline-block; padding:2px 9px; border-radius:4px; font-size:11px; font-weight:700; background:#fef2f2; color:#b91c1c; border:1px solid #fecaca; }
-    .flag-warn { display:inline-block; padding:2px 9px; border-radius:4px; font-size:11px; font-weight:700; background:#fffbeb; color:#92400e; border:1px solid #fde68a; }
-
-    /* ── Footer ── */
-    .footer-bar {
-      background: linear-gradient(135deg, #0f172a, #1e3a5f);
-      padding: 14px 36px;
-      display: flex; justify-content: space-between; align-items: center;
-      margin-top: 28px;
-    }
-    .footer-left  { color: #93c5fd; font-size: 10px; }
-    .footer-right { color: #7dd3fc; font-size: 10px; font-family: monospace; }
-    .footer-conf  { color: rgba(255,255,255,.35); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; margin-top: 2px; }
-  </style>
+  /* ── Attestation ── */
+  .attest {
+    margin-top: 20px; border-top: 2px solid var(--brand-deep); padding-top: 10px;
+    display: flex; justify-content: space-between; gap: 20px; page-break-inside: avoid;
+  }
+  .attest p { font-size: 8.5px; color: var(--muted); max-width: 70%; }
+  .attest .stamp { font-size: 8.5px; color: var(--muted); text-align: right; }
+</style>
 </head>
 <body>
 
-  <!-- ── Banner ── -->
-  <div class="banner">
-    <div class="banner-top">
+  <header class="masthead">
+    <div class="mast-top">
       <div>
-        <div class="banner-title">Transaction Report</div>
-        <div class="banner-sub">${fmt(tx.uid)}</div>
+        <div class="mast-sub">Anti-Money Laundering &middot; Transaction Record</div>
+        <div class="mast-title">Transaction Report</div>
+        <div class="mast-uid mono">${text(tx.uid)}</div>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px">
-        <span class="banner-type">${fmt(tx.type)}</span>
-        <span class="status-pill"><span class="status-dot"></span>${fmt(tx.status)}</span>
-      </div>
-    </div>
-    <div class="banner-meta">
-      <div class="banner-kv">
-        <span class="k">Amount</span>
-        <span class="v">${fmtAmt(tx.amount, tx.currency)}</span>
-      </div>
-      ${tx.convertedAmountAUD ? `
-      <div class="banner-kv">
-        <span class="k">AUD Equivalent</span>
-        <span class="v">AUD&nbsp;${Number(tx.convertedAmountAUD).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</span>
-      </div>` : ""}
-      <div class="banner-kv">
-        <span class="k">Date</span>
-        <span class="v">${fmtDate(tx.timestamp)}</span>
-      </div>
-      ${tx.channel ? `
-      <div class="banner-kv">
-        <span class="k">Channel</span>
-        <span class="v" style="text-transform:capitalize">${fmt(tx.channel)}</span>
-      </div>` : ""}
-    </div>
-  </div>
-
-  <div class="body">
-
-    <!-- ── Flow ── -->
-    <div class="flow-card">
-      <div class="flow-party">
-        <div class="flow-party-lbl">Sender</div>
-        <div class="flow-party-name">${fmt(tx.sender?.name)}</div>
-        ${tx.sender?.account ? `<div class="flow-party-acct">${fmt(tx.sender.account)}</div>` : ""}
-        ${tx.sender?.institution ? `<div class="flow-party-bank">${fmt(tx.sender.institution)}</div>` : ""}
-      </div>
-      <div class="flow-center">
-        <div class="flow-arrow-icon">&#x2192;</div>
-        <div class="flow-amount">${fmtAmt(tx.amount, tx.currency)}</div>
-        ${tx.convertedAmountAUD ? `<div class="flow-aud">≈ AUD ${Number(tx.convertedAmountAUD).toLocaleString("en-AU", { minimumFractionDigits: 2 })}</div>` : ""}
-      </div>
-      <div class="flow-party receiver">
-        <div class="flow-party-lbl">Receiver</div>
-        <div class="flow-party-name">${fmt(tx.receiver?.name)}</div>
-        ${tx.receiver?.account ? `<div class="flow-party-acct">${fmt(tx.receiver.account)}</div>` : ""}
-        ${tx.receiver?.institution ? `<div class="flow-party-bank">${fmt(tx.receiver.institution)}</div>` : ""}
+      <div class="mast-badges">
+        <span class="badge-type">${titled(tx.type)}</span>
+        <span class="status-pill"><span class="status-dot"></span>${titled(tx.status)}</span>
       </div>
     </div>
+    <div class="mast-figures">
+      <div class="fig"><span class="k">Amount</span><span class="v">${amount(tx.amount, tx.currency)}</span></div>
+      ${
+        has(tx.convertedAmountAUD)
+          ? `<div class="fig"><span class="k">AUD Equivalent</span><span class="v">${amount(
+              tx.convertedAmountAUD,
+              "AUD"
+            )}</span></div>`
+          : ""
+      }
+      <div class="fig"><span class="k">Value Date</span><span class="v">${date(tx.timestamp)}</span></div>
+      ${
+        has(tx.channel)
+          ? `<div class="fig"><span class="k">Channel</span><span class="v">${titled(tx.channel)}</span></div>`
+          : ""
+      }
+    </div>
+  </header>
 
-    <!-- ── Risk Assessment ── -->
-    <div class="section-head">Risk Assessment</div>
-    <div class="risk-card">
+  <table class="control-table">
+    <tr>
+      <td><span class="ck">Reporting Entity</span><span class="cv">${text(meta.clientName)}</span></td>
+      <td><span class="ck">Branch</span><span class="cv">${text(meta.branchName)}</span></td>
+      <td><span class="ck">Record Status</span><span class="cv">${titled(tx.status)}</span></td>
+    </tr>
+    <tr>
+      <td><span class="ck">Report Generated</span><span class="cv">${generatedAt}</span></td>
+      <td><span class="ck">Generated By</span><span class="cv">${text(meta.generatedBy)}</span></td>
+      <td><span class="ck">Classification</span><span class="cv">Confidential</span></td>
+    </tr>
+  </table>
+
+  ${section(
+    "Value Flow",
+    `<table class="flow"><tr>
+      <td class="leg">
+        <div class="leg-lbl">From &middot; Sender</div>
+        <div class="leg-name">${text(tx.sender?.name)}</div>
+        ${has(tx.sender?.account) ? `<div class="leg-meta mono">${text(tx.sender.account)}</div>` : ""}
+        ${has(tx.sender?.institution) ? `<div class="leg-meta">${text(tx.sender.institution)}</div>` : ""}
+      </td>
+      <td class="mid">
+        <svg width="58" height="10" viewBox="0 0 58 10" aria-hidden="true">
+          <path d="M0 5H48" stroke="#1d4ed8" stroke-width="1.6"/>
+          <path d="M46 0.5L57 5L46 9.5Z" fill="#1d4ed8"/>
+        </svg>
+        <div class="flow-amt">${amount(tx.amount, tx.currency)}</div>
+        ${
+          has(tx.convertedAmountAUD)
+            ? `<div class="flow-aud">${amount(tx.convertedAmountAUD, "AUD")} equivalent</div>`
+            : ""
+        }
+      </td>
+      <td class="leg to">
+        <div class="leg-lbl">To &middot; Receiver</div>
+        <div class="leg-name">${text(tx.receiver?.name)}</div>
+        ${has(tx.receiver?.account) ? `<div class="leg-meta mono">${text(tx.receiver.account)}</div>` : ""}
+        ${has(tx.receiver?.institution) ? `<div class="leg-meta">${text(tx.receiver.institution)}</div>` : ""}
+      </td>
+    </tr></table>`
+  )}
+
+  ${section(
+    "Risk Assessment",
+    `<div class="risk-card">
       <div class="risk-top">
-        <div>
-          <div class="risk-score">${score}<span> / 100</span></div>
-        </div>
-        <span class="risk-badge">${riskLabel}</span>
+        <div class="risk-score">${score}<small> / 100</small></div>
+        <span class="risk-badge">${escHtml(band.label)}</span>
       </div>
-      <div class="risk-bar-track"><div class="risk-bar-fill"></div></div>
-      <div class="risk-label-row"><span>Low (0)</span><span>Medium (40)</span><span>High (70–100)</span></div>
+      <div class="risk-track"><div class="risk-fill"></div></div>
+      <div class="risk-scale"><span>Low 0&ndash;39</span><span>Medium 40&ndash;69</span><span>High 70&ndash;100</span></div>
+      ${flagChips}
+    </div>`
+  )}
+
+  ${section(
+    "Transaction Details",
+    table(
+      row("Reference", tx.reference, { mono: true }) +
+        row("Transaction Type", has(tx.type) ? titled(tx.type) : "", { html: true }) +
+        row("Sub-type", has(tx.subtype) ? titled(tx.subtype) : "", { html: true }) +
+        row("Channel", has(tx.channel) ? titled(tx.channel) : "", { html: true }) +
+        row("Purpose", tx.purpose) +
+        row("Remittance Purpose Code", tx.remittancePurposeCode, { mono: true }) +
+        row("Narrative", tx.narrative) +
+        (tx.relatedPartyFlag
+          ? row("Related Party", `<span class="flag-note flag-warn">Related party transaction</span>`, {
+              html: true,
+            })
+          : "") +
+        row("Related Transaction ID", tx.relatedPartyTxnId, { mono: true }) +
+        row("Value Date", has(tx.timestamp) ? date(tx.timestamp) : "", { html: true })
+    )
+  )}
+
+  ${section("Transaction Parties", partyGrid)}
+
+  ${section(
+    "Virtual Asset Details",
+    table(
+      row("Network", tx.crypto?.network) +
+        row("Wallet Address", tx.crypto?.walletAddress, { mono: true }) +
+        row("Transaction Hash", tx.crypto?.txHash, { mono: true }) +
+        row("Cluster", tx.crypto?.cluster) +
+        row("Hops From Source", tx.crypto?.hops)
+    )
+  )}
+
+  ${section(
+    "Travel Rule",
+    table(
+      row("Originator VASP", tx.travelRule?.originatorVaspName) +
+        row("Originator VASP ID", tx.travelRule?.originatorVaspId, { mono: true }) +
+        row("Originator Licence", tx.travelRule?.originatorVaspLicense) +
+        row("Beneficiary VASP", tx.travelRule?.beneficiaryVaspName) +
+        row("Beneficiary VASP ID", tx.travelRule?.beneficiaryVaspId, { mono: true }) +
+        row("Travel Message ID", tx.travelRule?.travelMessageId, { mono: true }) +
+        row("Protocol", tx.travelRule?.protocol)
+    )
+  )}
+
+  ${section(
+    "Bullion Details",
+    table(
+      row("Metal", tx.bullion?.type) +
+        row("Purity", tx.bullion?.purity) +
+        row("Weight", has(tx.bullion?.weight) ? `${tx.bullion.weight} g` : "")
+    )
+  )}
+
+  ${section(
+    "Forensic Analysis",
+    table(
+      row("Wallet Cluster", tx.forensic?.walletCluster) +
+        row("Chain Analytics Score", tx.forensic?.chainalysisScore) +
+        row("Analyst Notes", tx.forensic?.notes)
+    )
+  )}
+
+  ${section(
+    "Investigation",
+    table(
+      (tx.investigation?.flagged
+        ? row("Status", `<span class="flag-note">Flagged for investigation</span>`, { html: true })
+        : "") +
+        row("Case Reference", tx.investigation?.caseId, { mono: true }) +
+        row("Investigator Notes", tx.investigation?.investigatorNotes)
+    )
+  )}
+
+  ${section(
+    "Record Audit",
+    table(
+      row("Record ID", tx._id, { mono: true }) +
+        row("Sequence", tx.sequence) +
+        row("Created", has(tx.createdAt) ? date(tx.createdAt) : "", { html: true }) +
+        row("Created By", meta.createdByName) +
+        row("Last Updated", has(tx.updatedAt) ? date(tx.updatedAt) : "", { html: true })
+    )
+  )}
+
+  <div class="attest">
+    <p>
+      This report was generated from the transaction record held in the case management
+      system at the time and date shown above. It is confidential and intended solely for
+      authorised compliance, audit and regulatory use.
+    </p>
+    <div class="stamp">
+      <div class="mono">${text(tx.uid)}</div>
+      <div>${generatedAt}</div>
     </div>
-    ${(tx.riskFlags || []).length ? `
-    <table class="detail-table" style="margin-top:8px">
-      ${row("Risk Flags", tx.riskFlags.join(", "))}
-    </table>` : ""}
-    ${tx.investigation?.flagged || tx.investigation?.caseId ? `
-    <table class="detail-table" style="margin-top:8px">
-      ${tx.investigation.flagged ? `<tr><td class="tl">Investigation</td><td class="tv"><span class="flag-red">&#9873; Flagged for Investigation</span></td></tr>` : ""}
-      ${row("Case ID", tx.investigation.caseId)}
-      ${row("Notes", tx.investigation.investigatorNotes)}
-    </table>` : ""}
-
-    <!-- ── Transaction Details ── -->
-    <div class="section-head">Transaction Details</div>
-    <table class="detail-table">
-      ${row("Reference", fmt(tx.reference), true)}
-      ${row("Narrative", fmt(tx.narrative))}
-      ${row("Purpose", fmt(tx.purpose))}
-      ${row("Sub-type", fmt(tx.subtype))}
-      ${tx.relatedPartyFlag ? `<tr><td class="tl">Related Party</td><td class="tv"><span class="flag-warn">&#9873; Related Party Flagged</span></td></tr>` : ""}
-      ${row("Related Txn ID", fmt(tx.relatedPartyTxnId), true)}
-      ${row("Created At", fmtDate(tx.createdAt))}
-    </table>
-
-    <!-- ── Parties ── -->
-    <div class="section-head">Transaction Parties</div>
-    <div class="party-grid">
-      ${partyCard("Sender", tx.sender, "#1d4ed8")}
-      ${partyCard("Receiver", tx.receiver, "#16a34a")}
-      ${partyCard("Beneficiary", tx.beneficiary, "#7c3aed")}
-      ${partyCard("Intermediary", tx.intermediary, "#0891b2")}
-    </div>
-
-  </div>
-
-  <!-- ── Footer ── -->
-  <div class="footer-bar">
-    <div>
-      <div class="footer-left">Generated on ${genDate}</div>
-      <div class="footer-conf">Confidential &mdash; For authorised use only</div>
-    </div>
-    <div class="footer-right">${fmt(tx.uid)}</div>
   </div>
 
 </body>
 </html>`;
 }
 
+// Exported so the template can be rendered (and snapshot-tested) without a browser.
+exports.buildTxHtml = buildTxHtml;
+
 exports.downloadTransactionPdf = asyncHandler(async (req, res, next) => {
   if (!isValidId(req.params.id))
     return next(new ErrorResponse("Invalid transaction id", 400));
 
-  const tx = await Transaction.findById(req.params.id).lean();
+  const tx = await Transaction.findById(req.params.id)
+    .populate("client branch createdBy")
+    .lean();
   if (!tx) return next(new ErrorResponse("Transaction not found", 404));
 
-  const html = buildTxHtml(tx);
+  const html = buildTxHtml(tx, {
+    generatedAt: new Date(),
+    generatedBy:
+      plainOr(req.user?.name) || plainOr(req.user?.email) || plainOr(req.user?.uid) || "",
+    createdByName: plainOr(tx.createdBy?.name) || plainOr(tx.createdBy?.uid) || "",
+    clientName: plainOr(tx.client?.name) || plainOr(req.user?.client?.name) || "",
+    branchName: plainOr(tx.branch?.name) || plainOr(req.user?.branch?.name) || "",
+  });
+
+  const safeName = String(tx.uid || tx._id).replace(/[^A-Za-z0-9._-]/g, "_");
 
   let browser;
   try {
-    browser = await puppeteer.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+    browser = await launchPdfBrowser();
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    // The document is fully self-contained (no remote images or fonts), so
+    // waiting on the network only risks a 30s stall in the container.
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
+
     const pdfBuffer = await page.pdf({
       format: "A4",
-      margin: { top: "10mm", right: "10mm", bottom: "10mm", left: "10mm" },
+      // Without this every background — masthead, status pill, risk card,
+      // zebra rows — prints white and the report loses its whole design.
+      printBackground: true,
+      // A page separated from the pack must still identify itself.
+      displayHeaderFooter: true,
+      headerTemplate: "<div></div>",
+      footerTemplate:
+        '<div style="width:100%;font-size:7px;color:#8a8a8a;padding:0 12mm;' +
+        'font-family:Helvetica,Arial,sans-serif;display:flex;justify-content:space-between;">' +
+        `<span>Transaction ${escHtml(tx.uid || "")} &mdash; Confidential</span>` +
+        '<span>Page <span class="pageNumber"></span> of <span class="totalPages"></span></span>' +
+        "</div>",
+      margin: { top: "12mm", bottom: "16mm", left: "12mm", right: "12mm" },
     });
+
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="transaction-${tx.uid || tx._id}.pdf"`);
-    res.end(pdfBuffer);
+    res.setHeader("Content-Disposition", `attachment; filename="Transaction_${safeName}.pdf"`);
+    // Puppeteer 23+ returns a Uint8Array; Express JSON-serialises anything that
+    // is not a Buffer, so an un-normalised body downloads as {"0":37,...}.
+    res.send(Buffer.from(pdfBuffer));
   } catch (err) {
+    // The old handler swallowed this, which is why a container-only failure was
+    // invisible in the logs. Keep the cause on the server, not in the response.
+    console.error("[transaction:pdf] generation failed:", err);
     return next(new ErrorResponse("Error generating PDF", 500));
   } finally {
-    if (browser) await browser.close();
+    if (browser) await browser.close().catch(() => {});
   }
 });
 
