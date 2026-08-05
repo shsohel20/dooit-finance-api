@@ -12,6 +12,7 @@ const {
   filterGFSSection,
   submitGFS,
   approveGFS,
+  exportGfsReportPdf,
 } = require("../controllers/gfsReportController");
 
 const GFS = require("../models/gfsReport");
@@ -42,6 +43,9 @@ router.route("/:id/generate-report").put(generateReport);
 
 router.route("/:id/submit").put(submitGFS);
 router.route("/:id/approve").put(approveGFS);
+
+// filing-grade PDF of a single report
+router.route("/:id/export-pdf").get(exportGfsReportPdf);
 
 // CRUD by id
 router.route("/:id").get(getGFS).put(updateGFS).delete(deleteGFS);
