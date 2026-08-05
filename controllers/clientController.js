@@ -542,6 +542,15 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
 
       // Optionally delete linked user
       if (deleteLinkedUser && linkedUserId) {
+        // Cascade the user's UserType memberships first (children before parent).
+        // Without this they outlive their user, leaving scopeUserListByTenant
+        // resolving IDs with no matching User.
+        if (usedSession) {
+          await UserType.deleteMany({ user: linkedUserId }).session(session);
+        } else {
+          await UserType.deleteMany({ user: linkedUserId });
+        }
+
         if (usedSession) {
           await User.deleteOne({ _id: linkedUserId }).session(session);
         } else {

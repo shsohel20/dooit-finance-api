@@ -19,6 +19,19 @@
 const FONT =
   "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
 
+/**
+ * Escape untrusted text before interpolating it into an email body. Names,
+ * client names and role labels are user-supplied, so they must never be able
+ * to inject markup into the rendered HTML.
+ */
+const esc = (v) =>
+  String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 // Real hosted Dooit logo (black wordmark on transparent). Rendered on a WHITE
 // band so it's always visible. Override with EMAIL_LOGO_URL if the asset moves.
 const LOGO_URL = (process.env.EMAIL_LOGO_URL || "https://dooit.ai/assets/img/logo.png").trim();
@@ -37,16 +50,45 @@ const logoMark = () =>
     : `<span style="font-family:${FONT};font-size:26px;font-weight:800;letter-spacing:-.5px;color:#0f172a;line-height:1">Dooit<span style="color:#2563eb">.AI</span></span>`;
 
 /**
+ * Partner (client/tenant) mark shown beside the Dooit logo when an email is sent
+ * on behalf of a specific client. Prefers the client's hosted logo; falls back to
+ * their name as a text wordmark so co-branding still reads when no logo is set.
+ */
+const coBrandMark = ({ name, logoUrl } = {}) =>
+  logoUrl
+    ? `<img src="${esc(logoUrl)}" alt="${esc(name)}" height="32" style="display:inline-block;height:32px;width:auto;max-width:150px;border:0;line-height:100%;outline:none;text-decoration:none;vertical-align:middle" />`
+    : `<span style="font-family:${FONT};font-size:17px;font-weight:700;letter-spacing:-.2px;color:#0f172a;vertical-align:middle">${esc(name)}</span>`;
+
+/**
  * Brand header: a white band carrying the logo, followed by a gradient hero with
  * an optional emoji icon badge + title + subtitle. Returns two <tr> rows to drop
  * inside the card <table>. Two bands keep the (black) logo readable while
  * preserving the branded gradient hero used across Dooit emails.
+ *
+ * `coBrand` ({ name, logoUrl }) renders a Dooit + client lockup in the white band,
+ * separated by a hairline divider — used for emails addressed to a client's own
+ * users so both brands are present.
  */
-function brandHeader({ icon = "", title = "", subtitle = "" }) {
+function brandHeader({ icon = "", title = "", subtitle = "", coBrand = null }) {
+  const hasCoBrand = Boolean(coBrand && (coBrand.logoUrl || coBrand.name));
+
+  // Divider is a filled <div> rather than a border so Outlook keeps its height.
+  const logoBand = hasCoBrand
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin:0 auto">
+            <tr>
+              <td style="padding:0 18px 0 0;vertical-align:middle">${logoMark()}</td>
+              <td style="width:1px;padding:0;vertical-align:middle">
+                <div style="width:1px;height:30px;background:#e2e8f0;font-size:0;line-height:0">&nbsp;</div>
+              </td>
+              <td style="padding:0 0 0 18px;vertical-align:middle">${coBrandMark(coBrand)}</td>
+            </tr>
+          </table>`
+    : logoMark();
+
   return `
       <tr>
         <td style="background:#ffffff;padding:22px 40px 20px;text-align:center;border-bottom:1px solid #eef2f7">
-          ${logoMark()}
+          ${logoBand}
         </td>
       </tr>
       <tr>
@@ -127,7 +169,9 @@ module.exports = {
   LOGO_URL,
   SUPPORT_EMAIL,
   BRAND_COLOR,
+  esc,
   logoMark,
+  coBrandMark,
   brandHeader,
   brandFooter,
   shell,
