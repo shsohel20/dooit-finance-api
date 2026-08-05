@@ -13,17 +13,20 @@ const {
   deleteContact,
 } = require("../controllers/contactController");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 // Public endpoint: submit contact form
 router.route("/new").post(createContact);
 
 // Admin: list / manage contacts
 router.use(protect);
-router.use(authorize("admin"));
+router.use(authorizePermission("CONTACT.GET", "CONTACT.DELETE"));
 
 router.route("/").get(advancedResults(Contact, null), getContacts);
 
-router.route("/:id").get(getContact).delete(deleteContact);
+router
+  .route("/:id")
+  .get(authorizePermission("CONTACT.GET"), getContact)
+  .delete(authorizePermission("CONTACT.DELETE"), deleteContact);
 
 module.exports = router;

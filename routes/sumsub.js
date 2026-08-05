@@ -29,7 +29,7 @@ const {
   bulkUpdateAmlMatches,
 } = require("../controllers/amlMatchController");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 
@@ -54,13 +54,13 @@ router.post("/upload-document", uploadDocument);
 // Step 3: Trigger Sumsub AI verification
 router.post("/request-check", requestCheck);
 
-// ── Protected routes (admin / client / manager) ───────────────────────────────
+// ── Protected routes (SUMSUB.* permission holders) ────────────────────────────
 
 // Step 4: Get current KYC status from Sumsub
 router.get(
   "/status/:customerId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.GET"),
   getApplicantStatus,
 );
 
@@ -68,7 +68,7 @@ router.get(
 router.post(
   "/aml-check/:customerId",
   protect,
-  authorize("admin", "client", "manager"),
+  authorizePermission("SUMSUB.EDIT"),
   triggerAml,
 );
 
@@ -76,7 +76,7 @@ router.post(
 router.get(
   "/aml-case/:customerId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.GET"),
   getAmlCase,
 );
 
@@ -84,7 +84,7 @@ router.get(
 router.get(
   "/aml-matches/:customerId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.GET"),
   getAmlMatches,
 );
 // Bulk disposition — MUST be declared before "/aml-matches/:id" so the literal
@@ -92,19 +92,19 @@ router.get(
 router.patch(
   "/aml-matches/bulk",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.EDIT"),
   bulkUpdateAmlMatches,
 );
 router.patch(
   "/aml-matches/:id",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.EDIT"),
   updateAmlMatch,
 );
 router.get(
   "/resources/checks/latest/:applicantId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.GET"),
   getVerificationResult,
 );
 

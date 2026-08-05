@@ -23,7 +23,20 @@ jest.mock("../../middleware/auth", () => ({
     next();
   },
   verifyUser:           (_req, _res, next) => next(),
-  authorizePermission:  ()  => (_req, _res, next) => next(),
+  // Mirrors authorizePermission in middleware/auth: passes when the user holds
+  // at least ONE of the listed permission strings.
+  authorizePermission: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.some((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
+  authorizeAllPermissions: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.every((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
 }));
 
 // advancedResults scopes by client/branch — Training modules no longer carry
@@ -49,9 +62,15 @@ const clientId  = new mongoose.Types.ObjectId();
 const branchId  = new mongoose.Types.ObjectId();
 const roleId    = new mongoose.Types.ObjectId();
 
-const ADMIN   = { _id: adminId,   id: adminId,   name: "Admin",   email: "admin@t.com",   role: "admin",   client: null, branch: {}, permissions: [] };
-const MANAGER = { _id: managerId, id: managerId, name: "Manager", email: "manager@t.com", role: "manager", client: null, branch: {}, permissions: [] };
-const LEARNER = { _id: learnerId, id: learnerId, name: "Learner", email: "learner@t.com", role: "learner", client: null, branch: {}, permissions: [] };
+// Training routes are permission-guarded. TRAINING.ADMIN (delete a module,
+// grant module access) is the admin-only slice a manager deliberately lacks.
+const ADMIN_PERMS   = ["TRAINING.GET", "TRAINING.MANAGE", "TRAINING.ASSIGN", "TRAINING.REPORT", "TRAINING.ADMIN"];
+const MANAGER_PERMS = ["TRAINING.GET", "TRAINING.MANAGE", "TRAINING.ASSIGN", "TRAINING.REPORT"];
+const LEARNER_PERMS = ["TRAINING.GET"];
+
+const ADMIN   = { _id: adminId,   id: adminId,   name: "Admin",   email: "admin@t.com",   role: "admin",   client: null, branch: {}, permissions: ADMIN_PERMS };
+const MANAGER = { _id: managerId, id: managerId, name: "Manager", email: "manager@t.com", role: "manager", client: null, branch: {}, permissions: MANAGER_PERMS };
+const LEARNER = { _id: learnerId, id: learnerId, name: "Learner", email: "learner@t.com", role: "learner", client: null, branch: {}, permissions: LEARNER_PERMS };
 
 function as(user) { mockCurrentUser = user; }
 

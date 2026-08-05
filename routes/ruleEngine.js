@@ -17,13 +17,21 @@ const {
 const upload = require("../middleware/upload");
 
 const ruleEngineResults = require("../middleware/ruleEngineResults");
-const { protect } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
 // Protect all routes
 router.use(protect);
+router.use(
+  authorizePermission(
+    "CLIENT_RULE.GET",
+    "CLIENT_RULE.ADD",
+    "CLIENT_RULE.EDIT",
+    "CLIENT_RULE.DELETE",
+  ),
+);
 
 // List rules — GET and POST both go through the same results middleware.
 // POST body is ignored for filtering (all params are in the query string);

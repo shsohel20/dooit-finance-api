@@ -8,7 +8,7 @@ const {
   verifyDocAndFace,
   ocrDocument,
 } = require("../controllers/onboardingJourneyController");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "15mb" }));
@@ -32,7 +32,7 @@ router.post("/ocr-document", protect, ocrDocument);
 router.get(
   "/customer/:customerId",
   protect,
-  // authorize("admin", "client", "branch", "manager"),
+  authorizePermission("ONBOARDING.GET", "CUSTOMER.GET"),
   getJourneyByCustomer
 );
 
@@ -40,7 +40,7 @@ router.get(
 router.patch(
   "/:journeyId/step/:stepType",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("ONBOARDING.REVIEW"),
   reviewJourneyStep
 );
 

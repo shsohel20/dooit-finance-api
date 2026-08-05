@@ -14,19 +14,22 @@ const {
   bulkRestoreSnapshots,
 } = require("../controllers/privacyController");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "10kb" }));
 
-// All privacy routes require authentication and admin role
+// All privacy routes require authentication and a PRIVACY grant
 router.use(protect);
-router.use(authorize("admin"));
+router.use(authorizePermission("PRIVACY.ENCRYPT", "PRIVACY.DECRYPT"));
 
 // ── User encryption management ────────────────────────────────────────────────
 // GET  /api/v1/privacy/user/:id            → encryption status
 // PUT  /api/v1/privacy/user/:id            → { encrypted: true|false }
-router.route("/user/:id").get(getUserPrivacyStatus).put(updateUserEncryption);
+router
+  .route("/user/:id")
+  .get(authorizePermission("PRIVACY.ENCRYPTVIEW", "PRIVACY.ENCRYPT", "PRIVACY.DECRYPT"), getUserPrivacyStatus)
+  .put(authorizePermission("PRIVACY.ENCRYPT", "PRIVACY.DECRYPT"), updateUserEncryption);
 
 // PUT  /api/v1/privacy/users/bulk          → { encrypted: true|false }
 router.route("/users/bulk").put(bulkUpdateUserEncryption);

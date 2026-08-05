@@ -1,6 +1,6 @@
 const express = require("express");
 const router  = express.Router();
-const { protect } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 const {
   getRiskSummary,
   getComplianceHealth,
@@ -16,6 +16,8 @@ const {
 
 router.use(express.json({ limit: "100kb" }));
 router.use(protect);
+// Every dashboard route here is a read.
+router.use(authorizePermission("EWRA.GET"));
 
 // All scoped to :entityId
 router.get("/:entityId/risk-summary",          getRiskSummary);

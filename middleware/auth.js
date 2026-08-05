@@ -124,15 +124,24 @@ exports.protect = asyncHandler(async (req, res, next) => {
       clientBelongs: resolvedClientId,
       branchBelongs: resolvedBranchId,
       client: u?.client ?? u?.branch?.client ?? null,
-      branch: u?.branch ? { ...u?.branch, client: branch.client?._id } : null,
+      // `u.branch` is populated one level deep, so `branch.client` is already the
+      // id (not a document) — collapse both shapes to an id. Referencing a bare
+      // `branch` here threw a ReferenceError for every branch user, which the
+      // catch below reported as a 401.
+      branch: u?.branch
+        ? { ...u.branch, client: u.branch.client?._id ?? u.branch.client ?? null }
+        : null,
       qr,
     };
 
     let canReadDecrypted = false;
     let permissions = [];
     try {
+      // Role names are operator-supplied ("Compliance officer", "C++ Lead"), so
+      // escape before building the anchored case-insensitive match.
+      const escaped = String(u.role ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const roleDoc = await Role.findOne({
-        name: { $regex: new RegExp(`^${u.role}$`, "i") },
+        name: { $regex: new RegExp(`^${escaped}$`, "i") },
       })
         .select("_id")
         .lean();
@@ -170,9 +179,16 @@ exports.verifyUser = asyncHandler(async (req, res, next) => {
   }
 });
 
-// ── Role-based guard ─────────────────────────────────────────────────────────
+// ── Role-based guard (LEGACY — prefer authorizePermission) ───────────────────
 // Checks the ACTIVE hat's role name (from the JWT). Pure role check — no
-// implicit userType bypass. Pair with authorizeUserType on routes that need it.
+// implicit userType bypass.
+//
+// Roles are created at runtime from the UI, so any hard-coded name list here
+// goes stale the moment an operator adds a role: "Compliance officer" could not
+// pass authorize("admin","client","branch","manager","officer") on ANY route.
+// Staff routes now use authorizePermission instead. What remains for this guard
+// is identity checks, where the role IS the subject of the route (a customer
+// reading their own onboarding record), not an access level.
 exports.authorize = (...roles) => {
   return (req, res, next) => {
     const userRole = (req.user.role ?? "").toLowerCase();
@@ -207,10 +223,36 @@ exports.authorizeUserType = (...types) => {
   };
 };
 
-// ── Permission guard ──────────────────────────────────────────────────────────
-// Checks that req.user.permissions includes ALL of the listed permission strings.
-// "dooit" users bypass this because bootstrapAdmin grants them the full catalog.
+// ── Permission guard (ANY-of) ─────────────────────────────────────────────────
+// Passes when req.user.permissions contains AT LEAST ONE of the listed strings.
+// This is the primary route guard — prefer it over authorize() so access follows
+// the RolePermission grant rather than a hard-coded role name.
+//
+// ANY-of (not ALL-of) because a route is usually reachable by more than one
+// grant: /cases DELETE is legitimate for both CASE.DELETE and the broader
+// CASE.EDIT-holder in some tenants. Use authorizeAllPermissions when a route
+// genuinely needs every listed permission at once.
+//
+// There is deliberately NO userType bypass here — not even for "dooit". Platform
+// admins get through because bootstrapAdmin/syncRolePermissions grants their role
+// the full catalog, which keeps RolePermission.restrictedUsers meaningful for them
+// too. A code-level bypass would silently void every per-user restriction.
 exports.authorizePermission = (...perms) => {
+  return (req, res, next) => {
+    const userPerms = req.user.permissions ?? [];
+    if (perms.some((p) => userPerms.includes(p))) return next();
+    return next(
+      new ErrorResponse(
+        `Missing permission — one of: ${perms.join(", ")} is required`,
+        403
+      )
+    );
+  };
+};
+
+// ── Permission guard (ALL-of) ─────────────────────────────────────────────────
+// Passes only when req.user.permissions contains EVERY listed string.
+exports.authorizeAllPermissions = (...perms) => {
   return (req, res, next) => {
     const userPerms = req.user.permissions ?? [];
     const missing = perms.filter((p) => !userPerms.includes(p));

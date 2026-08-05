@@ -3,7 +3,7 @@ const router = express.Router();
 const upload = require("../middleware/upload"); // multer instance for CSV import
 
 
-const { protect } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 const {
   getRiskFactors,
   getJurisdictions,
@@ -41,6 +41,14 @@ const RiskFactorOption = require("../models/RiskFactorOption");
 router.use(express.json({ limit: "100kb" }));
 
 router.use(protect);
+router.use(
+  authorizePermission(
+    "RISK_ASSESSMENT.GET",
+    "RISK_ASSESSMENT.ADD",
+    "RISK_ASSESSMENT.EDIT",
+    "RISK_ASSESSMENT.DELETE",
+  ),
+);
 
 router
   .route("/")

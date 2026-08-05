@@ -19,11 +19,11 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
-// protect all SMR routes and allow only admin by default
+// protect all SMR routes — access is the REPORT.SMR grant
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(authorizePermission("REPORT.SMR"));
 
 // list (GET query / POST body-filter)
 router

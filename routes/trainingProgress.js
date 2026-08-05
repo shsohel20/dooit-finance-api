@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const {
     getMyProgress,
@@ -30,7 +30,7 @@ router.use(protect);
 // POST /api/v1/progress/:moduleId/complete → finish module & calculate result
 
 router.get("/", getAllMyProgress);
-router.get("/report", authorize("admin", "manager"), getProgressReport);
+router.get("/report", authorizePermission("TRAINING.REPORT"), getProgressReport);
 
 router.get("/:moduleId", getMyProgress);
 router.post("/:moduleId/start", startModule);
@@ -45,17 +45,17 @@ router.get("/parts/:partId", getMyPartProgress);
 // GET  /api/v1/progress/:moduleId/learners → all learner progress for module
 router.post(
     "/:moduleId/retake",
-    authorize("admin", "manager"),
+    authorizePermission("TRAINING.ASSIGN"),
     grantRetake
 );
 router.get(
     "/:moduleId/learners",
-    authorize("admin", "manager"),
+    authorizePermission("TRAINING.REPORT"),
     getModuleLearnerProgress
 );
 router.get(
     "/:moduleId/learners/:learnerId",
-    authorize("admin", "manager"),
+    authorizePermission("TRAINING.REPORT"),
     getLearnerPartProgress
 );
 

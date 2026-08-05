@@ -35,7 +35,7 @@ const {
 
 const TrainingModule = require("../models/TrainingModule");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 router.use(express.json({ limit: "100kb" }));
 router.use(protect);
@@ -44,60 +44,66 @@ router.use(protect);
 router
   .route("/")
   .get(advancedResults(TrainingModule), getModules)
-  .post(authorize("admin", "manager"), createModule);
+  .post(authorizePermission("TRAINING.MANAGE"), createModule);
 
-router.get("/assigned-by-me", authorize("admin", "manager"), getAssignedByMe);
+router.get("/assigned-by-me", authorizePermission("TRAINING.ASSIGN"), getAssignedByMe);
 
 router
   .route("/:id")
   .get(getModule)
-  .put(authorize("admin", "manager"), updateModule)
-  .delete(authorize("admin"), deleteModule);
+  .put(authorizePermission("TRAINING.MANAGE"), updateModule)
+  // Destructive + scope-granting routes carry TRAINING.ADMIN, which the module
+  // authors' TRAINING.MANAGE grant deliberately does not include.
+  .delete(authorizePermission("TRAINING.ADMIN"), deleteModule);
 
 // ── Parts ──────────────────────────────────────────────────────────────────────
 router
   .route("/:moduleId/parts")
-  .post(authorize("admin", "manager"), createPart)
+  .post(authorizePermission("TRAINING.MANAGE"), createPart)
   .get(getPartsByModule);
 
 router
   .route("/parts/:partId")
   .get(getPart)
-  .put(authorize("admin", "manager"), updatePart)
-  .delete(authorize("admin", "manager"), deletePart);
+  .put(authorizePermission("TRAINING.MANAGE"), updatePart)
+  .delete(authorizePermission("TRAINING.MANAGE"), deletePart);
 
 // ── Questions ──────────────────────────────────────────────────────────────────
 router
   .route("/parts/:partId/questions")
-  .post(authorize("admin", "manager"), createQuestion);
+  .post(authorizePermission("TRAINING.MANAGE"), createQuestion);
 
 router
   .route("/questions/:id")
   .get(getQuestion)
-  .put(authorize("admin", "manager"), updateQuestion)
-  .delete(authorize("admin", "manager"), deleteQuestion);
+  .put(authorizePermission("TRAINING.MANAGE"), updateQuestion)
+  .delete(authorizePermission("TRAINING.MANAGE"), deleteQuestion);
 
 // ── Module Access (admin assigns module to client/branch/role scopes) ─────────
 router
   .route("/:moduleId/access")
-  .post(authorize("admin"), assignAccess)
-  // .put(authorize("admin"), assignModuleAccess)
-  .get(authorize("admin", "manager"), getModuleAccess);
+  .post(authorizePermission("TRAINING.ADMIN"), assignAccess)
+  // .put(authorizePermission("TRAINING.MANAGE"), assignModuleAccess)
+  .get(authorizePermission("TRAINING.MANAGE"), getModuleAccess);
 
-router.delete("/access/:accessId", authorize("admin"), deleteModuleAccess);
+router.delete(
+  "/access/:accessId",
+  authorizePermission("TRAINING.ADMIN"),
+  deleteModuleAccess,
+);
 
 // ── Assignments (module-scoped) ────────────────────────────────────────────────
 // POST /api/v1/training-modules/:moduleId/assign
-router.post("/:moduleId/assign", authorize("admin", "manager"), assignModule);
+router.post("/:moduleId/assign", authorizePermission("TRAINING.ASSIGN"), assignModule);
 
 // ── Progress (module-scoped) ───────────────────────────────────────────────────
 // GET  /api/v1/training-modules/:moduleId/learners  → per-learner progress breakdown
 // POST /api/v1/training-modules/:moduleId/retake    → grant retake
 router.get(
   "/:moduleId/learners",
-  authorize("admin", "manager"),
+  authorizePermission("TRAINING.REPORT"),
   getModuleLearnerProgress,
 );
-router.post("/:moduleId/retake", authorize("admin", "manager"), grantRetake);
+router.post("/:moduleId/retake", authorizePermission("TRAINING.ASSIGN"), grantRetake);
 
 module.exports = router;

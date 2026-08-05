@@ -20,40 +20,43 @@ const {
 
 const Notify = require("../models/Notify");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 // protect routes
 router.use(protect);
+router.use(
+  authorizePermission("NOTIFY.GET", "NOTIFY.ADD", "NOTIFY.EDIT", "NOTIFY.DELETE"),
+);
 
 // list (GET query / POST body filter)
 router
   .route("/")
   .get(
     advancedResults(Notify, ["resourceId"], null),
-    //  authorize("admin", "operator"),
+    authorizePermission("NOTIFY.GET"),
     getNotifies,
   )
   .post(
     advancedResults(Notify, ["resourceId"], filterNotifySection),
-    // authorize("admin", "operator"),
+    authorizePermission("NOTIFY.GET"),
     getNotifiesPost,
   );
 
 // create
 router.route("/new").post(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.ADD"),
   createNotify,
 );
 
 // create dummy
 router.route("/dummy").post(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.ADD"),
   createDummyNotify,
 );
 
 // get by uid
 router.route("/uid/:uid").get(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.GET"),
   getNotifyByUid,
 );
 
@@ -61,31 +64,31 @@ router.route("/uid/:uid").get(
 router
   .route("/:id")
   .get(
-    // authorize("admin", "operator"),
+    authorizePermission("NOTIFY.GET"),
     getNotify,
   )
   .put(
-    // authorize("admin", "operator"),
+    authorizePermission("NOTIFY.EDIT"),
     updateNotify,
   )
   .delete(
-    // authorize("admin"),
+    authorizePermission("NOTIFY.DELETE"),
     deleteNotify,
   );
 
 // toggle active
 router.route("/:id/active").put(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.EDIT"),
   toggleNotifyActive,
 );
 
 // documents
 router.route("/:id/documents").post(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.EDIT"),
   addDocument,
 );
 router.route("/:id/documents/:docIndex").delete(
-  // authorize("admin", "operator"),
+  authorizePermission("NOTIFY.EDIT"),
   removeDocument,
 );
 

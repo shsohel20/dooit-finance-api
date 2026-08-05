@@ -10,7 +10,7 @@ const {
   syncStaffStatus,
   runAmlApplicant,
 } = require("../controllers/staffController");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 const Staff = require("../models/Staff");
 const advancedStaffResults = require("../middleware/advancedStaffResults");
 
@@ -21,7 +21,7 @@ router.use(express.json({ limit: "15mb" }));
 router.get(
   "/",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.GET"),
   advancedStaffResults(Staff),
   getStaffs,
 );
@@ -30,7 +30,7 @@ router.get(
 router.get(
   "/role/:roleId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.GET"),
   getStaffByRoleId,
 );
 
@@ -38,7 +38,7 @@ router.get(
 router.get(
   "/:staffId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.GET"),
   getStaff,
 );
 
@@ -46,7 +46,7 @@ router.get(
 router.post(
   "/",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.ADD"),
   createStaff,
 );
 
@@ -54,7 +54,7 @@ router.post(
 router.patch(
   "/:staffId/review",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.EDIT"),
   reviewStaff,
 );
 
@@ -62,7 +62,7 @@ router.patch(
 router.put(
   "/:staffId",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("STAFF.EDIT"),
   updateStaff,
 );
 
@@ -70,7 +70,7 @@ router.put(
 router.post(
   "/:staffId/sumsub/applicant",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.EDIT", "STAFF.EDIT"),
   initStaffApplicant,
 );
 
@@ -78,7 +78,7 @@ router.post(
 router.get(
   "/:staffId/sumsub/status",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.GET", "STAFF.GET"),
   syncStaffStatus,
 );
 
@@ -86,7 +86,7 @@ router.get(
 router.post(
   "/:staffId/sumsub/run-aml",
   protect,
-  authorize("admin", "client", "branch", "manager"),
+  authorizePermission("SUMSUB.EDIT", "STAFF.EDIT"),
   runAmlApplicant,
 );
 

@@ -38,7 +38,7 @@ const { saveAsTemplate } = require("../controllers/policyHubTemplateController")
 
 const PolicyHub = require("../models/PolicyHub");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 // const json50mb = express.json({ limit: "50mb" });
@@ -49,7 +49,15 @@ router.route("/:id/webhook").post(generatePolicyHubWebHook);
 
 // Protect all routes below
 router.use(protect);
-router.use(authorize("admin"));
+// Router-level floor: any POLICY_HUB grant gets in; each route below narrows it.
+router.use(
+  authorizePermission(
+    "POLICY_HUB.GET",
+    "POLICY_HUB.ADD",
+    "POLICY_HUB.EDIT",
+    "POLICY_HUB.DELETE",
+  ),
+);
 
 // List PolicyHubs
 router
@@ -68,9 +76,15 @@ router
   );
 
 // Create PolicyHub
-router.route("/new").post(createPolicyHub);
-router.route("/generate").post(generatePolicyHub);
-router.route("/import-docx").post(docxUpload.single("file"), importPolicyHubDocx);
+router.route("/new").post(authorizePermission("POLICY_HUB.ADD"), createPolicyHub);
+router.route("/generate").post(authorizePermission("POLICY_HUB.ADD"), generatePolicyHub);
+router
+  .route("/import-docx")
+  .post(
+    authorizePermission("POLICY_HUB.ADD"),
+    docxUpload.single("file"),
+    importPolicyHubDocx,
+  );
 
 // const json2mb = [
 //     express.json({ limit: "25mb" }),
@@ -80,21 +94,27 @@ router.route("/import-docx").post(docxUpload.single("file"), importPolicyHubDocx
 router
   .route("/:id")
   //   .all(json50mb) // applies 50MB limit to all methods
-  .get(getPolicyHub)
-  .put(updatePolicyHub)
-  .delete(deletePolicyHub);
+  .get(authorizePermission("POLICY_HUB.GET"), getPolicyHub)
+  .put(authorizePermission("POLICY_HUB.EDIT"), updatePolicyHub)
+  .delete(authorizePermission("POLICY_HUB.DELETE"), deletePolicyHub);
 
-router.route("/:id/download").get(downloadPolicyHubPDF);
-router.route("/:id/export-docx").get(exportPolicyHubDocx);
+router.route("/:id/download").get(authorizePermission("POLICY_HUB.GET"), downloadPolicyHubPDF);
+router.route("/:id/export-docx").get(authorizePermission("POLICY_HUB.GET"), exportPolicyHubDocx);
 
 ///Version control
 
-router.route("/:id/versions").get(listPolicyHubVersions);
-router.route("/:id/versions/:versionNumber").get(getPolicyHubVersion);
-router.route("/:id/restore/:versionNumber").post(restorePolicyHubVersion);
+router.route("/:id/versions").get(authorizePermission("POLICY_HUB.GET"), listPolicyHubVersions);
+router
+  .route("/:id/versions/:versionNumber")
+  .get(authorizePermission("POLICY_HUB.GET"), getPolicyHubVersion);
+router
+  .route("/:id/restore/:versionNumber")
+  .post(authorizePermission("POLICY_HUB.EDIT"), restorePolicyHubVersion);
 
-router.route("/:id/diff").get(diffPolicyHubVersions);
+router.route("/:id/diff").get(authorizePermission("POLICY_HUB.GET"), diffPolicyHubVersions);
 
-router.route("/:id/save-as-template").post(saveAsTemplate);
+router
+  .route("/:id/save-as-template")
+  .post(authorizePermission("POLICY_HUB.ADD"), saveAsTemplate);
 
 module.exports = router;

@@ -19,11 +19,11 @@ const GFS = require("../models/gfsReport");
 const advancedResults = require("../middleware/advancedResults");
 
 const router = express.Router();
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
-// protect all routes and allow only admin by default
+// protect all routes — access is the REPORT.GFS grant
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(authorizePermission("REPORT.GFS"));
 router.use(express.json({ limit: "100kb" }));
 
 // list (GET with query params, POST body filter via advancedResults)

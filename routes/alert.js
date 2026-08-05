@@ -19,46 +19,63 @@ const {
 const Alert = require("../models/Alert");
 const advancedResults = require("../middleware/advancedResults");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 
 router.use(express.json({ limit: "100kb" }));
 
-// Protect all alert routes and allow only admin by default
+// Every alert route needs an ALERT grant; each route below narrows by verb.
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(
+  authorizePermission("ALERT.GET", "ALERT.ADD", "ALERT.EDIT", "ALERT.DELETE"),
+);
 
 // List alerts (GET with query params, POST with body filter via advancedResults)
 router
   .route("/")
-  .get(advancedResults(Alert, "customer analyst transaction"), getAlerts)
+  .get(
+    authorizePermission("ALERT.GET"),
+    advancedResults(Alert, "customer analyst transaction"),
+    getAlerts,
+  )
   .post(
+    authorizePermission("ALERT.GET"),
     advancedResults(Alert, "customer analyst transaction", filterAlertSection),
     getAlertsPost,
   );
 
 // Create new alert
-router.route("/new").post(createAlert);
+router.route("/new").post(authorizePermission("ALERT.ADD"), createAlert);
 
 // Create dummy alert
-router.route("/dummy").post(createDummyAlert);
+router.route("/dummy").post(authorizePermission("ALERT.ADD"), createDummyAlert);
 
 // CRUD by id
-router.route("/:id").get(getAlert).put(updateAlert).delete(deleteAlert);
+router
+  .route("/:id")
+  .get(authorizePermission("ALERT.GET"), getAlert)
+  .put(authorizePermission("ALERT.EDIT"), updateAlert)
+  .delete(authorizePermission("ALERT.DELETE"), deleteAlert);
 
-router.route("/:id/assign-analyst").put(assignAnalyst);
+router
+  .route("/:id/assign-analyst")
+  .put(authorizePermission("ALERT.EDIT"), assignAnalyst);
 
 // ── AML alert lifecycle ───────────────────────────────────────────────────────
 // Analyst picks up an alert for review
-router.route("/:id/review").put(reviewAlert);
+router.route("/:id/review").put(authorizePermission("ALERT.EDIT"), reviewAlert);
 
 // Dismiss an alert (dismissed | false_positive)
-router.route("/:id/dismiss").put(dismissAlert);
+router.route("/:id/dismiss").put(authorizePermission("ALERT.EDIT"), dismissAlert);
 
 // Promote an alert to a full investigation case
-router.route("/:id/escalate").post(authorize("admin", "compliance_officer"), escalateAlertToCase);
+router
+  .route("/:id/escalate")
+  .post(authorizePermission("CASE.ADD", "ALERT.EDIT"), escalateAlertToCase);
 
-router.route("/:caseNumber/eccd-dummy").get(getDummyEccdData);
+router
+  .route("/:caseNumber/eccd-dummy")
+  .get(authorizePermission("ALERT.GET"), getDummyEccdData);
 
 module.exports = router;

@@ -18,10 +18,12 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 // protect all branch routes and allow only admin by default
 router.use(protect);
-router.use(authorize("admin", "branch"));
+router.use(
+  authorizePermission("BRANCH.GET", "BRANCH.ADD", "BRANCH.EDIT", "BRANCH.DELETE"),
+);
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router
@@ -30,19 +32,23 @@ router
   .get(advancedResults(Branch, "client"), getBranches);
 
 // create new branch
-router.route("/new").post(createBranch);
+router.route("/new").post(authorizePermission("BRANCH.ADD"), createBranch);
 
 // create dummy branch
 
-router.route("/dummy").post(createDummyBranch);
+router.route("/dummy").post(authorizePermission("BRANCH.ADD"), createDummyBranch);
 
 // optional: update branch status (if you implement updateBranchStatus in controller)
 // router.route("/update-status/:id").put(updateBranchStatus);
 
 // CRUD by id
-router.route("/:id").get(getBranch).put(updateBranch).delete(deleteBranch);
+router
+  .route("/:id")
+  .get(authorizePermission("BRANCH.GET"), getBranch)
+  .put(authorizePermission("BRANCH.EDIT"), updateBranch)
+  .delete(authorizePermission("BRANCH.DELETE"), deleteBranch);
 
 // get by slug
-router.route("/slug/:slug").get(getBranchBySlug);
+router.route("/slug/:slug").get(authorizePermission("BRANCH.GET"), getBranchBySlug);
 
 module.exports = router;

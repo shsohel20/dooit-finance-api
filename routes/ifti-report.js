@@ -19,11 +19,11 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
-// protect routes and allow only admin by default (adjust as needed)
+// protect routes — access is the REPORT.IFTI grant
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(authorizePermission("REPORT.IFTI"));
 
 // list
 router

@@ -17,11 +17,11 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
-// Protect all TTR routes and allow only admin
+// Protect all TTR routes — access is the REPORT.TTR grant
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(authorizePermission("REPORT.TTR"));
 
 // list (GET query / POST body-filter)
 router

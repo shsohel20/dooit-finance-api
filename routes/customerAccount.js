@@ -18,7 +18,7 @@ const {
 
 const CustomerAccount = require("../models/CustomerAccount");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 // Protect all routes
 router.use(protect);
@@ -32,37 +32,37 @@ router
       ["client", "branch", "customer", "createdBy"],
       null,
     ),
-    authorize("admin", "operator"),
+    authorizePermission("CUSTOMER_ACCOUNT.GET"),
     getCustomerAccounts,
   )
-  .post(authorize("admin", "operator"), createCustomerAccount);
+  .post(authorizePermission("CUSTOMER_ACCOUNT.ADD"), createCustomerAccount);
 
 // create dummy
 router
   .route("/dummy")
-  .post(authorize("admin", "operator"), createDummyCustomerAccount);
+  .post(authorizePermission("CUSTOMER_ACCOUNT.ADD"), createDummyCustomerAccount);
 
 // status change
 router
   .route("/:id/status")
-  .put(authorize("admin", "operator"), changeAccountStatus);
+  .put(authorizePermission("CUSTOMER_ACCOUNT.EDIT"), changeAccountStatus);
 
 // card operations
 router
   .route("/:id/cards")
-  .post(authorize("admin", "operator"), addCardToAccount);
+  .post(authorizePermission("CUSTOMER_ACCOUNT.EDIT"), addCardToAccount);
 router
   .route("/:id/cards/:cardId")
-  .delete(authorize("admin", "operator"), removeCardFromAccount);
+  .delete(authorizePermission("CUSTOMER_ACCOUNT.EDIT"), removeCardFromAccount);
 
 // CRUD
 router
   .route("/uid/:uid")
-  .get(authorize("admin", "operator"), getCustomerAccountByUid);
+  .get(authorizePermission("CUSTOMER_ACCOUNT.GET"), getCustomerAccountByUid);
 router
   .route("/:id")
-  .get(authorize("admin", "operator"), getCustomerAccount)
-  .put(authorize("admin", "operator"), updateCustomerAccount)
-  .delete(authorize("admin"), deleteCustomerAccount); // only admin may delete
+  .get(authorizePermission("CUSTOMER_ACCOUNT.GET"), getCustomerAccount)
+  .put(authorizePermission("CUSTOMER_ACCOUNT.EDIT"), updateCustomerAccount)
+  .delete(authorizePermission("CUSTOMER_ACCOUNT.DELETE"), deleteCustomerAccount);
 
 module.exports = router;

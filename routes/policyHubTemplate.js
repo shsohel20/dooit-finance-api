@@ -17,7 +17,7 @@ const {
 
 const PolicyHubTemplate = require("../models/PolicyHubTemplate");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "105mb" }));
@@ -39,7 +39,15 @@ const docxUpload = multer({
 });
 
 router.use(protect);
-router.use(authorize("admin"));
+// Router-level floor: any POLICY_HUB grant gets in; each route below narrows it.
+router.use(
+  authorizePermission(
+    "POLICY_HUB.GET",
+    "POLICY_HUB.ADD",
+    "POLICY_HUB.EDIT",
+    "POLICY_HUB.DELETE",
+  ),
+);
 
 // List templates
 router
@@ -58,25 +66,27 @@ router
   );
 
 // Create template directly
-router.route("/new").post(createTemplate);
+router.route("/new").post(authorizePermission("POLICY_HUB.ADD"), createTemplate);
 
 // Import from .docx — multipart/form-data with field name "file"
-router.route("/import-docx").post(docxUpload.single("file"), importFromDocx);
+router
+  .route("/import-docx")
+  .post(authorizePermission("POLICY_HUB.ADD"), docxUpload.single("file"), importFromDocx);
 
 // Single template CRUD
 router
   .route("/:id")
-  .get(getTemplate)
-  .put(updateTemplate)
-  .delete(deleteTemplate);
+  .get(authorizePermission("POLICY_HUB.GET"), getTemplate)
+  .put(authorizePermission("POLICY_HUB.EDIT"), updateTemplate)
+  .delete(authorizePermission("POLICY_HUB.DELETE"), deleteTemplate);
 
 // Export template docs as .docx download
-router.route("/:id/export-docx").get(exportToDocx);
+router.route("/:id/export-docx").get(authorizePermission("POLICY_HUB.GET"), exportToDocx);
 
 // Export template docs as PDF download
-router.route("/:id/export-pdf").get(exportToPdf);
+router.route("/:id/export-pdf").get(authorizePermission("POLICY_HUB.GET"), exportToPdf);
 
 // Create a new PolicyHub from a template
-router.route("/:id/use").post(useTemplate);
+router.route("/:id/use").post(authorizePermission("POLICY_HUB.ADD"), useTemplate);
 
 module.exports = router;

@@ -19,6 +19,20 @@ jest.mock("../../middleware/auth", () => ({
       return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
     next();
   },
+  // Mirrors authorizePermission in middleware/auth: passes when the user holds
+  // at least ONE of the listed permission strings.
+  authorizePermission: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.some((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
+  authorizeAllPermissions: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.every((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
 }));
 
 // ── mock external I/O ─────────────────────────────────────────────────────────
@@ -98,16 +112,20 @@ const clientId1 = new mongoose.Types.ObjectId();
 const clientId2 = new mongoose.Types.ObjectId();
 const staffId = new mongoose.Types.ObjectId();
 
+// /manual-import is guarded by CUSTOMER.ADD, so staff fixtures carry the grant.
+const STAFF_PERMS = ["CUSTOMER.GET", "CUSTOMER.ADD", "CUSTOMER.EDIT"];
+
 const CLIENT_USER = {
   _id: staffId, id: staffId, name: "Client Staff",
-  role: "client", client: { _id: clientId1 }, branch: null, permissions: [],
+  role: "client", client: { _id: clientId1 }, branch: null,
+  permissions: STAFF_PERMS,
 };
 const CLIENT2_USER = {
   ...CLIENT_USER, role: "client", client: { _id: clientId2 },
 };
 const ADMIN_NO_TENANT = {
   _id: staffId, id: staffId, name: "Platform Admin",
-  role: "admin", client: null, branch: null, permissions: [],
+  role: "admin", client: null, branch: null, permissions: STAFF_PERMS,
 };
 
 function as(user) { mockCurrentUser = user; }
@@ -631,8 +649,10 @@ describe("manual import — validation & tenancy", () => {
     expect(String(customer.relations[0].branch)).toBe(String(ownBranch._id));
   });
 
-  it("403 — customer role is not allowed", async () => {
-    as({ ...CLIENT_USER, role: "customer" });
+  it("403 — a user with no CUSTOMER.ADD grant is not allowed", async () => {
+    // Access follows the grant now, not the role name: a customer holds no
+    // CUSTOMER.* permission, so the manual-import route rejects them.
+    as({ ...CLIENT_USER, role: "customer", permissions: [] });
     const res = await post(PAYLOAD());
     expect(res.status).toBe(403);
   });

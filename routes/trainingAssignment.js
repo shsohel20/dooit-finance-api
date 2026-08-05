@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const {
     assignModule,
@@ -29,26 +29,26 @@ router.get("/mine", getMyAssignments);
 // DELETE /api/v1/assignments/:id
 // PATCH  /api/v1/assignments/:id/status
 
-router.get("/by-me", authorize("admin", "manager"), getAssignedByMe);
-router.get("/", authorize("admin", "manager"), getAllAssignments);
+router.get("/by-me", authorizePermission("TRAINING.ASSIGN"), getAssignedByMe);
+router.get("/", authorizePermission("TRAINING.ASSIGN"), getAllAssignments);
 
 // GET /api/v1/assignments/module/:moduleId → all assignments for a module
 router.get(
     "/module/:moduleId",
-    authorize("admin", "manager"),
+    authorizePermission("TRAINING.ASSIGN"),
     getAssignmentsByModule
 );
 
-router.post("/:moduleId/assign", authorize("admin", "manager"), assignModule);
+router.post("/:moduleId/assign", authorizePermission("TRAINING.ASSIGN"), assignModule);
 
 router
     .route("/:id")
     .get(getAssignment)
-    .delete(authorize("admin", "manager"), deleteAssignment);
+    .delete(authorizePermission("TRAINING.ASSIGN"), deleteAssignment);
 
 router.patch(
     "/:id/status",
-    authorize("admin", "manager"),
+    authorizePermission("TRAINING.ASSIGN"),
     updateAssignmentStatus
 );
 

@@ -17,11 +17,11 @@ const advancedResults = require("../middleware/advancedResults");
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
-// protect all RFI routes and allow only admin by default
+// Every RFI route needs an RFI grant; each route below narrows by verb.
 router.use(protect);
-// router.use(authorize("admin"));
+router.use(authorizePermission("RFI.GET", "RFI.ADD", "RFI.EDIT", "RFI.DELETE"));
 
 // list
 router
@@ -50,15 +50,19 @@ router
   );
 
 // create
-router.route("/new").post(createRFI);
+router.route("/new").post(authorizePermission("RFI.ADD"), createRFI);
 
 // create dummy
-router.route("/dummy").post(createDummyRFI);
+router.route("/dummy").post(authorizePermission("RFI.ADD"), createDummyRFI);
 
 // send (initial|followup|final) -> use query param ?type=initial
-router.route("/:id/send").get(sendRFI);
+router.route("/:id/send").get(authorizePermission("RFI.EDIT"), sendRFI);
 
 // CRUD
-router.route("/:id").get(getRFI).put(updateRFI).delete(deleteRFI);
+router
+  .route("/:id")
+  .get(authorizePermission("RFI.GET"), getRFI)
+  .put(authorizePermission("RFI.EDIT"), updateRFI)
+  .delete(authorizePermission("RFI.DELETE"), deleteRFI);
 
 module.exports = router;

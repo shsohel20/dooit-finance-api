@@ -13,17 +13,20 @@ const {
   deleteLead,
 } = require("../controllers/leadController");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 // Public endpoint: create lead
 router.route("/new").post(createLead);
 
 // Admin: list / manage leads
 router.use(protect); // protect subsequent routes
-router.use(authorize("admin")); // only admin (adjust roles as needed)
+router.use(authorizePermission("LEAD.GET", "LEAD.DELETE"));
 
 router.route("/").get(advancedResults(Lead, null), getLeads);
 
-router.route("/:id").get(getLead).delete(deleteLead);
+router
+  .route("/:id")
+  .get(authorizePermission("LEAD.GET"), getLead)
+  .delete(authorizePermission("LEAD.DELETE"), deleteLead);
 
 module.exports = router;

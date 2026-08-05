@@ -21,13 +21,13 @@ const {
 const User = require("../models/User");
 
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
 
 router.use(protect);
-router.use(authorize("admin"));
+router.use(authorizePermission("USER.GET", "USER.ADD", "USER.EDIT", "USER.DELETE"));
 
 // User is identity-only — clientBelongs/branchBelongs no longer exist on it.
 // Pass skipClientFilter so advancedResults doesn't inject those stale filters.
@@ -36,19 +36,28 @@ router
   .post(scopeUserListByTenant, advancedResults(User, null, filterUserSection, { skipClientFilter: true }), getUsersPost)
   .get(scopeUserListByTenant, advancedResults(User, null, null, { skipClientFilter: true }), getUsers);
 
-router.route("/new").post(createUser);
-router.route("/role/:role").get(getUsersByRole);
-router.route("/update-user-password/:id").put(updateUserPassword);
-router.route("/reset-password/:id").put(resetPassword);
+router.route("/new").post(authorizePermission("USER.ADD"), createUser);
+router.route("/role/:role").get(authorizePermission("USER.GET"), getUsersByRole);
+router
+  .route("/update-user-password/:id")
+  .put(authorizePermission("USER.EDIT"), updateUserPassword);
+router.route("/reset-password/:id").put(authorizePermission("USER.EDIT"), resetPassword);
 
 // Membership management — must come before /:id to avoid route shadowing
-router.route("/:id/memberships").get(getMemberships).post(addMembership);
+router
+  .route("/:id/memberships")
+  .get(authorizePermission("USER.GET"), getMemberships)
+  .post(authorizePermission("USER.EDIT"), addMembership);
 router
   .route("/:id/memberships/:userTypeId")
-  .put(updateMembership)
-  .delete(deleteMembership);
+  .put(authorizePermission("USER.EDIT"), updateMembership)
+  .delete(authorizePermission("USER.EDIT"), deleteMembership);
 
-router.route("/:id").get(getUser).put(updateUser).delete(deleteUser);
-router.route("/slug/:slug").get(getUserBySlug);
+router
+  .route("/:id")
+  .get(authorizePermission("USER.GET"), getUser)
+  .put(authorizePermission("USER.EDIT"), updateUser)
+  .delete(authorizePermission("USER.DELETE"), deleteUser);
+router.route("/slug/:slug").get(authorizePermission("USER.GET"), getUserBySlug);
 
 module.exports = router;

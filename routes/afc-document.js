@@ -18,7 +18,7 @@ const {
 
 const AfcDocument = require("../models/AfcDocument");
 const advancedResults = require("../middleware/advancedResults");
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const docxUpload = multer({
   storage: multer.memoryStorage(),
@@ -42,7 +42,10 @@ router.route("/upsert").post(upsertAfcDocument);
 
 // Protect all routes below
 router.use(protect);
-router.use(authorize("admin"));
+// Router-level floor: any AFC_DOC grant gets in; each route below narrows it.
+router.use(
+  authorizePermission("AFC_DOC.GET", "AFC_DOC.ADD", "AFC_DOC.EDIT", "AFC_DOC.DELETE"),
+);
 
 router
   .route("/")
@@ -52,17 +55,25 @@ router
     getAfcDocumentsPost
   );
 
-router.route("/new").post(createAfcDocument);
-router.route("/import-docx").post(docxUpload.single("file"), importAfcDocumentDocx);
+router.route("/new").post(authorizePermission("AFC_DOC.ADD"), createAfcDocument);
+router
+  .route("/import-docx")
+  .post(
+    authorizePermission("AFC_DOC.ADD"),
+    docxUpload.single("file"),
+    importAfcDocumentDocx,
+  );
 
 router
   .route("/:id")
-  .get(getAfcDocument)
-  .put(updateAfcDocument)
-  .delete(deleteAfcDocument);
+  .get(authorizePermission("AFC_DOC.GET"), getAfcDocument)
+  .put(authorizePermission("AFC_DOC.EDIT"), updateAfcDocument)
+  .delete(authorizePermission("AFC_DOC.DELETE"), deleteAfcDocument);
 
 router.route("/:id/download").get(downloadAfcDocumentPDF);
 router.route("/:id/export-docx").get(exportAfcDocumentDocx);
-router.route("/:id/to-policy-hub").post(afcDocumentToPolicyHub);
+router
+  .route("/:id/to-policy-hub")
+  .post(authorizePermission("POLICY_HUB.ADD"), afcDocumentToPolicyHub);
 
 module.exports = router;

@@ -20,7 +20,7 @@ const {
   getInvestigators,
 } = require('../controllers/caseController');
 
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorizePermission } = require('../middleware/auth');
 const {
   validateCreateCase,
   validateUpdateCase,
@@ -33,62 +33,73 @@ const {
 const router = express.Router();
 router.use(express.json({ limit: '100kb' }));
 router.use(protect);
+// Every case route needs a CASE grant; each route below narrows by verb.
+router.use(
+  authorizePermission('CASE.GET', 'CASE.ADD', 'CASE.EDIT', 'CASE.DELETE', 'CASE.ASSIGN'),
+);
 
 // ── Investigators list (before /:id to avoid routing conflict) ────────────────
-router.route('/investigators').get(authorize('admin', 'compliance_officer'), getInvestigators);
+router
+  .route('/investigators')
+  .get(authorizePermission('CASE.ASSIGN', 'CASE.EDIT'), getInvestigators);
 
 // ── Analytics for the Case Manager dashboard (before /:id) ────────────────────
-router.route('/analytics').get(getCaseAnalytics);
+router.route('/analytics').get(authorizePermission('CASE.GET'), getCaseAnalytics);
 
 // ── Case list + creation ──────────────────────────────────────────────────────
 router
   .route('/')
-  .get(getCases)
-  .post(authorize('admin', 'compliance_officer'), validateCreateCase, createCase);
+  .get(authorizePermission('CASE.GET'), getCases)
+  .post(authorizePermission('CASE.ADD'), validateCreateCase, createCase);
 
 // ── Single case ───────────────────────────────────────────────────────────────
 router
   .route('/:id')
-  .get(getCaseById)
-  .put(validateUpdateCase, updateCase)
-  .delete(authorize('admin', 'compliance_officer'), deleteCase);
+  .get(authorizePermission('CASE.GET'), getCaseById)
+  .put(authorizePermission('CASE.EDIT'), validateUpdateCase, updateCase)
+  .delete(authorizePermission('CASE.DELETE'), deleteCase);
 
 // ── Status transition ─────────────────────────────────────────────────────────
-router.route('/:id/status').patch(validateStatusUpdate, updateCaseStatus);
+router
+  .route('/:id/status')
+  .patch(authorizePermission('CASE.EDIT'), validateStatusUpdate, updateCaseStatus);
 
 // ── Investigator assignment ───────────────────────────────────────────────────
 router
   .route('/:id/assign')
-  .patch(authorize('admin', 'compliance_officer'), validateAssignment, assignInvestigators);
+  .patch(authorizePermission('CASE.ASSIGN'), validateAssignment, assignInvestigators);
 
 // ── Watchers ──────────────────────────────────────────────────────────────────
 router
   .route('/:id/watchers')
-  .patch(authorize('admin', 'compliance_officer'), updateWatchers);
+  .patch(authorizePermission('CASE.ASSIGN', 'CASE.EDIT'), updateWatchers);
 
 // ── Alert linkage ─────────────────────────────────────────────────────────────
 // GET  → list alerts linked to this case
 // POST → link additional alerts to this case
 router
   .route('/:id/alerts')
-  .get(getCaseAlerts)
-  .post(authorize('admin', 'compliance_officer'), validateLinkAlerts, linkAlerts);
+  .get(authorizePermission('CASE.GET'), getCaseAlerts)
+  .post(authorizePermission('CASE.EDIT'), validateLinkAlerts, linkAlerts);
 
 // DELETE → unlink a single alert
 router
   .route('/:id/alerts/:alertId')
-  .delete(authorize('admin', 'compliance_officer'), unlinkAlert);
+  .delete(authorizePermission('CASE.EDIT'), unlinkAlert);
 
 // ── Reports (ECDD/SMR/TTR/IFTI/GFS/RFI attached to this case) ─────────────────
-router.route('/:id/reports').get(getCaseReports);
+router.route('/:id/reports').get(authorizePermission('CASE.GET'), getCaseReports);
 
 // ── Record a SAR/SMR filing decision on the case ──────────────────────────────
-router.route('/:id/sar').post(fileSAR);
+router.route('/:id/sar').post(authorizePermission('CASE.EDIT'), fileSAR);
 
 // ── Notes ─────────────────────────────────────────────────────────────────────
-router.route('/:id/notes').get(getCaseNotes).post(validateAddNote, addNote);
+router
+  .route('/:id/notes')
+  .get(authorizePermission('CASE.GET'), getCaseNotes)
+  .post(authorizePermission('CASE.EDIT'), validateAddNote, addNote);
 
 // ── Audit trail ───────────────────────────────────────────────────────────────
-router.route('/:id/audit').get(getAuditLog);
+router.route('/:id/audit').get(authorizePermission('CASE.GET'), getAuditLog);
 
 module.exports = router;

@@ -48,7 +48,11 @@ const ocrUpload = require("../middleware/ocrUpload");
 
 const router = express.Router();
 
-const { protect, authorize } = require("../middleware/auth");
+// Staff access is granted by CUSTOMER.* permissions (RolePermission), not by a
+// hard-coded role-name list. authorize() survives only on the customer-self
+// routes below, where "customer" identifies the subject of the request rather
+// than an access level.
+const { protect, authorize, authorizePermission } = require("../middleware/auth");
 
 // Staff-side manual import of an individual customer (in-branch onboarding).
 // Registered BEFORE the router-level 100kb json parser — signature images
@@ -57,7 +61,7 @@ router.post(
   "/manual-import",
   express.json({ limit: "5mb" }),
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.ADD"),
   manualImportCustomer,
 );
 
@@ -68,7 +72,7 @@ const kybListQuery = require("../middleware/kybListQuery");
 
 router.route("/").get(
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   advancedCustomerResultsQueryOnly({
     model: Customer,
     populate: [
@@ -87,11 +91,11 @@ router.route("/").get(
   getCustomers,
 );
 
-// protect: only client/admin can create invites
+// protect: inviting a customer is a create action on the customer record
 router.post(
   "/invite",
   protect,
-  authorize("admin", "client", "branch", "user"),
+  authorizePermission("CUSTOMER.ADD"),
   createInvite,
 );
 router.post(
@@ -101,7 +105,7 @@ router.post(
 router.get(
   "/download-qr",
   protect,
-  authorize("admin", "client", "branch", "user"),
+  authorizePermission("CUSTOMER.GET"),
   downloadQR,
 );
 
@@ -110,7 +114,7 @@ router.get(
 router.get(
   "/stats",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   getCustomerStats,
 );
 
@@ -118,7 +122,7 @@ router.get(
 router.get(
   "/export",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   exportCustomers,
 );
 
@@ -126,7 +130,7 @@ router.get(
 router.get(
   "/:id/kyc-export",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   exportCustomerKycPdf,
 );
 
@@ -134,7 +138,7 @@ router.get(
 router.patch(
   "/:id/kyc-status",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.EDIT"),
   updateCustomerKycStatus,
 );
 
@@ -142,7 +146,7 @@ router.patch(
 router.patch(
   "/:id/journeys/:journeyId/steps/:stepType/review",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("ONBOARDING.REVIEW", "CUSTOMER.EDIT"),
   reviewJourneyStep,
 );
 
@@ -151,12 +155,12 @@ router
   .route("/:id/documents")
   .post(
     protect,
-    authorize("admin", "client", "branch", "manager", "officer"),
+    authorizePermission("CUSTOMER.EDIT"),
     addCustomerDocuments,
   )
   .delete(
     protect,
-    authorize("admin", "client", "branch", "manager", "officer"),
+    authorizePermission("CUSTOMER.EDIT"),
     removeCustomerDocument,
   );
 
@@ -166,17 +170,18 @@ router
 // Compliance reports (ECDD/SMR/TTR/IFTI/GFS/RFI) filed against this customer
 router
   .route("/:id/reports")
-  .get(protect, authorize("admin", "client", "branch"), getCustomerReports);
+  .get(protect, authorizePermission("CUSTOMER.GET"), getCustomerReports);
 
 router
   .route("/:id")
-  .get(protect, authorize("admin", "client", "branch"), getCustomer);
+  .get(protect, authorizePermission("CUSTOMER.GET"), getCustomer);
 // .put(updateClient)
 // .delete(deleteClient);
 
 // public endpoints (token validation, registration from invite)
 router.get("/invite/validate", validateInvite);
 
+// Customer-self: the caller IS the customer, so this stays a role identity check.
 router.post(
   "/register/onboarding",
   protect,
@@ -194,13 +199,13 @@ router.post(
 router.post(
   "/company",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.ADD"),
   createCompanyKyc,
 );
 router.put(
   "/company/:id",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.EDIT"),
   updateCompanyKyc,
 );
 // eKYB OCR pre-fill (docs/65 Step 48) — extraction only, no CompanyKyc
@@ -208,7 +213,7 @@ router.put(
 router.post(
   "/company/ocr",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.ADD", "CUSTOMER.EDIT"),
   ocrUpload.single("image"),
   ocrExtractCompany,
 );
@@ -217,37 +222,37 @@ router.post(
 router.patch(
   "/company/:id/review-status",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.EDIT"),
   updateCompanyReviewStatus,
 );
 router.get(
   "/company/:id/audit",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   getCompanyKycAudit,
 );
 router
   .route("/company/:id/documents")
   .post(
     protect,
-    authorize("admin", "client", "branch", "manager", "officer"),
+    authorizePermission("CUSTOMER.EDIT"),
     addCompanyDocuments,
   )
   .delete(
     protect,
-    authorize("admin", "client", "branch", "manager", "officer"),
+    authorizePermission("CUSTOMER.EDIT"),
     removeCompanyDocument,
   );
 router.patch(
   "/company/:id/documents/:docId",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.EDIT"),
   updateCompanyDocument,
 );
 router.get(
   "/company/all",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
   // advancedResults stays removed (docs/65 Step 30): it ran a second,
   // discarded query per call, and it turns any leftover query param into a
   // Mongo filter key. kybListQuery only BUILDS a whitelisted query onto
@@ -261,13 +266,13 @@ router.get(
 router.get(
   "/company/stats",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.GET"),
   getCompanyKycStats,
 );
 router.get(
   "/company/:id",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
 
   getCompanyKyc
 );
@@ -276,7 +281,7 @@ router.get(
 router.get(
   "/trust/all",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
   kybListQuery("trust"),
   getTrustKycs
 );
@@ -286,13 +291,13 @@ router.get(
 router.get(
   "/trust/:id/companies",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
   getCompaniesForTrust,
 );
 router.get(
   "/trust/:id",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
 
   getTrustKyc
 );
@@ -302,7 +307,7 @@ router.get(
 router.post(
   "/trust/ocr",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.ADD", "CUSTOMER.EDIT"),
   ocrUpload.single("image"),
   ocrExtractTrust,
 );
@@ -312,30 +317,31 @@ router.post(
 router.post(
   "/trust",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.ADD"),
   createTrustKyc,
 );
 router.put(
   "/trust/:id",
   protect,
-  authorize("admin", "client", "branch", "manager", "officer"),
+  authorizePermission("CUSTOMER.EDIT"),
   updateTrustKyc,
 );
 
 router.get(
   "/non-individual/all",
   protect,
-  authorize("admin", "client", "branch"),
+  authorizePermission("CUSTOMER.GET"),
   getNonIndividualKycs
 );
 // router.get(
 //   "/non-individual/all",
 //   protect,
-//   authorize("admin", "client", "branch"),
+//   authorizePermission("CUSTOMER.GET"),
 
 //   getTrustKyc
 // );
 
+// Customer-self onboarding — role identity check, not an access level.
 router.get(
   "/onboarding/:id",
   protect,

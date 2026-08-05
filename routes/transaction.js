@@ -16,7 +16,7 @@ const {
   downloadTransactionPdf,
 } = require("../controllers/transactionController");
 
-const { protect } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 const Transaction = require("../models/Transaction");
 const transactionFilter = require("../middleware/transactionFilter");
 
@@ -35,6 +35,14 @@ const upload = multer({
 
 // Protect all transaction routes
 router.use(protect);
+router.use(
+  authorizePermission(
+    "TRANSACTION.GET",
+    "TRANSACTION.ADD",
+    "TRANSACTION.EDIT",
+    "TRANSACTION.DELETE",
+  ),
+);
 
 // ── Collection endpoints ──────────────────────────────────────────────────────
 router

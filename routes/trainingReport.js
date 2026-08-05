@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const {
     getOverview,
@@ -11,7 +11,7 @@ const {
 
 router.use(express.json({ limit: "100kb" }));
 router.use(protect);
-router.use(authorize("admin", "manager"));
+router.use(authorizePermission("TRAINING.REPORT"));
 
 // GET /api/v1/reports/overview          → KPI snapshot
 // GET /api/v1/reports/modules           → per-module stats table

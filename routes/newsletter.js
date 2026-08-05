@@ -13,14 +13,14 @@ const {
   deleteSubscription,
 } = require("../controllers/newsletterController");
 
-const { protect, authorize } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 // Public endpoint: subscribe
 router.route("/subscribe").post(subscribe);
 
 // Admin: list / manage subscriptions
 router.use(protect);
-router.use(authorize("admin"));
+router.use(authorizePermission("NEWSLETTER.GET", "NEWSLETTER.DELETE"));
 
 router
   .route("/")
@@ -28,7 +28,7 @@ router
 
 router
   .route("/:id")
-  .get(getSubscription)
-  .delete(deleteSubscription);
+  .get(authorizePermission("NEWSLETTER.GET"), getSubscription)
+  .delete(authorizePermission("NEWSLETTER.DELETE"), deleteSubscription);
 
 module.exports = router;

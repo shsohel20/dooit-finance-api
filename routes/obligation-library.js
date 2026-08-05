@@ -8,15 +8,24 @@ const {
   bulkImport,
   getCategories,
 } = require("../controllers/obligationLibraryController");
-const { protect } = require("../middleware/auth");
+const { protect, authorizePermission } = require("../middleware/auth");
 
 const router = express.Router();
 router.use(express.json({ limit: "5mb" }));
 router.use(protect);
+// Router-level floor: any GRC grant gets in; each route below narrows by verb.
+router.use(authorizePermission("GRC.GET", "GRC.ADD", "GRC.EDIT", "GRC.DELETE"));
 
-router.route("/").get(getObligations).post(createObligation);
-router.route("/bulk-import").post(bulkImport);
-router.route("/categories").get(getCategories);
-router.route("/:obligationId").get(getObligation).put(updateObligation).delete(deleteObligation);
+router
+  .route("/")
+  .get(authorizePermission("GRC.GET"), getObligations)
+  .post(authorizePermission("GRC.ADD"), createObligation);
+router.route("/bulk-import").post(authorizePermission("GRC.ADD"), bulkImport);
+router.route("/categories").get(authorizePermission("GRC.GET"), getCategories);
+router
+  .route("/:obligationId")
+  .get(authorizePermission("GRC.GET"), getObligation)
+  .put(authorizePermission("GRC.EDIT"), updateObligation)
+  .delete(authorizePermission("GRC.DELETE"), deleteObligation);
 
 module.exports = router;

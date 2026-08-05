@@ -19,6 +19,20 @@ jest.mock("../../middleware/auth", () => ({
       return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
     next();
   },
+  // Mirrors authorizePermission in middleware/auth: passes when the user holds
+  // at least ONE of the listed permission strings.
+  authorizePermission: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.some((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
+  authorizeAllPermissions: (...perms) => (req, _res, next) => {
+    if (!req.user) return next(Object.assign(new Error("Unauthorized"), { statusCode: 401 }));
+    const held = req.user.permissions ?? [];
+    if (perms.every((p) => held.includes(p))) return next();
+    return next(Object.assign(new Error("Forbidden"), { statusCode: 403 }));
+  },
 }));
 
 // ── mock external I/O ─────────────────────────────────────────────────────────
@@ -59,7 +73,10 @@ const adminId = new mongoose.Types.ObjectId();
 const ADMIN = {
   _id: adminId, id: adminId, name: "Admin User",
   email: "admin@test.com", role: "admin",
-  client: null, branch: {}, permissions: [],
+  client: null, branch: {},
+  // Staff routes are permission-guarded, so the fixture carries a grant.
+  permissions: ["STAFF.GET", "STAFF.ADD", "STAFF.EDIT", "STAFF.DELETE",
+                "SUMSUB.GET", "SUMSUB.EDIT"],
 };
 
 function as(user) { mockCurrentUser = user; }
