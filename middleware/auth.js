@@ -105,8 +105,8 @@ exports.protect = asyncHandler(async (req, res, next) => {
     //   branchId ? Branch.findById(branchId).populate("client").lean() : Promise.resolve(null),
     // ]);
 
-    const resolvedClientId = u.client?._id ?? null;
-    const resolvedBranchId = u.branch?._id ?? null;
+    const resolvedClientId = u.client?._id ?? clientId?? null;
+    const resolvedBranchId = u.branch?._id ?? branchId ?? null;
 
     let qr = null;
     if (resolvedClientId && (u.userType === 'client' || u.userType === 'branch')) {
