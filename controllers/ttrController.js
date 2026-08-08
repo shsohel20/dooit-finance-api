@@ -4,6 +4,7 @@ const TTR = require("../models/TtrReport");
 const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
+const { logEvent } = require("../utils/audit");
 
 // Simple filter helper for POST filtering
 exports.filterTTRSection = (doc, requestBody = {}) => {
@@ -71,6 +72,17 @@ exports.createTTR = asyncHandler(async (req, res, next) => {
     notes: body.metadata?.notes || "Created via API",
   });
   await ttr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ttr_created",
+    reportType: "TTR",
+    target: ttr.uid || String(ttr._id),
+    case: ttr.case || null,
+    customer: ttr.customer || null,
+    afterValue: { status: ttr.status },
+  });
 
   res.status(201).json({ succeed: true, data: ttr, id: ttr._id });
 });
@@ -171,6 +183,7 @@ exports.updateTTR = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`TTR not found with id ${req.params.id}`, 404)
     );
 
+  const prevStatus = ttr.status;
   Object.assign(ttr, req.body);
   if (hasLinkageRef(req.body)) Object.assign(ttr, await linkageOverrides(req.body, "case"));
   ttr.metadata = ttr.metadata || {};
@@ -186,6 +199,20 @@ exports.updateTTR = asyncHandler(async (req, res, next) => {
   });
 
   await ttr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ttr_updated",
+    reportType: "TTR",
+    target: ttr.uid || String(ttr._id),
+    case: ttr.case || null,
+    customer: ttr.customer || null,
+    ...(prevStatus !== ttr.status
+      ? { beforeValue: { status: prevStatus }, afterValue: { status: ttr.status } }
+      : {}),
+  });
+
   res.status(200).json({ succeed: true, data: ttr });
 });
 
@@ -196,7 +223,27 @@ exports.deleteTTR = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(`TTR not found with id ${req.params.id}`, 404)
     );
+  // Snapshot before the delete — the workflowHistory dies with the doc, so
+  // this is the only surviving record.
+  const snapshot = {
+    uid: ttr.uid,
+    status: ttr.status,
+    case: ttr.case,
+    customer: ttr.customer,
+  };
   await ttr.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ttr_deleted",
+    reportType: "TTR",
+    target: snapshot.uid || String(ttr._id),
+    case: snapshot.case || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
+
   res.status(200).json({ succeed: true, data: req.params.id });
 });
 
@@ -223,6 +270,18 @@ exports.submitTTR = asyncHandler(async (req, res, next) => {
   });
 
   await ttr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ttr_submitted",
+    reportType: "TTR",
+    target: ttr.uid || String(ttr._id),
+    case: ttr.case || null,
+    customer: ttr.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: ttr.status },
+  });
 
   // optionally send notification email
   if (req.body.notify && req.body.notifyEmail) {
@@ -264,5 +323,18 @@ exports.approveTTR = asyncHandler(async (req, res, next) => {
   });
 
   await ttr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ttr_approved",
+    reportType: "TTR",
+    target: ttr.uid || String(ttr._id),
+    case: ttr.case || null,
+    customer: ttr.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: ttr.status },
+  });
+
   res.status(200).json({ succeed: true, data: ttr });
 });

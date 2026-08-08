@@ -14,6 +14,7 @@
  */
 
 const AuditLog = require("../models/AuditLog");
+const { auditContext } = require("./auditContext");
 
 /**
  * logKybEvent({ req, company, action, before, after, target })
@@ -49,6 +50,8 @@ async function logKybEvent({
 
       beforeValue: before,
       afterValue: after,
+
+      ...auditContext(req.headers ? req : undefined),
     });
   } catch (err) {
     console.error(`KYB audit write failed (${action}):`, err.message);

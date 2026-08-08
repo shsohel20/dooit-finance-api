@@ -12,6 +12,8 @@ const User = require("../models/User");
 const UserType = require("../models/UserType");
 const Client = require("../models/Client");
 const { hashForSearch } = require("../utils/encryption");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 
 /**
  * Basic filter helper for client-side searching by name
@@ -165,6 +167,16 @@ exports.createBranch = asyncHandler(async (req, res, next) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
   }
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "branch_created",
+    client: client._id,
+    branch: branch._id,
+    afterValue: { name: branch.name },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(201).json({
     succeed: true,
@@ -416,6 +428,28 @@ exports.updateBranch = asyncHandler(async (req, res, next) => {
       branch.user = newUser._id;
       await branch.save();
 
+      logEvent({
+        req,
+        service: "auth",
+        action: "membership_granted",
+        user: newUser._id,
+        client: branch.client ?? null,
+        branch: branch._id,
+        afterValue: {
+          userType: "branch",
+          role: "branch",
+          branchBelongs: branch._id,
+        },
+      });
+      logEvent({
+        req,
+        service: "auth",
+        action: "branch_updated",
+        client: branch.client ?? null,
+        branch: branch._id,
+        details: `Changed: ${Object.keys(req.body || {}).join(", ")}`,
+      });
+
       // return initial password in response (one-time)
       return res.status(200).json({
         success: true,
@@ -434,6 +468,15 @@ exports.updateBranch = asyncHandler(async (req, res, next) => {
   const updated = await Branch.findByIdAndUpdate(branchId, req.body, {
     new: true,
     runValidators: true,
+  });
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "branch_updated",
+    client: branch.client ?? null,
+    branch: branchId,
+    details: `Changed: ${Object.keys(req.body || {}).join(", ")}`,
   });
 
   res.status(200).json({
@@ -460,7 +503,20 @@ exports.deleteBranch = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Snapshot BEFORE the delete — nothing left to read afterwards.
+  const auditBefore = { name: branch.name };
+  const branchClient = branch.client ?? null;
+
   await branch.deleteOne();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "branch_deleted",
+    client: branchClient,
+    branch: req.params.id,
+    beforeValue: auditBefore,
+  });
 
   res.status(200).json({
     success: true,

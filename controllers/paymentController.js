@@ -27,6 +27,7 @@ const {
   reconcileInvoice,
   refundedTotalFor,
 } = require("../services/billing/paymentService");
+const { logEvent } = require("../utils/audit");
 
 const scopeFor = (req) => (isDooit(req) ? {} : { user: actorId(req) });
 
@@ -166,6 +167,16 @@ exports.recordPayment = asyncHandler(async (req, res, next) => {
     throw err;
   }
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "payment_recorded",
+    user: invoice.user,
+    ...(invoice.client ? { client: invoice.client } : {}),
+    target: String(payment._id),
+    afterValue: { amount: value, invoice: String(invoice._id) },
+  });
+
   // A failed payment leaves the invoice untouched — it is still owed.
   const reconciled =
     status === "paid" ? await reconcileInvoice(invoice) : null;
@@ -220,6 +231,20 @@ exports.retryPayment = asyncHandler(async (req, res, next) => {
   });
 
   if (status === "paid") await reconcileInvoice(invoice);
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "payment_retried",
+    user: retry.user,
+    ...(retry.client ? { client: retry.client } : {}),
+    target: String(retry._id),
+    afterValue: {
+      amount: toNumber(retry.amount),
+      originalPayment: String(failed._id),
+      status,
+    },
+  });
 
   res.status(201).json({
     success: true,
@@ -290,6 +315,16 @@ exports.refundPayment = asyncHandler(async (req, res, next) => {
 
   const invoice = await Invoice.findById(original.invoice);
   const reconciled = invoice ? await reconcileInvoice(invoice) : null;
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "payment_refunded",
+    user: refund.user,
+    ...(refund.client ? { client: refund.client } : {}),
+    target: String(refund._id),
+    afterValue: { amount: value, originalPayment: String(original._id) },
+  });
 
   res.status(201).json({
     success: true,

@@ -8,6 +8,7 @@ const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../util
 // const User = require("../models/User");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
 const sendEmail = require("../utils/sendEmail");
+const { logEvent } = require("../utils/audit");
 
 /**
  * Basic filter helper if you want POST-based filtering (body)
@@ -87,6 +88,17 @@ exports.createRFI = asyncHandler(async (req, res, next) => {
     status: "Draft",
   });
 
+  logEvent({
+    req,
+    service: "report",
+    action: "rfi_created",
+    reportType: "RFI",
+    target: rfi.uid || String(rfi._id),
+    case: rfi.case || null,
+    customer: rfi.customer || null,
+    afterValue: { status: rfi.status },
+  });
+
   res.status(201).json({
     succeed: true,
     data: rfi,
@@ -146,9 +158,23 @@ exports.updateRFI = asyncHandler(async (req, res, next) => {
   if (!rfi)
     return next(new ErrorResponse(`RFI not found with id ${rfiId}`, 404));
 
+  const prevStatus = rfi.status;
   Object.assign(rfi, req.body);
   if (hasLinkageRef(req.body)) Object.assign(rfi, await linkageOverrides(req.body, "case"));
   await rfi.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "rfi_updated",
+    reportType: "RFI",
+    target: rfi.uid || String(rfi._id),
+    case: rfi.case || null,
+    customer: rfi.customer || null,
+    ...(prevStatus !== rfi.status
+      ? { beforeValue: { status: prevStatus }, afterValue: { status: rfi.status } }
+      : {}),
+  });
 
   res.status(200).json({ succeed: true, data: rfi });
 });
@@ -160,7 +186,26 @@ exports.deleteRFI = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(`RFI not found with id ${req.params.id}`, 404)
     );
+  // Snapshot before the delete — this is the only surviving record of the doc.
+  const snapshot = {
+    uid: rfi.uid,
+    status: rfi.status,
+    case: rfi.case,
+    customer: rfi.customer,
+  };
   await rfi.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "rfi_deleted",
+    reportType: "RFI",
+    target: snapshot.uid || String(rfi._id),
+    case: snapshot.case || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
+
   res.status(200).json({ succeed: true, data: req.params.id });
 });
 
@@ -192,6 +237,8 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
   // }
   if (!rfi)
     return next(new ErrorResponse(`RFI not found with id ${rfiId}`, 404));
+
+  const fromStatus = rfi.status;
 
   // compute deadlines if missing
   const now = new Date();
@@ -273,6 +320,19 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     });
 
     await rfi.save();
+
+    logEvent({
+      req,
+      service: "report",
+      action: "rfi_sent",
+      reportType: "RFI",
+      target: rfi.uid || String(rfi._id),
+      case: rfi.case?._id || rfi.case || null,
+      customer: rfi.customer?._id || rfi.customer || null,
+      details: `RFI ${type} sent to ${to}`,
+      beforeValue: { status: fromStatus },
+      afterValue: { status: rfi.status },
+    });
 
     res.status(200).json({
       succeed: true,

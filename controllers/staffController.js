@@ -12,12 +12,39 @@ const { generatePassword } = require("../utils/passwordUtils");
 const { staffWelcomeHtml } = require("../utils/email-template/staffEmailTemplate");
 const { attachUserRoleId } = require("../utils/attachUserRoleId");
 const { hashForSearch } = require("../utils/encryption");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 const {
   ensureStaffApplicant,
   submitStaffDocuments,
   syncStaffApplicantStatus,
   triggerStaffAmlCheck,
 } = require("../services/staffSumsubService");
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Writes the "staff_onboarded" audit event and links its _id into the Staff
+// doc's auditLog array. This is the one spot where logEvent is awaited — the
+// created AuditLog _id is needed for the link — and it is wrapped so an audit
+// failure can never break onboarding.
+// ─────────────────────────────────────────────────────────────────────────────
+const auditStaffOnboarded = async ({ req, staff, userId, roleName, details }) => {
+  try {
+    const log = await logEvent({
+      req,
+      service: "auth",
+      action: "staff_onboarded",
+      user: userId,
+      target: String(staff._id),
+      details,
+      afterValue: { staffId: staff._id, uid: staff.uid ?? null, role: roleName },
+    });
+    if (log?._id) {
+      await Staff.updateOne({ _id: staff._id }, { $push: { auditLog: log._id } });
+    }
+  } catch (err) {
+    console.error("[createStaff] audit link failed:", err.message);
+  }
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // @desc    Create a staff member — derives User from personal + contact fields,
@@ -140,6 +167,15 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
         ...rest,
       });
 
+      await auditStaffOnboarded({
+        req,
+        staff,
+        userId: existingUser._id,
+        roleName,
+        details: `Staff record created for existing user (role "${roleName}")`,
+      });
+      recordDevice({ req, purpose: "admin_action" });
+
       return res.status(201).json({
         success: true,
         message: "Staff record created for existing user account",
@@ -180,6 +216,29 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
       employment,
       ...rest,
     });
+
+    logEvent({
+      req,
+      service: "auth",
+      action: "membership_granted",
+      user: existingUser._id,
+      target: String(existingUser._id),
+      details: `Membership granted during staff onboarding: client/${roleName}`,
+      afterValue: {
+        userType: "client",
+        role: roleName,
+        clientBelongs: client || null,
+        branchBelongs: branch || null,
+      },
+    });
+    await auditStaffOnboarded({
+      req,
+      staff,
+      userId: existingUser._id,
+      roleName,
+      details: `Staff member added to existing user account (role "${roleName}")`,
+    });
+    recordDevice({ req, purpose: "admin_action" });
 
     return res.status(201).json({
       success: true,
@@ -244,6 +303,29 @@ exports.createStaff = asyncHandler(async (req, res, next) => {
     employment,
     ...rest,
   });
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "membership_granted",
+    user: user._id,
+    target: String(user._id),
+    details: `Membership granted during staff onboarding: client/${roleName}`,
+    afterValue: {
+      userType: "client",
+      role: roleName,
+      clientBelongs: client || null,
+      branchBelongs: branch || null,
+    },
+  });
+  await auditStaffOnboarded({
+    req,
+    staff,
+    userId: user._id,
+    roleName,
+    details: `Staff member onboarded with new user account (role "${roleName}")`,
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   return res.status(201).json({
     success: true,
@@ -440,6 +522,18 @@ exports.reviewStaff = asyncHandler(async (req, res, next) => {
   }
 
   await staff.save();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: `staff_review_${status}`,
+    user: staff.user ?? null,
+    target: String(staff._id),
+    details: `Staff review: status changed from "${prev ?? "unset"}" to "${status}"`,
+    beforeValue: { status: prev ?? null },
+    afterValue: { status: staff.status },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   return res.status(200).json({
     success: true,

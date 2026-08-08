@@ -10,8 +10,11 @@ const {
   createDemo,
 } = require("../controllers/demoDataController");
 
+const { protect } = require("../middleware/auth");
+
 const router = express.Router();
 router.use(express.json({ limit: "100kb" }));
+router.use(protect);
 
 // list (supports GET with query params and POST with body-filter via advancedResults)
 router

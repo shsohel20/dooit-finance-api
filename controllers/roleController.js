@@ -1,6 +1,7 @@
 const asyncHandler = require("../middleware/async");
 const Role = require("../models/Role");
 const ErrorResponse = require("../utils/errorResponse");
+const { logEvent } = require("../utils/audit");
 
 exports.filterRoleSection = (s, requestBody) => {
   return s.name
@@ -38,8 +39,16 @@ exports.createRole = asyncHandler(async (req, res, next) => {
   #swagger.responses[400] = { description: 'Bad Request' }
   #swagger.responses[401] = { description: 'Unauthorized' }
 */
-  console.log(req.body);
   const role = await Role.create(req.body);
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_created",
+    target: String(role._id),
+    details: `Role "${role.name}" created with ${role.permissions?.length ?? 0} permission(s)`,
+    afterValue: { name: role.name, permissions: role.permissions ?? [] },
+  });
 
   res.status(201).json({
     succeed: true,
@@ -95,6 +104,9 @@ exports.updateRole = asyncHandler(async (req, res, next) => {
     name: req.body.name,
   });
 
+  // Snapshot the pre-update doc so the audit event carries the permissions diff.
+  const beforeRole = await Role.findById(req.params.id).lean();
+
   const role = await Role.findByIdAndUpdate(req.params.id, req.body, {
     new: true,
     runValidators: true,
@@ -115,6 +127,19 @@ exports.updateRole = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`Role not found with id of ${req.params.id}`, 404)
     );
   }
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_updated",
+    target: String(role._id),
+    details: `Role "${role.name}" updated`,
+    beforeValue: beforeRole
+      ? { name: beforeRole.name, permissions: beforeRole.permissions }
+      : null,
+    afterValue: { name: role.name, permissions: role.permissions },
+  });
+
   res.status(200).json({
     success: true,
     data: role,
@@ -140,7 +165,19 @@ exports.deleteRole = asyncHandler(async (req, res, next) => {
     );
   }
 
-  role.deleteOne();
+  // Snapshot before the delete — the doc stops existing after this point.
+  const beforeValue = { name: role.name, permissions: role.permissions };
+
+  await role.deleteOne();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_deleted",
+    target: String(req.params.id),
+    details: `Role "${beforeValue.name}" deleted`,
+    beforeValue,
+  });
 
   res.status(200).json({
     success: true,

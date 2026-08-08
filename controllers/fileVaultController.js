@@ -17,6 +17,7 @@
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const fileVaultService = require("../utils/fileVaultService");
+const { logEvent } = require("../utils/audit");
 
 // ── Upload ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ exports.uploadFile = asyncHandler(async (req, res, next) => {
 
   const result = await fileVaultService.uploadFile(buffer, originalname, mimetype);
 
+  logEvent({ req, service: "file", action: "file_uploaded", target: originalname });
 
   res.status(200).json(
     result
@@ -139,6 +141,9 @@ exports.getFile = asyncHandler(async (req, res, next) => {
     if (contentDisposition) res.setHeader("Content-Disposition", contentDisposition);
     if (contentLength) res.setHeader("Content-Length", contentLength);
 
+    // Evidence / ID-document access — the download itself is the audit target
+    logEvent({ req, service: "file", action: "file_downloaded", target: req.params.id });
+
     // Pipe the FileVault stream directly to the client
     response.data.pipe(res);
 
@@ -198,6 +203,9 @@ exports.deleteFile = asyncHandler(async (req, res, next) => {
   */
   try {
     const result = await fileVaultService.deleteFile(req.params.id);
+
+    logEvent({ req, service: "file", action: "file_deleted", target: req.params.id });
+
     res.status(200).json({
       success: true,
       message: result.message || "File deleted successfully",
@@ -239,6 +247,8 @@ exports.bulkDeleteFiles = asyncHandler(async (req, res, next) => {
 
   const result = await fileVaultService.bulkDeleteFiles(fileIds);
 
+  logEvent({ req, service: "file", action: "file_bulk_deleted", afterValue: { fileIds } });
+
   res.status(200).json({
     success: true,
     message: result.message || `${fileIds.length} file(s) deleted successfully`,
@@ -269,6 +279,8 @@ exports.restoreFiles = asyncHandler(async (req, res, next) => {
   }
 
   const result = await fileVaultService.restoreFiles(fileIds);
+
+  logEvent({ req, service: "file", action: "file_restored", afterValue: { fileIds } });
 
   res.status(200).json({
     success: true,

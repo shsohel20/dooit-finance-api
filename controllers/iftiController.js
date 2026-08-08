@@ -4,6 +4,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const IFTI = require("../models/IftiReport");
 const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
+const { logEvent } = require("../utils/audit");
 
 /* -- Helpers -- */
 function ensureString(v) {
@@ -181,6 +182,17 @@ exports.createIFTI = asyncHandler(async (req, res, next) => {
   });
   await doc.save();
 
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_created",
+    reportType: "IFTI",
+    target: doc.uid || String(doc._id),
+    case: doc.case || null,
+    customer: doc.customer || null,
+    afterValue: { status: doc.status },
+  });
+
   res.status(201).json({ succeed: true, data: doc, id: doc._id });
 });
 
@@ -250,6 +262,7 @@ exports.updateIFTI = asyncHandler(async (req, res, next) => {
 
   const body = normalizeInput(req.body || {});
   // merge
+  const prevStatus = doc.status;
   Object.assign(doc, body);
   if (hasLinkageRef(body)) Object.assign(doc, await linkageOverrides(body, "case"));
   doc.metadata = doc.metadata || {};
@@ -265,6 +278,20 @@ exports.updateIFTI = asyncHandler(async (req, res, next) => {
   });
 
   await doc.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_updated",
+    reportType: "IFTI",
+    target: doc.uid || String(doc._id),
+    case: doc.case || null,
+    customer: doc.customer || null,
+    ...(prevStatus !== doc.status
+      ? { beforeValue: { status: prevStatus }, afterValue: { status: doc.status } }
+      : {}),
+  });
+
   res.status(200).json({ succeed: true, data: doc });
 });
 
@@ -275,7 +302,27 @@ exports.deleteIFTI = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(`IFTI not found with id ${req.params.id}`, 404)
     );
+  // Snapshot before the delete — the workflowHistory dies with the doc, so
+  // this is the only surviving record.
+  const snapshot = {
+    uid: doc.uid,
+    status: doc.status,
+    case: doc.case,
+    customer: doc.customer,
+  };
   await doc.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_deleted",
+    reportType: "IFTI",
+    target: snapshot.uid || String(doc._id),
+    case: snapshot.case || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
+
   res.status(200).json({ succeed: true, data: req.params.id });
 });
 
@@ -388,6 +435,17 @@ exports.generateReport = asyncHandler(async (req, res, next) => {
     await doc.save();
   }
 
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_generated",
+    reportType: "IFTI",
+    target: doc.uid || String(doc._id),
+    case: doc.case || null,
+    customer: doc.customer || null,
+    afterValue: { saved: !!req.body?.save },
+  });
+
   res
     .status(200)
     .json({ succeed: true, data: { report, saved: !!req.body?.save } });
@@ -422,6 +480,18 @@ exports.submitIFTI = asyncHandler(async (req, res, next) => {
   });
 
   await doc.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_submitted",
+    reportType: "IFTI",
+    target: doc.uid || String(doc._id),
+    case: doc.case || null,
+    customer: doc.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: doc.status },
+  });
 
   // optional notify
   if (req.body?.notify && req.body?.notifyEmail) {
@@ -474,6 +544,18 @@ exports.approveIFTI = asyncHandler(async (req, res, next) => {
   });
 
   await doc.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ifti_approved",
+    reportType: "IFTI",
+    target: doc.uid || String(doc._id),
+    case: doc.case || null,
+    customer: doc.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: doc.status },
+  });
 
   if (req.body?.notify && req.body?.notifyEmail) {
     try {

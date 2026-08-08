@@ -3,6 +3,7 @@
 const asyncHandler  = require("../middleware/async");
 const MonitoringRule = require("../models/MonitoringRule");
 const ErrorResponse  = require("../utils/errorResponse");
+const { logEvent }   = require("../utils/audit");
 
 const getClient = (req) => req.user?.client?._id || req.user?.clientBelongs || null;
 
@@ -41,8 +42,20 @@ exports.toggleActive = asyncHandler(async (req, res, next) => {
     { ruleId: req.params.id },
   ]});
   if (!rule) return next(new ErrorResponse("Monitoring rule not found", 404));
+  const prevActive = rule.active;
   rule.active = !rule.active;
   await rule.save();
+
+  // Highest-value event here — this can switch transaction monitoring OFF
+  logEvent({
+    req,
+    service: "rule",
+    action: "monitoring_rule_toggled",
+    target: rule.ruleId || String(rule._id),
+    beforeValue: { active: prevActive },
+    afterValue: { active: rule.active },
+  });
+
   res.status(200).json({ success: true, data: rule });
 });
 
@@ -53,14 +66,39 @@ exports.updateRule = asyncHandler(async (req, res, next) => {
   const update  = {};
   allowed.forEach((k) => { if (req.body[k] !== undefined) update[k] = req.body[k]; });
 
+  const matcher = { $or: [
+    { _id: req.params.id.match(/^[a-f\d]{24}$/i) ? req.params.id : null },
+    { ruleId: req.params.id },
+  ]};
+
+  // Snapshot audited fields before the write so the audit row can show a diff
+  const before = await MonitoringRule.findOne(matcher).select(allowed.join(" ")).lean();
+
   const rule = await MonitoringRule.findOneAndUpdate(
-    { $or: [
-      { _id: req.params.id.match(/^[a-f\d]{24}$/i) ? req.params.id : null },
-      { ruleId: req.params.id },
-    ]},
+    matcher,
     update,
     { new: true, runValidators: true }
   );
   if (!rule) return next(new ErrorResponse("Monitoring rule not found", 404));
+
+  const beforeValue = {};
+  const afterValue  = {};
+  Object.keys(update).forEach((k) => {
+    if (!before || JSON.stringify(before[k]) !== JSON.stringify(rule[k])) {
+      beforeValue[k] = before ? before[k] : undefined;
+      afterValue[k]  = rule[k];
+    }
+  });
+  if (Object.keys(afterValue).length) {
+    logEvent({
+      req,
+      service: "rule",
+      action: "monitoring_rule_updated",
+      target: rule.ruleId || String(rule._id),
+      beforeValue,
+      afterValue,
+    });
+  }
+
   res.status(200).json({ success: true, data: rule });
 });

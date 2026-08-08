@@ -12,6 +12,7 @@
  */
 
 const AuditLog = require("../models/AuditLog");
+const { auditContext } = require("./auditContext");
 
 /**
  * logCraEvent({ req, assessment, action, before, after, target, linkedMatterId })
@@ -50,6 +51,8 @@ async function logCraEvent({
       beforeValue: before,
       afterValue: after,
       linkedMatterId,
+
+      ...auditContext(req.headers ? req : undefined),
     });
   } catch (err) {
     console.error(`CRA audit write failed (${action}):`, err.message);

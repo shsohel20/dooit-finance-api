@@ -24,6 +24,7 @@ const {
 } = require("../services/billing/assertUserType");
 const { DISCOUNT_TYPES } = require("../models/constants/billing");
 const { computeDiscount } = require("../services/billing/invoiceService");
+const { logEvent } = require("../utils/audit");
 const {
   buildPriceSnapshot,
   canSubscribe,
@@ -257,6 +258,19 @@ exports.createSubscription = asyncHandler(async (req, res, next) => {
     createdBy: actorId(req),
   });
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "subscription_created",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: sub.uid ?? String(sub._id),
+    afterValue: {
+      planCode: sub.planCode,
+      ...(discount ? { discount: { type: discount.type, value: discount.value } } : {}),
+    },
+  });
+
   res.status(201).json({ success: true, data: sub });
 });
 
@@ -305,6 +319,17 @@ exports.updateDiscount = asyncHandler(async (req, res, next) => {
 
   sub.discount = discount;
   await sub.save();
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "discount_changed",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: sub.uid ?? String(sub._id),
+    beforeValue: previous,
+    afterValue: { type: discount.type, value: discount.value },
+  });
 
   // Show what this will do to the next invoice, so the effect of "15%" is not
   // left to be discovered at close time.
@@ -411,6 +436,18 @@ exports.changePlan = asyncHandler(async (req, res, next) => {
   current.replacedBySubscription = next_._id;
   await current.save();
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "plan_changed",
+    user: current.user,
+    ...(current.client ? { client: current.client } : {}),
+    target: next_.uid ?? String(next_._id),
+    beforeValue: { planCode: current.planCode },
+    afterValue: { planCode: newPlan.code },
+    details: `${direction} effective ${effectiveAt?.toISOString?.() ?? effectiveAt}`,
+  });
+
   res.status(201).json({
     success: true,
     data: next_,
@@ -460,6 +497,16 @@ exports.cancelSubscription = asyncHandler(async (req, res, next) => {
   }
   await sub.save();
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "subscription_cancelled",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: sub.uid ?? String(sub._id),
+    details: immediate ? "Cancelled immediately" : "Cancelled at period end",
+  });
+
   res.status(200).json({
     success: true,
     data: sub,
@@ -497,6 +544,16 @@ exports.resumeSubscription = asyncHandler(async (req, res, next) => {
   }
 
   await sub.save();
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "subscription_resumed",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: sub.uid ?? String(sub._id),
+  });
+
   res.status(200).json({ success: true, data: sub });
 });
 
@@ -514,6 +571,16 @@ exports.pauseSubscription = asyncHandler(async (req, res, next) => {
   sub.pausedAt = new Date();
   sub.metadata = { ...(sub.metadata || {}), pauseReason: req.body.reason || null };
   await sub.save();
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "subscription_paused",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: sub.uid ?? String(sub._id),
+    details: req.body.reason || null,
+  });
 
   res.status(200).json({ success: true, data: sub });
 });

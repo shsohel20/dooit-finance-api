@@ -19,6 +19,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const AmlMatch = require("../models/AmlMatch");
 const Customer = require("../models/Customer");
 const AuditLog = require("../models/AuditLog");
+const { auditContext } = require("../utils/auditContext");
 const {
   upsertMatchesForCustomer,
   recomputeCustomerAmlStatus,
@@ -130,6 +131,7 @@ exports.updateAmlMatch = asyncHandler(async (req, res, next) => {
     actor: req.user?.id || req.user?._id || undefined,
     actorName: req.user?.name || undefined,
     actorRole: req.user?.role || undefined,
+    ...auditContext(req),
     beforeValue: before,
     afterValue: {
       matchStatus: match.matchStatus,
@@ -224,6 +226,7 @@ exports.bulkUpdateAmlMatches = asyncHandler(async (req, res, next) => {
       actor: actorId || undefined,
       actorName: req.user?.name || undefined,
       actorRole: req.user?.role || undefined,
+      ...auditContext(req),
       beforeValue: before,
       afterValue: {
         matchStatus: match.matchStatus,

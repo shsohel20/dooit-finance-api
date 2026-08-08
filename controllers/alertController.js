@@ -8,6 +8,8 @@ const Customer = require("../models/Customer");
 const User = require("../models/User");
 const Transaction = require("../models/Transaction");
 const { linkTransactionsToCase } = require("../utils/transactionCaseLink");
+const { auditContext } = require("../utils/auditContext");
+const { logEvent } = require("../utils/audit");
 
 // Maps Alert.riskLabel → Case.priority
 const mapRiskToPriority = (riskLabel) => {
@@ -136,6 +138,15 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     }
   }
 
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_created",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    target: alert.uid,
+  });
+
   res.status(201).json({ succeed: true, data: alert, id: alert._id });
 });
 
@@ -237,6 +248,30 @@ exports.updateAlert = asyncHandler(async (req, res, next) => {
     runValidators: true,
   });
 
+  const auditedKeys = ["status", "riskScore", "riskLabel", "priority", "analyst"];
+  const beforeValue = {};
+  const afterValue = {};
+  auditedKeys.forEach((k) => {
+    if (
+      updates[k] !== undefined &&
+      JSON.stringify(alert[k]) !== JSON.stringify(updated[k])
+    ) {
+      beforeValue[k] = alert[k];
+      afterValue[k] = updated[k];
+    }
+  });
+  if (Object.keys(afterValue).length) {
+    logEvent({
+      req,
+      service: "alert",
+      action: "alert_updated",
+      alert: updated._id,
+      customer: updated.customer || undefined,
+      beforeValue,
+      afterValue,
+    });
+  }
+
   res.status(200).json({ succeed: true, data: updated });
 });
 
@@ -252,6 +287,15 @@ exports.deleteAlert = asyncHandler(async (req, res, next) => {
   alert.isDeleted = true;
   alert.deletedAt = new Date();
   await alert.save();
+
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_deleted",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    beforeValue: { uid: alert.uid, status: alert.status },
+  });
 
   res.status(200).json({ succeed: true, data: req.params.id });
 });
@@ -289,6 +333,15 @@ exports.assignAnalyst = asyncHandler(async (req, res, next) => {
     createdBy: req.user._id,
   });
   await alert.save();
+
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_assigned",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    afterValue: { analyst: analyst.name || analyst._id },
+  });
 
   res.status(200).json({
     succeed: true,
@@ -373,6 +426,15 @@ exports.reviewAlert = asyncHandler(async (req, res, next) => {
   });
   await alert.save();
 
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_review_started",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    afterValue: { analyst: alert.analyst },
+  });
+
   res.status(200).json({ succeed: true, data: alert });
 });
 
@@ -396,6 +458,7 @@ exports.dismissAlert = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Cannot dismiss an alert that has been escalated to a case", 400));
   }
 
+  const previousStatus = alert.status;
   alert.status = reason;
   alert.closedAt = new Date();
   if (note) alert.statusReason = note;
@@ -407,6 +470,16 @@ exports.dismissAlert = asyncHandler(async (req, res, next) => {
     createdBy: req.user._id,
   });
   await alert.save();
+
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_dismissed",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    beforeValue: { status: previousStatus },
+    afterValue: { status: alert.status, reason, note: note || undefined },
+  });
 
   res.status(200).json({ succeed: true, data: alert });
 });
@@ -483,6 +556,17 @@ exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
     user: req.user._id,
     action: "case_created",
     details: `Case created by escalating alert ${alert.uid} (${alert.riskLabel || ""} ${alert.caseType || ""})`,
+    ...auditContext(req),
+  });
+
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_escalated",
+    alert: alert._id,
+    case: newCase._id,
+    customer: alert.customer?._id || undefined,
+    target: alert.uid,
   });
 
   const populated = await Case.findById(newCase._id)

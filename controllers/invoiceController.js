@@ -37,6 +37,7 @@ const {
   billToFromClient,
 } = require("../services/billing/invoiceDocument");
 const { deliverInvoiceEmail } = require("../services/billing/invoiceMailer");
+const { logEvent } = require("../utils/audit");
 
 const scopeFor = (req) => (isDooit(req) ? {} : { user: actorId(req) });
 
@@ -142,6 +143,16 @@ exports.closePeriod = asyncHandler(async (req, res, next) => {
     );
   }
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "period_closed",
+    user: sub.user,
+    ...(sub.client ? { client: sub.client } : {}),
+    target: invoice.invoiceNumber || String(invoice._id),
+    afterValue: { periodKey, usageRecordsBilled: usageBilled },
+  });
+
   res.status(201).json({
     success: true,
     data: invoice,
@@ -162,6 +173,15 @@ exports.issueInvoice = asyncHandler(async (req, res, next) => {
   }
 
   await issueInvoiceDoc(invoice, { dueDays: req.body.dueDays });
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "invoice_issued",
+    user: invoice.user,
+    ...(invoice.client ? { client: invoice.client } : {}),
+    target: invoice.invoiceNumber || String(invoice._id),
+  });
 
   res.status(200).json({ success: true, data: invoice });
 });
@@ -195,6 +215,17 @@ exports.voidInvoice = asyncHandler(async (req, res, next) => {
     { $set: { status: "recorded", invoice: null, billedAt: null } }
   );
 
+  logEvent({
+    req,
+    service: "billing",
+    action: "invoice_voided",
+    user: invoice.user,
+    ...(invoice.client ? { client: invoice.client } : {}),
+    target: invoice.invoiceNumber || String(invoice._id),
+    afterValue: { usageReleased: released.modifiedCount ?? 0 },
+    details: invoice.voidReason,
+  });
+
   res.status(200).json({
     success: true,
     data: invoice,
@@ -222,6 +253,16 @@ exports.markPaid = asyncHandler(async (req, res, next) => {
   invoice.status = "paid";
   invoice.paidAt = new Date();
   await invoice.save();
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "invoice_marked_paid",
+    user: invoice.user,
+    ...(invoice.client ? { client: invoice.client } : {}),
+    target: invoice.invoiceNumber || String(invoice._id),
+    afterValue: { status: "paid" },
+  });
 
   res.status(200).json({ success: true, data: invoice });
 });
@@ -287,6 +328,17 @@ exports.sendInvoice = asyncHandler(async (req, res, next) => {
   invoice.sentCount = (invoice.sentCount || 0) + 1;
   invoice.lastSentTo = delivery.maskedTo;
   await invoice.save();
+
+  logEvent({
+    req,
+    service: "billing",
+    action: "invoice_sent",
+    user: invoice.user,
+    ...(invoice.client ? { client: invoice.client } : {}),
+    target: invoice.invoiceNumber || String(invoice._id),
+    // Masked recipient, for the same reason the response masks it.
+    details: `Sent to ${delivery.maskedTo}`,
+  });
 
   res.status(200).json({
     success: true,

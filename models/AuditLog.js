@@ -112,6 +112,37 @@ const AuditLogSchema = new mongoose.Schema(
     beforeValue: mongoose.Schema.Types.Mixed,
     afterValue: mongoose.Schema.Types.Mixed,
     linkedMatterId: String,
+
+    // ── Cross-domain refs (docs/71 coverage rollout) ─────────────────────────
+    transaction: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Transaction",
+      index: true,
+      default: null,
+    },
+    alert: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Alert",
+      index: true,
+      default: null,
+    },
+    // Which report a service:"report" entry concerns: SMR|TTR|IFTI|GFS|ECDD|RFI.
+    // The report id goes in `target` (uid preferred) — reports live in five
+    // collections, so a single ref is not possible without refPath.
+    reportType: { type: String, default: null },
+
+    // ── Device / network context (utils/auditContext.js) ─────────────────────
+    // Who ran the operation, from where, on what device.
+    ip: { type: String, default: null },
+    userAgent: { type: String, default: null },
+    // Stable device identity string (Device.deviceId — header or fingerprint)
+    deviceId: { type: String, index: true, default: null },
+    // Registry row in the Device collection, when one was resolved
+    device: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Device",
+      default: null,
+    },
   },
   {
     toJSON: { virtuals: true },

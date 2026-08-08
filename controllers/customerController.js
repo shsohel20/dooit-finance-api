@@ -42,6 +42,8 @@ const { buildRiskAssessmentFromCustomer } = require("../utils/riskAssessment");
 const { getCentroid } = require("../utils/countryCentroids");
 const { customerRelatedToTenant } = require("../utils/customerTenantGuard");
 const { logKybEvent } = require("../utils/kybAudit");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 const AuditLog = require("../models/AuditLog");
 const { launchPdfBrowser } = require("../utils/puppeteerLaunch");
 const ocrService = require("../utils/ocrService");
@@ -1161,6 +1163,13 @@ exports.createInvite = asyncHandler(async (req, res, next) => {
     }
   }
 
+  logEvent({
+    req,
+    service: "kyc",
+    action: "customer_invited",
+    customer: customer._id,
+  });
+
   // ---------------------------
   // Response
   // ---------------------------
@@ -1451,6 +1460,16 @@ exports.createInviteFromQr = asyncHandler(async (req, res, next) => {
     process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite";
 
   const url = `${INVITE_BASE}?token=${plain}&cid=${customer._id}`;
+
+  // Public route — req.user may be undefined; logEvent leaves actor fields null
+  logEvent({
+    req,
+    service: "kyc",
+    action: "customer_invited",
+    customer: customer._id,
+    details: "self-service QR",
+  });
+  recordDevice({ req, customerId: customer._id, purpose: "registration" });
 
   // ---------------------------
   // Response
@@ -1823,6 +1842,14 @@ exports.acceptInvitePersonal = asyncHandler(async (req, res, next) => {
       });
     }
 
+
+    logEvent({
+      req,
+      service: "kyc",
+      action: "customer_registered",
+      customer: customer._id,
+    });
+    recordDevice({ req, customerId: customer._id, purpose: "registration" });
 
     return res.status(200).json({
       success: true,
@@ -2393,6 +2420,14 @@ exports.acceptInviteEntity = asyncHandler(async (req, res, next) => {
 
   // ✅ No more redundant `customer.relations[relIndex] = relation`
   await customer.save();
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "customer_registered",
+    customer: customer._id,
+  });
+  recordDevice({ req, customerId: customer._id, purpose: "registration" });
 
   return res.status(200).json({
     success: true,
@@ -4213,6 +4248,17 @@ exports.addCustomerDocuments = asyncHandler(async (req, res, next) => {
     { $push: { documents: { $each: fresh } } },
   );
 
+  logEvent({
+    req,
+    service: "kyc",
+    action: "kyc_document_added",
+    customer: customer._id,
+    afterValue: {
+      count: fresh.length,
+      names: fresh.map((d) => d.name || d.docType || d.url),
+    },
+  });
+
   const updated = await Customer.findById(customer._id).select("documents").lean();
   res.status(200).json({
     success: true,
@@ -4233,12 +4279,24 @@ exports.removeCustomerDocument = asyncHandler(async (req, res, next) => {
   const customer = await loadGuardedCustomer(req, next);
   if (!customer) return;
 
-  const exists = (customer.documents || []).some((d) => d.url === url);
-  if (!exists) {
+  const removed = (customer.documents || []).find((d) => d.url === url);
+  if (!removed) {
     return next(new ErrorResponse("Document not found on this customer", 404));
   }
 
   await Customer.updateOne({ _id: customer._id }, { $pull: { documents: { url } } });
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "kyc_document_removed",
+    customer: customer._id,
+    beforeValue: {
+      url: removed.url,
+      name: removed.name || "",
+      docType: removed.docType || "",
+    },
+  });
 
   const updated = await Customer.findById(customer._id).select("documents").lean();
   res.status(200).json({
@@ -4313,6 +4371,16 @@ exports.updateCustomerKycStatus = asyncHandler(async (req, res, next) => {
     { _id: customer._id },
     { $set: set, $push: { kycHistory: historyEntry } },
   );
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "kyc_status_changed",
+    customer: customer._id,
+    beforeValue: { kycStatus: prev },
+    afterValue: { kycStatus: status },
+    ...(note ? { details: note } : {}),
+  });
 
   res.status(200).json({
     success: true,
@@ -4414,6 +4482,18 @@ exports.reviewJourneyStep = asyncHandler(async (req, res, next) => {
     });
     cascaded.push(extraType);
   }
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "onboarding_step_reviewed",
+    customer: id,
+    target: stepType,
+    afterValue: {
+      status,
+      ...(cascaded.length ? { cascadedSteps: cascaded } : {}),
+    },
+  });
 
   res.status(200).json({
     success: true,
@@ -4575,6 +4655,13 @@ exports.exportCustomers = asyncHandler(async (req, res, next) => {
 
   await wb.xlsx.write(res);
   res.end();
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "customer_data_exported",
+    afterValue: { rowCount: rows.length, format: "xlsx" },
+  });
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -4641,6 +4728,13 @@ exports.exportCustomerKycPdf = asyncHandler(async (req, res, next) => {
     res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
     res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
     res.send(Buffer.from(pdfBuffer));
+
+    logEvent({
+      req,
+      service: "privacy",
+      action: "customer_kyc_exported",
+      customer: customer._id,
+    });
   } finally {
     if (browser) await browser.close();
   }
@@ -4858,6 +4952,15 @@ exports.manualImportCustomer = asyncHandler(async (req, res, next) => {
       },
     ],
   });
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "customer_created",
+    customer: customer._id,
+    details: "manual import",
+  });
+  recordDevice({ req, purpose: "registration" });
 
   // ── 5. Real audit journey (not the display-only seed fallback) ──────────────
   const journey = await findOrCreateJourney({

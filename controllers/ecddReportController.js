@@ -10,6 +10,7 @@ const {
   linkageOverrides,
 } = require("../utils/resolveCaseLinkage");
     const IndividualRiskAssessment = require("../models/IndividualRiskAssessment");
+const { logEvent } = require("../utils/audit");
 
 const csvParser = require("csv-parser");
 const { Parser: Json2CsvParser } = require("json2csv");
@@ -225,6 +226,17 @@ exports.createEcddReport = asyncHandler(async (req, res, next) => {
     });
   }
 
+  logEvent({
+    req,
+    service: "report",
+    action: "ecdd_created",
+    reportType: "ECDD",
+    target: report.uid || String(report._id),
+    case: report.caseId || null,
+    customer: report.customer || null,
+    afterValue: { status: report.status },
+  });
+
   res.status(201).json({
     success: true,
     data: report,
@@ -275,6 +287,23 @@ exports.createPublicEcddReport = asyncHandler(async (req, res, next) => {
   };
 
   const report = await EcddReport.create(submitObj);
+
+  // Route is unauthenticated by design — attribute the event to the AI service
+  // and carry tenant refs from the resolved alert.
+  logEvent({
+    req,
+    service: "report",
+    action: "ecdd_created",
+    actorName: "ai-service",
+    actorRole: "public",
+    reportType: "ECDD",
+    target: report.uid || String(report._id),
+    case: report.caseId || null,
+    customer: report.customer || null,
+    client: report.client || null,
+    branch: report.branch || null,
+    afterValue: { status: report.status },
+  });
 
   res.status(201).json({
     success: true,
@@ -361,6 +390,16 @@ exports.updateEcddReport = asyncHandler(async (req, res, next) => {
     updateBody = { ...req.body, ...(await linkageOverrides(req.body, "caseId")) };
   }
 
+  // Capture the pre-update status so a transition can be audited with its
+  // before/after values (findByIdAndUpdate with new:true only returns "after").
+  let prevStatus;
+  if (updateBody.status !== undefined) {
+    const prev = await EcddReport.findById(req.params.id)
+      .select("status")
+      .lean();
+    prevStatus = prev?.status;
+  }
+
   const report = await EcddReport.findByIdAndUpdate(req.params.id, updateBody, {
     new: true,
     runValidators: true,
@@ -374,6 +413,24 @@ exports.updateEcddReport = asyncHandler(async (req, res, next) => {
       )
     );
   }
+
+  const statusChanged =
+    updateBody.status !== undefined && prevStatus !== report.status;
+  logEvent({
+    req,
+    service: "report",
+    action: statusChanged ? "ecdd_status_changed" : "ecdd_updated",
+    reportType: "ECDD",
+    target: report.uid || String(report._id),
+    case: report.caseId || null,
+    customer: report.customer || null,
+    ...(statusChanged
+      ? {
+          beforeValue: { status: prevStatus },
+          afterValue: { status: report.status },
+        }
+      : {}),
+  });
 
   res.status(200).json({
     success: true,
@@ -396,7 +453,25 @@ exports.deleteEcddReport = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Snapshot before the delete — this is the only surviving record of the doc.
+  const snapshot = {
+    uid: report.uid,
+    status: report.status,
+    caseId: report.caseId,
+    customer: report.customer,
+  };
   await report.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ecdd_deleted",
+    reportType: "ECDD",
+    target: snapshot.uid || String(report._id),
+    case: snapshot.caseId || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
 
   res.status(200).json({
     success: true,
@@ -422,6 +497,15 @@ exports.importFromJsonEcddReports = asyncHandler(async (req, res, next) => {
       const doc = await EcddReport.create(p);
       inserted.push(doc);
     }
+
+    logEvent({
+      req,
+      service: "report",
+      action: "ecdd_import",
+      reportType: "ECDD",
+      afterValue: { created: inserted.length },
+    });
+
     return res.status(201).json({
       success: true,
       inserted: inserted.length,
@@ -431,6 +515,16 @@ exports.importFromJsonEcddReports = asyncHandler(async (req, res, next) => {
 
   // Single object create
   const doc = await EcddReport.create(payload);
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ecdd_import",
+    reportType: "ECDD",
+    target: doc.uid || String(doc._id),
+    afterValue: { created: 1 },
+  });
+
   return res.status(201).json({
     success: true,
     data: doc,
@@ -487,6 +581,18 @@ exports.importEcddReportCsv = asyncHandler(async (req, res, next) => {
       })
       .on("end", () => resolve())
       .on("error", (err) => reject(err));
+  });
+
+  logEvent({
+    req,
+    service: "report",
+    action: "ecdd_import",
+    reportType: "ECDD",
+    afterValue: {
+      created: createdDocs.length,
+      failed: errors.length,
+      filename: req.file.originalname || null,
+    },
   });
 
   return res.status(201).json({

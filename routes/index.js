@@ -39,6 +39,8 @@ const privacy = require("./privacy");
 const rolePermission = require("./rolePermission");
 const trainingModule = require("./trainingModule");
 const cases = require("./cases");
+const devices = require("./devices");
+const audit = require("./audit");
 const assignmentRoutes = require("./trainingAssignment");
 const progressRoutes = require("./trainingProgress");
 const reportRoutes = require("./trainingReport");
@@ -139,6 +141,8 @@ router.use("/role-permissions", rolePermission);
 
 // Case Management
 router.use("/cases", cases);
+router.use("/devices", devices);
+router.use("/audit", audit);
 
 //Training module CRUD + quiz management + video progress
 router.use("/training-modules", trainingModule);

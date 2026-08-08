@@ -5,6 +5,7 @@ const SMR = require("../models/SmrReport");
 const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const { fillTemplate } = require("../utils/email-template/rfiTemplates");
 const sendEmail = require("../utils/sendEmail");
+const { logEvent } = require("../utils/audit");
 
 // simple filter helper (for advancedResults POST filtering)
 exports.filterSMRSection = (doc, requestBody = {}) => {
@@ -109,6 +110,17 @@ exports.createSMR = asyncHandler(async (req, res, next) => {
   });
   await smr.save();
 
+  logEvent({
+    req,
+    service: "report",
+    action: "smr_created",
+    reportType: "SMR",
+    target: smr.uid || String(smr._id),
+    case: smr.caseId || null,
+    customer: smr.customer || null,
+    afterValue: { status: smr.status },
+  });
+
   res.status(201).json({ succeed: true, data: smr, id: smr._id });
 });
 
@@ -197,6 +209,7 @@ exports.updateSMR = asyncHandler(async (req, res, next) => {
       new ErrorResponse(`SMR not found with id ${req.params.id}`, 404)
     );
 
+  const prevStatus = smr.status;
   Object.assign(smr, req.body);
   if (hasLinkageRef(req.body)) Object.assign(smr, await linkageOverrides(req.body, "caseId"));
   smr.metadata = smr.metadata || {};
@@ -212,6 +225,20 @@ exports.updateSMR = asyncHandler(async (req, res, next) => {
   });
 
   await smr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "smr_updated",
+    reportType: "SMR",
+    target: smr.uid || String(smr._id),
+    case: smr.caseId || null,
+    customer: smr.customer || null,
+    ...(prevStatus !== smr.status
+      ? { beforeValue: { status: prevStatus }, afterValue: { status: smr.status } }
+      : {}),
+  });
+
   res.status(200).json({ succeed: true, data: smr });
 });
 
@@ -222,7 +249,27 @@ exports.deleteSMR = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(`SMR not found with id ${req.params.id}`, 404)
     );
+  // Snapshot before the delete — the workflowHistory dies with the doc, so
+  // this is the only surviving record.
+  const snapshot = {
+    uid: smr.uid,
+    status: smr.status,
+    caseId: smr.caseId,
+    customer: smr.customer,
+  };
   await smr.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "smr_deleted",
+    reportType: "SMR",
+    target: snapshot.uid || String(smr._id),
+    case: snapshot.caseId || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
+
   res.status(200).json({ succeed: true, data: req.params.id });
 });
 
@@ -249,6 +296,18 @@ exports.submitSMR = asyncHandler(async (req, res, next) => {
   });
 
   await smr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "smr_submitted",
+    reportType: "SMR",
+    target: smr.uid || String(smr._id),
+    case: smr.caseId || null,
+    customer: smr.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: smr.status },
+  });
 
   // optionally send notification email
   if (req.body.notify && req.body.notifyEmail) {
@@ -287,6 +346,18 @@ exports.approveSMR = asyncHandler(async (req, res, next) => {
     notes: req.body.notes || "Approved",
   });
   await smr.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "smr_approved",
+    reportType: "SMR",
+    target: smr.uid || String(smr._id),
+    case: smr.caseId || null,
+    customer: smr.customer || null,
+    beforeValue: { status: from },
+    afterValue: { status: smr.status },
+  });
 
   res.status(200).json({ succeed: true, data: smr });
 });

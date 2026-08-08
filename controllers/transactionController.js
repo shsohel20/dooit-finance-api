@@ -10,6 +10,8 @@ const Branch = require("../models/Branch");
 const User = require("../models/User");
 const { Parser: CsvParser } = require("json2csv");
 const csv = require("csv-parser");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 // Never call puppeteer.launch() directly — the container needs the hardened
 // launch options in this helper (writable HOME for crashpad, /dev/shm off).
 // See docs/56-PUPPETEER-DOCKER-CRASHPAD-FIX.md.
@@ -296,6 +298,16 @@ exports.createTransaction = asyncHandler(async (req, res, next) => {
   // Create transaction
   const tx = await Transaction.create(payload);
 
+  logEvent({
+    req,
+    service: "transaction",
+    action: "transaction_created",
+    transaction: tx._id,
+    target: tx.uid,
+    afterValue: { amount: tx.amount, currency: tx.currency, type: tx.type },
+  });
+  recordDevice({ req, purpose: "transaction" });
+
   res.status(201).json({
     success: true,
     data: tx,
@@ -501,6 +513,16 @@ exports.createDummyTransaction = asyncHandler(async (req, res, next) => {
   // Create transaction
   const tx = await Transaction.create(payload);
 
+  logEvent({
+    req,
+    service: "transaction",
+    action: "transaction_created",
+    details: "dummy",
+    transaction: tx._id,
+    target: tx.uid,
+    afterValue: { amount: tx.amount, currency: tx.currency, type: tx.type },
+  });
+
   res.status(201).json({
     success: true,
     data: tx,
@@ -540,11 +562,43 @@ exports.updateTransaction = asyncHandler(async (req, res, next) => {
   if (Object.keys(updates).length === 0)
     return next(new ErrorResponse("No updatable fields provided", 400));
 
+  // Snapshot audited fields before the write so the audit row can show a diff
+  const AUDITED_TX_FIELDS = ["status", "riskScore", "riskFlags"];
+  const before = AUDITED_TX_FIELDS.some((k) => k in updates)
+    ? await Transaction.findById(req.params.id)
+        .select(AUDITED_TX_FIELDS.join(" "))
+        .lean()
+    : null;
+
   const tx = await Transaction.findByIdAndUpdate(req.params.id, updates, {
     new: true,
     runValidators: true,
   });
   if (!tx) return next(new ErrorResponse("Transaction not found", 404));
+
+  if (before) {
+    const beforeValue = {};
+    const afterValue = {};
+    AUDITED_TX_FIELDS.forEach((k) => {
+      if (
+        k in updates &&
+        JSON.stringify(before[k]) !== JSON.stringify(tx[k])
+      ) {
+        beforeValue[k] = before[k];
+        afterValue[k] = tx[k];
+      }
+    });
+    if (Object.keys(afterValue).length) {
+      logEvent({
+        req,
+        service: "transaction",
+        action: "transaction_updated",
+        transaction: tx._id,
+        beforeValue,
+        afterValue,
+      });
+    }
+  }
 
   return res.status(200).json({ success: true, data: tx });
 });
@@ -849,6 +903,16 @@ exports.changeTransactionStatus = asyncHandler(async (req, res, next) => {
 
   await tx.save();
 
+  logEvent({
+    req,
+    service: "transaction",
+    action: "transaction_status_changed",
+    transaction: tx._id,
+    beforeValue: { status: fromStatus },
+    afterValue: { status: newStatus, notes: notes || "" },
+  });
+  recordDevice({ req, purpose: "transaction" });
+
   return res.status(200).json({ success: true, data: tx });
 });
 
@@ -993,6 +1057,20 @@ exports.importTransactionsCsv = asyncHandler(async (req, res, next) => {
     } catch (err) {
       errors.push({ row: i + 2, reason: err.message });
     }
+  }
+
+  if (created.length) {
+    logEvent({
+      req,
+      service: "transaction",
+      action: "transaction_import",
+      afterValue: {
+        created: created.length,
+        failed: errors.length,
+        filename: req.file.originalname || undefined,
+      },
+    });
+    recordDevice({ req, purpose: "transaction" });
   }
 
   res.status(200).json({
@@ -1587,6 +1665,21 @@ exports.bulkChangeTransactionStatus = asyncHandler(async (req, res, next) => {
     } catch (err) {
       results.failed.push({ id, reason: err.message });
     }
+  }
+
+  if (results.success.length) {
+    logEvent({
+      req,
+      service: "transaction",
+      action: "transaction_status_changed",
+      details: "bulk",
+      afterValue: {
+        status: newStatus,
+        count: results.success.length,
+        ids: results.success.map((r) => r.id),
+      },
+    });
+    recordDevice({ req, purpose: "transaction" });
   }
 
   res.status(200).json({ success: true, result: results });

@@ -4,6 +4,7 @@ const ErrorResponse = require("../utils/errorResponse");
 const GFS = require("../models/gfsReport");
 const { resolveCaseLinkage, hasLinkageRef, linkageOverrides } = require("../utils/resolveCaseLinkage");
 const sendEmail = require("../utils/sendEmail");
+const { logEvent } = require("../utils/audit");
 
 /**
  * Helper: try to parse stringified JSON input for fields that might arrive as strings.
@@ -132,6 +133,17 @@ exports.createGFS = asyncHandler(async (req, res, next) => {
     },
   });
 
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_created",
+    reportType: "GFS",
+    target: gfs.uid || String(gfs._id),
+    case: gfs.case || null,
+    customer: gfs.customer || null,
+    afterValue: { status: gfs.status },
+  });
+
   res.status(201).json({ succeed: true, data: gfs, id: gfs._id });
 });
 
@@ -202,12 +214,26 @@ exports.updateGFS = asyncHandler(async (req, res, next) => {
   const body = normalizeInput(req.body || {});
 
   // merge updates
+  const prevStatus = gfs.status;
   Object.assign(gfs, body);
   if (hasLinkageRef(body)) Object.assign(gfs, await linkageOverrides(body, "case"));
   gfs.metadata = gfs.metadata || {};
   gfs.metadata.updatedBy = req.user?.id || gfs.metadata.updatedBy;
 
   await gfs.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_updated",
+    reportType: "GFS",
+    target: gfs.uid || String(gfs._id),
+    case: gfs.case || null,
+    customer: gfs.customer || null,
+    ...(prevStatus !== gfs.status
+      ? { beforeValue: { status: prevStatus }, afterValue: { status: gfs.status } }
+      : {}),
+  });
 
   res.status(200).json({ succeed: true, data: gfs });
 });
@@ -219,7 +245,27 @@ exports.deleteGFS = asyncHandler(async (req, res, next) => {
     return next(
       new ErrorResponse(`GFS not found with id ${req.params.id}`, 404)
     );
+  // Snapshot before the delete — this is the only surviving record once the
+  // doc (and any workflow history on it) is gone.
+  const snapshot = {
+    uid: gfs.uid,
+    status: gfs.status,
+    case: gfs.case,
+    customer: gfs.customer,
+  };
   await gfs.deleteOne();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_deleted",
+    reportType: "GFS",
+    target: snapshot.uid || String(gfs._id),
+    case: snapshot.case || null,
+    customer: snapshot.customer || null,
+    beforeValue: snapshot,
+  });
+
   res.status(200).json({ succeed: true, data: req.params.id });
 });
 
@@ -340,6 +386,17 @@ ${gfs.additionalNotes ? "Additional Notes:\n" + gfs.additionalNotes : ""}`;
     await gfs.save();
   }
 
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_generated",
+    reportType: "GFS",
+    target: gfs.uid || String(gfs._id),
+    case: gfs.case || null,
+    customer: gfs.customer || null,
+    afterValue: { saved: !!req.body?.save },
+  });
+
   res
     .status(200)
     .json({ succeed: true, data: { report, saved: !!req.body?.save } });
@@ -386,6 +443,18 @@ exports.submitGFS = asyncHandler(async (req, res, next) => {
   });
 
   await gfs.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_submitted",
+    reportType: "GFS",
+    target: gfs.uid || String(gfs._id),
+    case: gfs.case || null,
+    customer: gfs.customer || null,
+    beforeValue: { status: fromStatus },
+    afterValue: { status: gfs.status },
+  });
 
   // optional notify email (basic)
   if (req.body?.notify && req.body?.notifyEmail) {
@@ -755,6 +824,18 @@ exports.approveGFS = asyncHandler(async (req, res, next) => {
   });
 
   await gfs.save();
+
+  logEvent({
+    req,
+    service: "report",
+    action: "gfs_approved",
+    reportType: "GFS",
+    target: gfs.uid || String(gfs._id),
+    case: gfs.case || null,
+    customer: gfs.customer || null,
+    beforeValue: { status: fromStatus },
+    afterValue: { status: gfs.status }, // finalStatus: "closed" by default, or "review"
+  });
 
   // optional notify email
   if (req.body?.notify && req.body?.notifyEmail) {

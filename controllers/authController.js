@@ -7,11 +7,72 @@ const Otp = require("../models/Otp");
 const ErrorResponse = require("../utils/errorResponse");
 const sendEmail = require("../utils/sendEmail");
 const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
 const { hashForSearch } = require("../utils/encryption");
 const { resolveMembership } = require("../utils/resolveMembership");
 const { otpVerificationHtml, passwordResetHtml } = require("../utils/email-template/otpEmailTemplate");
 const { getRawEmail, getRawName } = require("../utils/rawUserFields");
 const { convertQueryString } = require("../utils");
+const { recordDevice } = require("../utils/deviceContext");
+const { auditContext } = require("../utils/auditContext");
+const AuditLog = require("../models/AuditLog");
+
+// ─── Auth telemetry ───────────────────────────────────────────────────────────
+// Device registry upsert + audit entry for auth events (login/logout/switch).
+// Fire-and-forget: never blocks or fails the auth response.
+const recordAuthEvent = async ({
+  req,
+  userId,
+  membership,
+  action,
+  status = "success",
+  details = null,
+}) => {
+  try {
+    const purposeByAction = {
+      login: "login",
+      login_failed: "suspicious_activity",
+      logout: "logout",
+      switch_context: "api_access",
+      register: "registration",
+      password_reset_requested: "password_reset",
+      password_reset: "password_reset",
+      password_reset_failed: "suspicious_activity",
+      password_changed: "password_reset",
+      password_change_failed: "suspicious_activity",
+      profile_updated: "api_access",
+      email_confirmed: "device_verification",
+      otp_verified: "two_factor_challenge",
+      otp_verify_failed: "suspicious_activity",
+      otp_sent: "two_factor_challenge",
+    };
+    const device = userId
+      ? await recordDevice({
+          req,
+          userId,
+          purpose: purposeByAction[action] ?? "other",
+          client: membership?.clientBelongs ?? null,
+          branch: membership?.branchBelongs ?? null,
+          details: membership
+            ? { userType: membership.userType, role: membership.role }
+            : undefined,
+        })
+      : null;
+
+    await AuditLog.create({
+      service: "auth",
+      action,
+      status,
+      details,
+      user: userId ?? null,
+      client: membership?.clientBelongs ?? null,
+      branch: membership?.branchBelongs ?? null,
+      ...auditContext(req, device?._id),
+    });
+  } catch (err) {
+    console.error("recordAuthEvent failed:", err.message);
+  }
+};
 
 // ─── Token response ───────────────────────────────────────────────────────────
 // membership = the resolved UserType row (active hat); pass {} when unknown.
@@ -114,6 +175,13 @@ exports.register = asyncHandler(async (req, res, next) => {
 
   const subject = "Verify Your Account – Confirmation Code";
   const message = otpVerificationHtml(code, user.name);
+  recordAuthEvent({
+    req,
+    userId: user._id,
+    membership,
+    action: "register",
+    details: `Registered as ${membership.userType}/${membership.role}`,
+  });
   sendTokenResponse(user, membership, 200, res);
   optSend(user, message, subject, res, next);
 });
@@ -164,11 +232,24 @@ exports.login = asyncHandler(async (req, res, next) => {
   }
 
   if (!user) {
+    recordAuthEvent({
+      req,
+      action: "login_failed",
+      status: "failed",
+      details: "Unknown email",
+    });
     return next(new ErrorResponse("Invalid Credential.", 401));
   }
 
   const isMatch = await user.mathPassword(password);
   if (!isMatch) {
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "login_failed",
+      status: "failed",
+      details: "Wrong password",
+    });
     return next(new ErrorResponse("Invalid Credential.", 401));
   }
 
@@ -177,14 +258,36 @@ exports.login = asyncHandler(async (req, res, next) => {
 
   // No membership found at all — account exists but has no active hat.
   if (!membership) {
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "login_failed",
+      status: "failed",
+      details: `No active membership for userType "${requestedType}"`,
+    });
     return next(new ErrorResponse("Please provide valid credential or either contact the support team", 401));
   }
 
   // A specific userType was requested but resolveMembership fell back to a
   // different type — that means the requested hat doesn't exist for this user.
   if (requestedType && membership.userType !== requestedType) {
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "login_failed",
+      status: "failed",
+      details: `Requested userType "${requestedType}" not available`,
+    });
     return next(new ErrorResponse(`Please provide valid credential or either contact the support team`, 401));
   }
+
+  recordAuthEvent({
+    req,
+    userId: user._id,
+    membership,
+    action: "login",
+    details: `Logged in as ${membership.userType}/${membership.role}`,
+  });
 
   sendTokenResponse(user, membership, 200, res);
 });
@@ -384,6 +487,37 @@ exports.logout = asyncHandler(async (req, res, next) => {
   #swagger.description = 'Clears cookie token'
   #swagger.responses[200] = { description: 'Logged out', schema: { $ref: '#/definitions/GenericSuccess' } }
 */
+  // This route is deliberately unprotected — logout must always succeed, even
+  // with an expired session. Best-effort attribution: verify whatever token
+  // came with the request (Bearer header or cookie) and record the event;
+  // no valid token → clear the cookie silently, nothing to attribute.
+  let decoded = null;
+  try {
+    const token =
+      (req.headers.authorization?.startsWith("Bearer") &&
+        req.headers.authorization.split(" ")[1]) ||
+      req.cookies?.token;
+    if (token && token !== "none") {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    }
+  } catch {
+    decoded = null;
+  }
+
+  if (decoded?.id) {
+    recordAuthEvent({
+      req,
+      userId: decoded.id,
+      membership: {
+        userType: decoded.userType,
+        role: decoded.role,
+        clientBelongs: decoded.clientBelongs,
+        branchBelongs: decoded.branchBelongs,
+      },
+      action: "logout",
+      details: "Logged out",
+    });
+  }
   res.cookie("token", "none", { expires: new Date(Date.now()), httpOnly: true });
   res.status(200).json({ success: true, data: {} });
 });
@@ -404,6 +538,12 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
   const { token = null, cid = null, client = null } = req?.body
   const user = await User.findOne({ emailHash: hashForSearch(req.body.email) });
   if (!user) {
+    recordAuthEvent({
+      req,
+      action: "password_reset_requested",
+      status: "failed",
+      details: "Unknown email",
+    });
     return next(new ErrorResponse("The email address is not valid", 404));
   }
 
@@ -441,6 +581,12 @@ exports.forgotPassword = asyncHandler(async (req, res, next) => {
       subject: "Reset Your Password – Dooit",
       message,
     });
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "password_reset_requested",
+      details: "Password reset email sent",
+    });
     res.status(200).json({ success: true, message: "Email Send Successfully" });
   } catch (error) {
     await User.updateOne(
@@ -477,6 +623,12 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   });
 
   if (!user) {
+    recordAuthEvent({
+      req,
+      action: "password_reset_failed",
+      status: "failed",
+      details: "Invalid or expired reset token",
+    });
     return next(new ErrorResponse("Invalid Token.", 401));
   }
 
@@ -488,6 +640,13 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   );
 
   const membership = await resolveMembership(user._id, null);
+  recordAuthEvent({
+    req,
+    userId: user._id,
+    membership: membership ?? undefined,
+    action: "password_reset",
+    details: "Password reset via token",
+  });
   sendTokenResponse(user, membership ?? {}, 200, res);
 });
 
@@ -519,6 +678,20 @@ exports.updateMe = asyncHandler(async (req, res, next) => {
     ? await UserType.findById(req.user.userTypeId).lean()
     : await resolveMembership(req.user.id, req.user.userType);
 
+  const emailChanged =
+    req.body.email !== undefined &&
+    String(req.body.email).trim().toLowerCase() !==
+      String(req.user.email ?? "").trim().toLowerCase();
+  recordAuthEvent({
+    req,
+    userId: req.user.id,
+    membership: activeMembership ?? undefined,
+    action: "profile_updated",
+    details: emailChanged
+      ? "Profile updated — email (recovery channel) changed"
+      : "Profile updated",
+  });
+
   sendTokenResponse(user, activeMembership ?? {}, 200, res);
 });
 
@@ -536,6 +709,13 @@ exports.updatePassword = asyncHandler(async (req, res, next) => {
 */
   const user = await User.findById(req.user.id).select("+password");
   if (!(await user.mathPassword(req.body.currentPassword))) {
+    recordAuthEvent({
+      req,
+      userId: req.user.id,
+      action: "password_change_failed",
+      status: "failed",
+      details: "Current password mismatch",
+    });
     return next(new ErrorResponse("Current Password not match.", 401));
   }
 
@@ -547,6 +727,14 @@ exports.updatePassword = asyncHandler(async (req, res, next) => {
   const activeMembership = req.user.userTypeId
     ? await UserType.findById(req.user.userTypeId).lean()
     : await resolveMembership(req.user.id, req.user.userType);
+
+  recordAuthEvent({
+    req,
+    userId: user._id,
+    membership: activeMembership ?? undefined,
+    action: "password_changed",
+    details: "Password changed",
+  });
 
   sendTokenResponse(freshUser, activeMembership ?? {}, 200, res);
 });
@@ -600,6 +788,13 @@ exports.confirmUser = asyncHandler(async (req, res, next) => {
   );
 
   const membership = await resolveMembership(user._id, null);
+  recordAuthEvent({
+    req,
+    userId: user._id,
+    membership: membership ?? undefined,
+    action: "email_confirmed",
+    details: "Account confirmed via email token",
+  });
   sendTokenResponse(user, membership ?? {}, 200, res);
 });
 
@@ -638,12 +833,25 @@ exports.confirmUserByOtp = asyncHandler(async (req, res, next) => {
 
       userActivated = true;
       const membership = await resolveMembership(user._id, null);
+      recordAuthEvent({
+        req,
+        userId: user._id,
+        membership: membership ?? undefined,
+        action: "otp_verified",
+        details: "Account confirmed via OTP",
+      });
       sendTokenResponse(user, membership ?? {}, 200, res);
       break;
     }
   }
 
   if (!userActivated) {
+    recordAuthEvent({
+      req,
+      action: "otp_verify_failed",
+      status: "failed",
+      details: "Invalid OTP code",
+    });
     return next(new ErrorResponse("Invalid Code.", 401));
   }
 });
@@ -701,12 +909,28 @@ exports.resendOtp = asyncHandler(async (req, res, next) => {
     latest?.createdAt &&
     Date.now() - latest.createdAt.getTime() < resendThrottleMs
   ) {
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "otp_throttled",
+      status: "failed",
+      details: "OTP resend throttled (60s window)",
+    });
     return next(
       new ErrorResponse("Please wait a bit before requesting a new OTP.", 429)
     );
   }
 
-  return createAndSendOtp(user, res, next);
+  await createAndSendOtp(user, res, next);
+  // headersSent → the OTP was created and the email actually went out.
+  if (res.headersSent) {
+    recordAuthEvent({
+      req,
+      userId: user._id,
+      action: "otp_sent",
+      details: "OTP resent",
+    });
+  }
 });
 
 // ─── Switch Context ───────────────────────────────────────────────────────────
@@ -733,6 +957,13 @@ exports.switchContext = asyncHandler(async (req, res, next) => {
   }
 
   const user = await User.findById(req.user.id);
+  recordAuthEvent({
+    req,
+    userId: req.user.id,
+    membership: target,
+    action: "switch_context",
+    details: `Switched context to ${target.userType}/${target.role}`,
+  });
   // No user.save() — token-bound context means nothing is mutated server-side.
   sendTokenResponse(user, target, 200, res);
 });

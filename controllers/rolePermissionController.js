@@ -3,6 +3,8 @@ const ErrorResponse = require("../utils/errorResponse");
 const RolePermission = require("../models/RolePermission");
 const Role = require("../models/Role");
 const permissionList = require("../_data/permissionjson.json");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 
 const populate = (q) =>
   q
@@ -68,6 +70,19 @@ exports.createRolePermission = asyncHandler(async (req, res, next) => {
     branch: branchId,
   });
 
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_permission_created",
+    target: String(role),
+    details: `Role permission created for role "${roleDoc.name}" (${rolePermission.permissions.length} permission(s))`,
+    afterValue: {
+      permissions: rolePermission.toObject().permissions,
+      restrictedUsers: rolePermission.toObject().restrictedUsers,
+    },
+  });
+  recordDevice({ req, purpose: "admin_action" });
+
   res.status(201).json({ success: true, data: rolePermission });
 });
 
@@ -130,6 +145,10 @@ exports.updateRolePermission = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("No valid fields provided to update", 400));
   }
 
+  // Snapshot the pre-update doc so the audit event carries a before/after diff
+  // (including client/branch re-tenanting).
+  const beforeDoc = await RolePermission.findOne({ role: req.params.roleId }).lean();
+
   const rolePermission = await populate(
     RolePermission.findOneAndUpdate(
       { role: req.params.roleId },
@@ -141,6 +160,23 @@ exports.updateRolePermission = asyncHandler(async (req, res, next) => {
   if (!rolePermission) {
     return next(new ErrorResponse("Role permission not found", 404));
   }
+
+  const beforeValue = {};
+  const afterValue = {};
+  Object.keys(updates).forEach((k) => {
+    beforeValue[k] = beforeDoc ? beforeDoc[k] : undefined;
+    afterValue[k] = updates[k];
+  });
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_permission_updated",
+    target: String(req.params.roleId),
+    details: `Role permission updated: ${Object.keys(updates).join(", ")}`,
+    beforeValue,
+    afterValue,
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(200).json({ success: true, data: rolePermission });
 });
@@ -156,6 +192,24 @@ exports.deleteRolePermission = asyncHandler(async (req, res, next) => {
   if (!rolePermission) {
     return next(new ErrorResponse("Role permission not found", 404));
   }
+
+  // findOneAndDelete returns the deleted doc — that is the before snapshot.
+  const snapshot = rolePermission.toObject();
+  logEvent({
+    req,
+    service: "auth",
+    action: "role_permission_deleted",
+    target: String(req.params.roleId),
+    details: "Role permission document deleted",
+    beforeValue: {
+      permissions: snapshot.permissions,
+      restrictedUsers: snapshot.restrictedUsers,
+      isActive: snapshot.isActive,
+      client: snapshot.client,
+      branch: snapshot.branch,
+    },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(200).json({ success: true, data: {} });
 });
@@ -182,6 +236,16 @@ exports.addPermissions = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse("Role permission not found", 404));
   }
 
+  logEvent({
+    req,
+    service: "auth",
+    action: "permissions_granted",
+    target: String(req.params.roleId),
+    details: `Granted permission(s): ${permissions.join(", ")}`,
+    afterValue: { added: permissions },
+  });
+  recordDevice({ req, purpose: "admin_action" });
+
   res.status(200).json({ success: true, data: rolePermission });
 });
 
@@ -206,6 +270,16 @@ exports.removePermissions = asyncHandler(async (req, res, next) => {
   if (!rolePermission) {
     return next(new ErrorResponse("Role permission not found", 404));
   }
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "permissions_revoked",
+    target: String(req.params.roleId),
+    details: `Revoked permission(s): ${permissions.join(", ")}`,
+    afterValue: { removed: permissions },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(200).json({ success: true, data: rolePermission });
 });
@@ -255,6 +329,17 @@ exports.addRestrictedUsers = asyncHandler(async (req, res, next) => {
   // Re-populate after save
   await rolePermission.populate("restrictedUsers.user", "name email uid");
 
+  logEvent({
+    req,
+    service: "auth",
+    action: "user_restricted",
+    user,
+    target: String(user),
+    details: `User restricted on role permission (modules: ${modules.length ? modules.join(", ") : "all"})`,
+    afterValue: { user, modules, options },
+  });
+  recordDevice({ req, purpose: "admin_action" });
+
   res.status(200).json({ success: true, data: rolePermission });
 });
 
@@ -281,6 +366,17 @@ exports.removeRestrictedUsers = asyncHandler(async (req, res, next) => {
   if (!rolePermission) {
     return next(new ErrorResponse("Role permission not found", 404));
   }
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "user_unrestricted",
+    user,
+    target: String(user),
+    details: "User restriction removed from role permission",
+    afterValue: { user },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(200).json({ success: true, data: rolePermission });
 });

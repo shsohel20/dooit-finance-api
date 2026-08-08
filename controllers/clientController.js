@@ -12,6 +12,8 @@ const { createRiskRegisterFromClient } = require("./riskRegisterController");
 const { runInBackground } = require("../utils/backgroundJob");
 const { generateAMLDocsForClient } = require("../utils/amlDocGenService");
 const { hashForSearch } = require("../utils/encryption");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 const sendEmail = require("../utils/sendEmail");
 const { clientWelcomeHtml, clientCredentialsHtml } = require("../utils/email-template/clientEmailTemplate");
 
@@ -69,7 +71,6 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     metadata
   } = req.body;
 
-  console.log(req.body)
 
   let user = null;
   let isNewUser = false;
@@ -123,6 +124,15 @@ exports.createClient = asyncHandler(async (req, res, next) => {
     { $setOnInsert: { isActive: true, assignedBy: req.user?._id ?? null } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "client_created",
+    client: client._id,
+    afterValue: { name: client.name },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(201).json({
     succeed: true,
@@ -264,6 +274,16 @@ exports.sendClientPasswordReset = asyncHandler(async (req, res, next) => {
       loginUrl,
     }),
   });
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "password_reset_by_admin",
+    user: user._id,
+    client: client._id,
+    details: "Password reset email sent to client by admin",
+  });
+  recordDevice({ req, purpose: "password_reset" });
 
   res.status(200).json({
     success: true,
@@ -491,6 +511,30 @@ exports.updateClient = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Audit only the small identity/settings surface — not the whole document.
+  {
+    const auditKeys = ["name", "email", "settings"].filter(
+      (k) => req.body[k] !== undefined
+    );
+    const beforeValue = {};
+    const afterValue = {};
+    auditKeys.forEach((k) => {
+      beforeValue[k] = client[k];
+      afterValue[k] = updatedClient[k];
+    });
+    logEvent({
+      req,
+      service: "auth",
+      action: "client_updated",
+      client: updatedClient._id,
+      beforeValue,
+      afterValue,
+      details: auditKeys.length
+        ? `Updated: ${auditKeys.join(", ")}`
+        : `Updated: ${Object.keys(req.body || {}).join(", ")}`,
+    });
+  }
+
   res.status(200).json({
     success: true,
     data: updatedClient,
@@ -520,6 +564,13 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
 
   // Get linked user id if exists
   const linkedUserId = client.user ? client.user.toString() : null;
+
+  // Snapshot BEFORE any delete — after a hard delete there is nothing left to read.
+  const auditBefore = {
+    name: client.name,
+    hard: hardDelete,
+    deleteUser: deleteLinkedUser,
+  };
 
   // If hard delete requested, try to run inside a transaction (if DB supports it)
   if (hardDelete) {
@@ -579,6 +630,14 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
         session.endSession();
       }
 
+      logEvent({
+        req,
+        service: "auth",
+        action: "client_deleted",
+        client: clientId,
+        beforeValue: auditBefore,
+      });
+
       return res.status(200).json({
         success: true,
         message: `Client ${hardDelete ? "hard-deleted" : "deleted"
@@ -623,6 +682,14 @@ exports.deleteClient = asyncHandler(async (req, res, next) => {
     if (linkedUserId) {
       await User.updateOne({ _id: linkedUserId }, { $unset: { client: "" } });
     }
+
+    logEvent({
+      req,
+      service: "auth",
+      action: "client_deleted",
+      client: clientId,
+      beforeValue: auditBefore,
+    });
 
     return res.status(200).json({
       success: true,
@@ -1092,6 +1159,12 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Client not found with id of ${req.params.id}`, 404));
   }
 
+  // Snapshot the risk-profile identity fields before the merge mutates them.
+  const riskProfileBefore = {
+    clientType: client.clientType,
+    clientTypeId: client.clientTypeId,
+  };
+
   // ── Resolve entity_type → both name string and ObjectId ──────────────────
   // Incoming value may be either a plain name ("Accountants") or an ObjectId string.
   let resolvedEntityName = null;   // → client.clientType  (name string)
@@ -1165,6 +1238,18 @@ exports.updateRiskQuestions = asyncHandler(async (req, res, next) => {
 
   await client.save();
 
+  logEvent({
+    req,
+    service: "cra",
+    action: "client_risk_profile_changed",
+    client: client._id,
+    beforeValue: riskProfileBefore,
+    afterValue: {
+      clientType: client.clientType,
+      clientTypeId: client.clientTypeId,
+    },
+  });
+
   res.status(200).json({
     success: true,
     data: {
@@ -1192,10 +1277,21 @@ exports.updateClientStatus = asyncHandler(async (req, res, next) => {
     );
   }
 
+  const statusBefore = { status: client.status, isActive: client.isActive };
+
   if (typeof status === "string") client.status = status;
   if (typeof isActive === "boolean") client.isActive = isActive;
 
   await client.save();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "client_status_changed",
+    client: client._id,
+    beforeValue: statusBefore,
+    afterValue: { status: client.status, isActive: client.isActive },
+  });
 
   res.status(200).json({
     success: true,

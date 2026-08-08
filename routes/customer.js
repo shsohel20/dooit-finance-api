@@ -190,7 +190,8 @@ router.post(
 );
 router.post(
   "/dummy/create",
-
+  protect,
+  authorizePermission("CUSTOMER.ADD"),
   createCustomerDummy,
 );
 

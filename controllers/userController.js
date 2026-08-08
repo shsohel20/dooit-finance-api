@@ -13,6 +13,8 @@ const { initialPassword, convertQueryString } = require("../utils");
 const sendEmail = require("../utils/sendEmail");
 const { getRawEmail } = require("../utils/rawUserFields");
 const { runInBackground } = require("../utils/backgroundJob");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 const { userWelcomeHtml } = require("../utils/email-template/userEmailTemplate");
 
 // Derives a unique userName from an email's local part (e.g. "jane.doe@x.com" -> "jane.doe"),
@@ -239,6 +241,17 @@ exports.createUser = asyncHandler(async (req, res, next) => {
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
 
+  logEvent({
+    req,
+    service: "auth",
+    action: "user_created",
+    user: user._id,
+    target: String(user._id),
+    details: `Created user "${user.name}" with role "${role}"`,
+    afterValue: { userType, role, clientBelongs },
+  });
+  recordDevice({ req, purpose: "admin_action" });
+
   res.status(201).json({
     succeed: true,
     data: user,
@@ -432,6 +445,11 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // Snapshot the pre-update values of the fields being changed, for the audit trail.
+  const beforeUser = Object.keys(updates).length
+    ? await User.findById(req.params.id)
+    : null;
+
   const user = await User.findByIdAndUpdate(req.params.id, updates, {
     new: true,
     runValidators: true,
@@ -440,6 +458,25 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
   if (!user) {
     return next(new ErrorResponse(`User not found with id of ${req.params.id}`, 404));
   }
+
+  const changedBefore = {};
+  const changedAfter = {};
+  Object.keys(updates).forEach((field) => {
+    changedBefore[field] = beforeUser ? beforeUser[field] : undefined;
+    changedAfter[field] = user[field];
+  });
+  logEvent({
+    req,
+    service: "auth",
+    action: "user_updated",
+    user: user._id,
+    target: String(user._id),
+    details: Object.keys(updates).length
+      ? `Updated user fields: ${Object.keys(updates).join(", ")}`
+      : "User update requested (no profile fields changed)",
+    beforeValue: changedBefore,
+    afterValue: changedAfter,
+  });
 
   // Role lives on UserType, not User — sync the membership row.
   if (req.body.role) {
@@ -487,6 +524,9 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
       );
     }
 
+    const prevRole = membership?.role ?? null;
+    const prevRoleId = membership?.roleId ?? null;
+
     try {
       if (membership) {
         membership.role = newRole;
@@ -519,6 +559,17 @@ exports.updateUser = asyncHandler(async (req, res, next) => {
       }
       throw err;
     }
+
+    logEvent({
+      req,
+      service: "auth",
+      action: "user_role_changed",
+      user: user._id,
+      target: String(user._id),
+      details: `Role changed from "${prevRole ?? "none"}" to "${newRole}"`,
+      beforeValue: { role: prevRole, roleId: prevRoleId },
+      afterValue: { role: newRole, roleId: roleDoc?._id ?? null },
+    });
   }
 
   const data = await attachRoleToUsers(user, req);
@@ -577,9 +628,27 @@ exports.deleteUser = asyncHandler(async (req, res, next) => {
   //
   // Children before parent: if this throws, the user is left intact and the
   // delete can simply be retried.
+  // Snapshot before the delete — the doc stops existing after this point.
+  const beforeValue = {
+    name: user.name ?? null,
+    email: user.email ?? null,
+    memberships: await UserType.countDocuments({ user: user._id }),
+  };
+
   const { deletedCount } = await UserType.deleteMany({ user: user._id });
 
   await user.deleteOne();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "user_deleted",
+    user: user._id,
+    target: String(user._id),
+    details: `Deleted user "${beforeValue.name}" (${deletedCount} membership(s) removed)`,
+    beforeValue,
+  });
+
   res.status(200).json({
     success: true,
     data: req.params.id,
@@ -605,6 +674,17 @@ exports.updateUserPassword = asyncHandler(async (req, res, next) => {
   }
   user.password = req.body.password;
   await user.save();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "password_reset_by_admin",
+    user: user._id,
+    target: String(user._id),
+    details: "Password reset by administrator",
+  });
+  recordDevice({ req, purpose: "password_reset" });
+
   res.status(200).json({ success: true, data: req.params.id });
 });
 
@@ -618,6 +698,15 @@ exports.resetPassword = asyncHandler(async (req, res, next) => {
   }
   user.password = req.body.newPassword;
   await user.save();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "password_changed",
+    details: "User changed their own password",
+  });
+  recordDevice({ req, purpose: "password_reset" });
+
   res.status(200).json({ success: true, message: "Password updated successfully" });
 });
 
@@ -668,6 +757,22 @@ exports.addMembership = asyncHandler(async (req, res, next) => {
       isActive: true,
       assignedBy: req.user.id,
     });
+
+    logEvent({
+      req,
+      service: "auth",
+      action: "membership_granted",
+      user: req.params.id,
+      target: String(membership._id),
+      details: `Membership granted: ${userType}/${role}`,
+      afterValue: {
+        userType,
+        role,
+        clientBelongs: clientBelongs ?? null,
+        branchBelongs: branchBelongs ?? null,
+      },
+    });
+
     res.status(201).json({ success: true, data: membership });
   } catch (err) {
     if (err.code === 11000) {
@@ -694,6 +799,12 @@ exports.updateMembership = asyncHandler(async (req, res, next) => {
   const updates = {};
   allowed.forEach((f) => { if (req.body[f] !== undefined) updates[f] = req.body[f]; });
 
+  // Snapshot the pre-update row so the audit event can carry a before/after diff.
+  const beforeMembership = await UserType.findOne({
+    _id: req.params.userTypeId,
+    user: req.params.id,
+  }).lean();
+
   const membership = await UserType.findOneAndUpdate(
     { _id: req.params.userTypeId, user: req.params.id },
     updates,
@@ -703,6 +814,24 @@ exports.updateMembership = asyncHandler(async (req, res, next) => {
   if (!membership) {
     return next(new ErrorResponse("Membership not found", 404));
   }
+
+  const beforeValue = {};
+  const afterValue = {};
+  Object.keys(updates).forEach((f) => {
+    beforeValue[f] = beforeMembership ? beforeMembership[f] : undefined;
+    afterValue[f] = membership[f];
+  });
+  logEvent({
+    req,
+    service: "auth",
+    action: "membership_updated",
+    user: req.params.id,
+    target: String(membership._id),
+    details: `Membership updated: ${Object.keys(updates).join(", ") || "no fields"}`,
+    beforeValue,
+    afterValue,
+  });
+
   res.status(200).json({ success: true, data: membership });
 });
 
@@ -745,9 +874,28 @@ exports.deleteMembership = asyncHandler(async (req, res, next) => {
     }
   }
 
+  // Snapshot the row being revoked before it is deactivated.
+  const beforeValue = {
+    userType: membership.userType,
+    role: membership.role,
+    clientBelongs: membership.clientBelongs ?? null,
+    branchBelongs: membership.branchBelongs ?? null,
+    isActive: membership.isActive,
+  };
+
   // Soft-deactivate rather than hard-delete for audit trail.
   membership.isActive = false;
   await membership.save();
+
+  logEvent({
+    req,
+    service: "auth",
+    action: "membership_revoked",
+    user: req.params.id,
+    target: String(membership._id),
+    details: `Membership revoked: ${beforeValue.userType}/${beforeValue.role}`,
+    beforeValue,
+  });
 
   res.status(200).json({ success: true, data: req.params.userTypeId });
 });

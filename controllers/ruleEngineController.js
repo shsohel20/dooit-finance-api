@@ -7,6 +7,8 @@ const RuleEngine = require("../models/RuleEngine");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
 const csv = require("csv-parser");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 
 function bufferToStream(buffer) {
     const stream = new Readable();
@@ -447,6 +449,14 @@ exports.createRule = asyncHandler(async (req, res, next) => {
 
     const rule = await RuleEngine.create(payload);
 
+    logEvent({
+        req,
+        service: "rule",
+        action: "rule_created",
+        target: rule.ruleId || String(rule._id),
+        afterValue: { name: rule.ruleName, ruleId: rule.ruleId, status: rule.status },
+    });
+
     res.status(201).json({ success: true, data: rule });
 });
 
@@ -473,7 +483,7 @@ exports.getRule = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/v1/rule-engine/:id
 // @access  Private — dooit: system rules only; client: own rules only
 exports.updateRule = asyncHandler(async (req, res, next) => {
-    const existing = await RuleEngine.findById(req.params.id).select('client branch');
+    const existing = await RuleEngine.findById(req.params.id).select('client branch status');
     if (!existing || !canWrite(existing, req.user)) {
         return next(new ErrorResponse(`Rule not found with id ${req.params.id}`, 404));
     }
@@ -486,6 +496,21 @@ exports.updateRule = asyncHandler(async (req, res, next) => {
         runValidators: true,
     });
 
+    // Audit — large structures (conditions/logic/actions) are summarised as a
+    // changed-keys list; status is recorded explicitly before/after.
+    const auditedKeys = ["conditions", "logic", "actions", "status", "effectiveFrom", "effectiveTo"];
+    const changed = auditedKeys.filter((k) => update[k] !== undefined);
+    if (changed.length) {
+        logEvent({
+            req,
+            service: "rule",
+            action: "rule_updated",
+            target: rule.ruleId || String(rule._id),
+            beforeValue: { changed, status: existing.status },
+            afterValue: { changed, status: rule.status },
+        });
+    }
+
     res.status(200).json({ success: true, data: rule });
 });
 
@@ -493,12 +518,23 @@ exports.updateRule = asyncHandler(async (req, res, next) => {
 // @route   DELETE /api/v1/rule-engine/:id
 // @access  Private — dooit: system rules only; client: own rules only
 exports.deleteRule = asyncHandler(async (req, res, next) => {
-    const rule = await RuleEngine.findById(req.params.id).select('client branch');
+    const rule = await RuleEngine.findById(req.params.id).select('client branch ruleId ruleName status');
     if (!rule || !canWrite(rule, req.user)) {
         return next(new ErrorResponse(`Rule not found with id ${req.params.id}`, 404));
     }
 
+    // Hard delete — snapshot identifying fields before the doc is gone
+    const beforeValue = { ruleId: rule.ruleId, name: rule.ruleName, status: rule.status };
+
     await rule.deleteOne();
+
+    logEvent({
+        req,
+        service: "rule",
+        action: "rule_deleted",
+        target: rule.ruleId || String(rule._id),
+        beforeValue,
+    });
 
     res.status(200).json({ success: true, data: req.params.id });
 });
@@ -526,6 +562,16 @@ exports.toggleRuleVisibility = asyncHandler(async (req, res, next) => {
         { visibleToClients: !rule.visibleToClients, updatedBy: req.user._id },
         { new: true }
     );
+
+    logEvent({
+        req,
+        service: "rule",
+        action: "rule_visibility_changed",
+        target: updated.ruleId || String(updated._id),
+        beforeValue: { visibleToClients: rule.visibleToClients },
+        afterValue: { visibleToClients: updated.visibleToClients },
+    });
+    recordDevice({ req, purpose: "admin_action" });
 
     res.status(200).json({ success: true, data: updated });
 });
@@ -824,6 +870,18 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
     }));
 
     const result = await RuleEngine.bulkWrite(bulkOps, { ordered: false });
+
+    logEvent({
+        req,
+        service: "rule",
+        action: "rule_import",
+        afterValue: {
+            created: result.upsertedCount,
+            updated: result.modifiedCount,
+            skipped: skipped.length,
+            autoFills: autoFills.length,
+        },
+    });
 
     res.status(200).json({
         success: true,

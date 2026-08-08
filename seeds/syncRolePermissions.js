@@ -63,6 +63,7 @@ const PROFILES = {
     ...mod("CLIENT_RULE"), ...mod("POLICY_HUB"), ...mod("RISK_ASSESSMENT"),
     ...mod("REPORT"), ...TRAINING_NO_ADMIN, ...mod("AML_DOC"), ...mod("AFC_DOC"),
     ...mod("NOTIFY"), ...mod("GRC"), ...mod("EWRA"), ...mod("REFERENCE"),
+    ...mod("DEVICE"), ...mod("AUDIT"),
     "CLIENT.GET", "CLIENT.EDIT", "ROLE.GET",
     "PRIVACY.ENCRYPTVIEW",
   ],
@@ -74,7 +75,7 @@ const PROFILES = {
     ...mod("ALERT"), ...mod("CASE"), ...mod("RFI"), ...mod("REPORT"),
     ...mod("NOTIFY"), "TRAINING.GET",
     ...read("CLIENT", "BRANCH", "POLICY_HUB", "RISK_ASSESSMENT", "CLIENT_RULE",
-            "GRC", "EWRA", "REFERENCE"),
+            "GRC", "EWRA", "REFERENCE", "DEVICE", "AUDIT"),
     "PRIVACY.ENCRYPTVIEW",
   ],
 
@@ -93,6 +94,9 @@ const PROFILES = {
     "SUMSUB.GET", "SUMSUB.EDIT",
     "POLICY_HUB.GET", "AFC_DOC.GET", "CLIENT_RULE.GET",
     "STAFF.GET", "NOTIFY.GET", "TRAINING.GET",
+    // Device intelligence + the who-did-what audit feed are core to
+    // investigations: full device module (trust/risk flags), read-only audit.
+    ...mod("DEVICE"), "AUDIT.GET",
     // Authors the enterprise-wide risk assessment but does not sign it off —
     // EWRA.APPROVE sits with the senior manager and the governing body.
     "EWRA.GET", "EWRA.ADD", "EWRA.EDIT",
@@ -110,7 +114,7 @@ const PROFILES = {
     "TRANSACTION.GET", "ONBOARDING.GET", "ONBOARDING.REVIEW",
     "SUMSUB.GET", "CLIENT_RULE.GET", "AML_DOC.GET", "AFC_DOC.GET",
     ...mod("GRC"), ...mod("EWRA"),
-    ...read("USER", "CLIENT", "BRANCH", "REFERENCE"),
+    ...read("USER", "CLIENT", "BRANCH", "REFERENCE", "DEVICE", "AUDIT"),
     "PRIVACY.ENCRYPTVIEW",
   ],
 
@@ -121,7 +125,7 @@ const PROFILES = {
       "USER", "CLIENT", "BRANCH", "STAFF", "CUSTOMER", "CUSTOMER_ACCOUNT",
       "TRANSACTION", "ALERT", "CASE", "RFI", "CLIENT_RULE", "POLICY_HUB",
       "RISK_ASSESSMENT", "ONBOARDING", "SUMSUB", "AML_DOC", "AFC_DOC",
-      "NOTIFY", "TRAINING", "GRC", "EWRA", "REFERENCE",
+      "NOTIFY", "TRAINING", "GRC", "EWRA", "REFERENCE", "DEVICE", "AUDIT",
     ),
     ...mod("REPORT"),
     // The one write the board does hold: signing off the enterprise-wide risk

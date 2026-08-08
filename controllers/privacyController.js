@@ -5,6 +5,8 @@ const Customer = require("../models/Customer");
 const PrivacySnapshot = require("../models/PrivacySnapshot");
 const { encrypt, decrypt } = require("../utils/encryption");
 const { Types } = require("mongoose");
+const { logEvent } = require("../utils/audit");
+const { recordDevice } = require("../utils/deviceContext");
 
 /**
  * Check that the requesting user holds the required privacy permission string.
@@ -257,7 +259,6 @@ async function setEncryption(Model, id, shouldEncrypt, opts = {}) {
     snapshotId = await takeSnapshot(modelType, oid, raw, paths, "pre_decrypt", performedBy);
   }
 
-  console.log(snapshotId)
 
   const $set = {};
   let decryptErrors = 0;
@@ -336,6 +337,15 @@ exports.updateUserEncryption = asyncHandler(async (req, res, next) => {
   if (!result) return next(new ErrorResponse("User not found", 404));
 
   const { doc, snapshotId } = result;
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_encryption_changed",
+    user: req.params.id,
+    afterValue: { encrypted },
+  });
+
   res.status(200).json({
     success: true,
     message: encrypted ? "User data encrypted" : "User data decrypted",
@@ -399,6 +409,13 @@ exports.bulkUpdateUserEncryption = asyncHandler(async (req, res, next) => {
       failed++;
     }
   }
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: encrypted ? "pii_bulk_encrypted" : "pii_bulk_decrypted",
+    afterValue: { scope: "users", count: processed },
+  });
 
   res.status(200).json({
     success: true,
@@ -464,6 +481,15 @@ exports.updateCustomerEncryption = asyncHandler(async (req, res, next) => {
   if (!result) return next(new ErrorResponse("Customer not found", 404));
 
   const { doc, snapshotId } = result;
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_encryption_changed",
+    customer: req.params.id,
+    afterValue: { encrypted },
+  });
+
   res.status(200).json({
     success: true,
     message: encrypted ? "Customer data encrypted" : "Customer data decrypted",
@@ -528,6 +554,13 @@ exports.bulkUpdateCustomerEncryption = asyncHandler(async (req, res, next) => {
     }
   }
 
+  logEvent({
+    req,
+    service: "privacy",
+    action: encrypted ? "pii_bulk_encrypted" : "pii_bulk_decrypted",
+    afterValue: { scope: "customers", count: processed },
+  });
+
   res.status(200).json({
     success: true,
     message: encrypted
@@ -591,7 +624,6 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
     Customer.find(await buildCustomerFilter(encrypted, clientId, branchId)).select("_id isDataEncrypted"),
   ]);
 
-  console.log(customers)
 
   const results = { users: { processed: 0, failed: 0 }, customers: { processed: 0, failed: 0 } };
 
@@ -616,6 +648,18 @@ exports.bulkUpdateAllEncryption = asyncHandler(async (req, res, next) => {
       results.customers.failed++;
     }
   }
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: encrypted ? "pii_bulk_encrypted" : "pii_bulk_decrypted",
+    afterValue: {
+      scope: "all",
+      users: results.users.processed,
+      customers: results.customers.processed,
+    },
+  });
+  recordDevice({ req, purpose: "admin_action" });
 
   res.status(200).json({
     success: true,
@@ -650,6 +694,15 @@ exports.getSnapshots = asyncHandler(async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(200);
 
+  // Full snapshot docs include the `fields` PII before-images — this read is auditable
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_snapshot_viewed",
+    details: "list",
+    afterValue: { count: snapshots.length },
+  });
+
   res.status(200).json({ success: true, count: snapshots.length, data: snapshots });
 });
 
@@ -662,6 +715,15 @@ exports.getSnapshot = asyncHandler(async (req, res, next) => {
     .populate("restoredBy", "name email uid");
 
   if (!snapshot) return next(new ErrorResponse("Snapshot not found", 404));
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_snapshot_viewed",
+    target: String(snapshot._id),
+    details: `${snapshot.modelType}/${snapshot.documentId}`,
+  });
+
   res.status(200).json({ success: true, data: snapshot });
 });
 
@@ -698,6 +760,15 @@ exports.restoreSnapshot = asyncHandler(async (req, res, next) => {
     { $set: { restoredAt: new Date(), restoredBy: req.user.id } }
   );
 
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_snapshot_restored",
+    target: String(snapshot._id),
+    details: `${snapshot.modelType}/${snapshot.documentId}`,
+  });
+  recordDevice({ req, purpose: "admin_action" });
+
   res.status(200).json({
     success: true,
     message: `Restored to state before ${snapshot.operation === "pre_encrypt" ? "encryption" : "decryption"}`,
@@ -732,6 +803,15 @@ exports.getSnapshotVersions = asyncHandler(async (req, res, next) => {
     .populate("performedBy", "name email uid")
     .populate("restoredBy", "name email uid")
     .sort({ version: 1 });
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_snapshot_viewed",
+    target: String(documentId),
+    details: `versions ${modelType}/${documentId}`,
+    afterValue: { count: snapshots.length },
+  });
 
   res.status(200).json({ success: true, count: snapshots.length, data: snapshots });
 });
@@ -815,6 +895,14 @@ exports.bulkRestoreSnapshots = asyncHandler(async (req, res, next) => {
       failed++;
     }
   }
+
+  logEvent({
+    req,
+    service: "privacy",
+    action: "pii_snapshot_restored",
+    details: "bulk",
+    afterValue: { count: restored },
+  });
 
   res.status(200).json({
     success: true,

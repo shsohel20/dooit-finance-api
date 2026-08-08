@@ -14,6 +14,7 @@ const IFTI = require('../models/IftiReport');
 const GFS = require('../models/gfsReport');
 const RFI = require('../models/Rfi');
 const { linkTransactionsToCase } = require('../utils/transactionCaseLink');
+const { auditContext } = require('../utils/auditContext');
 
 // ── Status machine ────────────────────────────────────────────────────────────
 const STATUS_TRANSITIONS = {
@@ -31,8 +32,15 @@ const getTenant = (req) => ({
   branch: req?.user?.branch?._id || req?.user?.branchBelongs || null,
 });
 
-const logAudit = (caseId, userId, action, details, tenant) =>
-  AuditLog.create({ case: caseId, user: userId, action, details, ...tenant });
+const logAudit = (caseId, userId, action, details, tenant, req) =>
+  AuditLog.create({
+    case: caseId,
+    user: userId,
+    action,
+    details,
+    ...tenant,
+    ...auditContext(req),
+  });
 
 // Returns an ErrorResponse if access is denied, null if allowed.
 const checkCaseAccess = (caseDoc, req, { requireAssignment = false } = {}) => {
@@ -348,22 +356,20 @@ exports.createCase = asyncHandler(async (req, res, next) => {
   const auditPromises = [
     logAudit(
       newCase._id, req.user._id, 'case_created',
-      `Case "${title}" created with type "${derivedType}" and priority "${derivedPriority}"`,
-      tenant
-    ),
+      `Case "${title}" created with type "${derivedType}" and priority "${derivedPriority}"`, tenant, req),
   ];
   if (alertIds && alertIds.length > 0) {
     auditPromises.push(
       logAudit(
         newCase._id, req.user._id, 'alert_linked',
         `${alertIds.length} alert(s) linked on creation: [${resolvedAlerts.map((a) => a.uid).join(', ')}]`,
-        tenant
+        tenant, req
       )
     );
   }
   if (assignedTo) {
     auditPromises.push(
-      logAudit(newCase._id, req.user._id, 'assignment', `Investigator assigned on creation: ${assignedTo}`, tenant)
+      logAudit(newCase._id, req.user._id, 'assignment', `Investigator assigned on creation: ${assignedTo}`, tenant, req)
     );
   }
   await Promise.all(auditPromises);
@@ -421,9 +427,7 @@ exports.updateCase = asyncHandler(async (req, res, next) => {
   const tenant = getTenant(req);
   await logAudit(
     req.params.id, req.user._id, 'field_update',
-    `Fields updated: ${Object.keys(updates).join(', ')}`,
-    tenant
-  );
+    `Fields updated: ${Object.keys(updates).join(', ')}`, tenant, req);
 
   res.status(200).json({ succeed: true, data: updated });
 });
@@ -467,9 +471,7 @@ exports.updateCaseStatus = asyncHandler(async (req, res, next) => {
   const tenant = getTenant(req);
   await logAudit(
     caseDoc._id, req.user._id, 'status_change',
-    `Status: "${previousStatus}" → "${status}"${closureReason ? `. Reason: ${closureReason}` : ''}`,
-    tenant
-  );
+    `Status: "${previousStatus}" → "${status}"${closureReason ? `. Reason: ${closureReason}` : ''}`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -506,9 +508,7 @@ exports.assignInvestigators = asyncHandler(async (req, res, next) => {
   const tenant = getTenant(req);
   await logAudit(
     caseDoc._id, req.user._id, 'assignment',
-    `Investigator updated. Previous: ${previousAssignee}, New: ${investigatorId || 'none'}`,
-    tenant
-  );
+    `Investigator updated. Previous: ${previousAssignee}, New: ${investigatorId || 'none'}`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -533,9 +533,7 @@ exports.updateWatchers = asyncHandler(async (req, res, next) => {
   const tenant = getTenant(req);
   await logAudit(
     caseDoc._id, req.user._id, 'watchers_updated',
-    `Watchers set to [${watcherIds.join(', ') || 'none'}]`,
-    tenant
-  );
+    `Watchers set to [${watcherIds.join(', ') || 'none'}]`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -774,9 +772,7 @@ exports.fileSAR = asyncHandler(async (req, res, next) => {
 
   await logAudit(
     caseDoc._id, req.user._id, 'sar_filed',
-    `SAR filing recorded${req.body.sarNotes ? `: ${req.body.sarNotes}` : ''}`,
-    getTenant(req)
-  );
+    `SAR filing recorded${req.body.sarNotes ? `: ${req.body.sarNotes}` : ''}`, getTenant(req), req);
 
   const updated = await populateCase(Case.findById(caseDoc._id)).lean();
   res.status(200).json({
@@ -846,9 +842,7 @@ exports.linkAlerts = asyncHandler(async (req, res, next) => {
   const uids = alerts.filter((a) => newIds.includes(String(a._id))).map((a) => a.uid);
   await logAudit(
     caseDoc._id, req.user._id, 'alert_linked',
-    `${newIds.length} alert(s) linked: [${uids.join(', ')}]`,
-    tenant
-  );
+    `${newIds.length} alert(s) linked: [${uids.join(', ')}]`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -889,9 +883,7 @@ exports.unlinkAlert = asyncHandler(async (req, res, next) => {
   const tenant = getTenant(req);
   await logAudit(
     caseDoc._id, req.user._id, 'alert_unlinked',
-    `Alert ${alert?.uid || alertId} unlinked from case`,
-    tenant
-  );
+    `Alert ${alert?.uid || alertId} unlinked from case`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -936,11 +928,11 @@ exports.addNote = asyncHandler(async (req, res, next) => {
   });
 
   const auditPromises = [
-    logAudit(req.params.id, req.user._id, 'note_added', `Note added by ${req.user.name || req.user._id}`, tenant),
+    logAudit(req.params.id, req.user._id, 'note_added', `Note added by ${req.user.name || req.user._id}`, tenant, req),
   ];
   if (attachments && attachments.length > 0) {
     auditPromises.push(
-      logAudit(req.params.id, req.user._id, 'evidence_added', `${attachments.length} evidence URL(s) attached`, tenant)
+      logAudit(req.params.id, req.user._id, 'evidence_added', `${attachments.length} evidence URL(s) attached`, tenant, req)
     );
   }
   await Promise.all(auditPromises);

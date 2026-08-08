@@ -137,8 +137,8 @@ router
 router
   .route("/dummy/create")
   .post(
-    // authorizeUserType("dooit"),
-    // authorizePermission("CLIENT.ADD"),
+    authorizeUserType("dooit"),
+    authorizePermission("CLIENT.ADD"),
     createDummyClient
   );
 

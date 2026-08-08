@@ -31,6 +31,9 @@ const { CLOUDINARY_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } =
 connectDB();
 // mysqlConnect();
 const app = express();
+// Behind a reverse proxy / load balancer: trust the first hop so req.ip
+// resolves to the real client address (device & audit telemetry rely on it).
+app.set("trust proxy", 1);
 // app.use(bodyParser.urlencoded({ extended: true }));
 // app.use(bodyParser.json());
 app.use(cookieParser());
