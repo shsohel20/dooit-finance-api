@@ -232,8 +232,13 @@ const recordSofRfi = async ({ req, customer, sof, email, url, caseId }) => {
   }
 };
 
-const SOF_UPLOAD_BASE =
-  (process.env.CLIENT_INVITE_URL || "http://localhost:3000/accept-invite").replace(/\/+$/, "");
+// The upload page lives at /accept-invite/sof-upload on the customer-facing
+// app. Built from FRONTEND_URL (the app's origin) rather than
+// CLIENT_INVITE_URL, so the SOF link doesn't move if the invite path changes.
+const SOF_UPLOAD_BASE = `${(process.env.FRONTEND_URL || "http://localhost:3000").replace(
+  /\/+$/,
+  "",
+)}/accept-invite`;
 
 const buildSofUrl = (customerId) => `${SOF_UPLOAD_BASE}/sof-upload?cid=${customerId}`;
 
