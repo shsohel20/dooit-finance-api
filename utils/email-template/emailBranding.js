@@ -94,14 +94,20 @@ function brandHeader({ icon = "", title = "", subtitle = "", coBrand = null }) {
       <tr>
         <td style="background-color:#1e3a5f;background-image:linear-gradient(135deg,#1e3a5f 0%,#2563eb 100%);padding:32px 40px;text-align:center">
           ${
+            // Table (not a styled <div>) so Word keeps the badge a centred
+            // 60px box instead of stretching it to the full header width.
             icon
-              ? `<div style="width:60px;height:60px;background:rgba(255,255,255,.15);border:2px solid rgba(255,255,255,.25);border-radius:50%;display:inline-block;line-height:60px;font-size:26px;margin-bottom:14px">${icon}</div>`
+              ? `<table role="presentation" cellpadding="0" cellspacing="0" border="0" align="center" style="margin:0 auto 14px">
+            <tr>
+              <td width="60" height="60" align="center" valign="middle" style="width:60px;height:60px;background:#2a4d7d;border:2px solid #5580b8;border-radius:50%;font-size:26px;line-height:56px;mso-line-height-rule:exactly">${icon}</td>
+            </tr>
+          </table>`
               : ""
           }
-          <h1 style="margin:0;color:#ffffff;font-size:23px;font-weight:700;letter-spacing:-.3px;font-family:${FONT}">${title}</h1>
+          <h1 style="margin:0;color:#ffffff;font-size:23px;font-weight:700;letter-spacing:-.3px;line-height:1.3;mso-line-height-rule:exactly;font-family:${FONT}">${title}</h1>
           ${
             subtitle
-              ? `<p style="margin:8px 0 0;color:rgba(255,255,255,.78);font-size:14px;line-height:1.5;font-family:${FONT}">${subtitle}</p>`
+              ? `<p style="margin:8px 0 0;color:#dbe6f5;font-size:14px;line-height:1.5;mso-line-height-rule:exactly;font-family:${FONT}">${subtitle}</p>`
               : ""
           }
         </td>
@@ -130,18 +136,36 @@ function brandFooter(
  */
 function shell({ title, preview = "", cardRows = "" }) {
   return `<!DOCTYPE html>
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
   <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
   <meta name="x-apple-disable-message-reformatting"/>
+  <meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no"/>
+  <meta name="color-scheme" content="light"/>
+  <meta name="supported-color-schemes" content="light"/>
   <title>${title}</title>
+  <!--[if mso]>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
   <style>
-    body{margin:0;padding:0;background:#f1f5f9;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%}
-    table{border-collapse:collapse}
-    img{border:0;line-height:100%;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
+    /* Word can't parse the -apple-system stack and silently falls back to
+       Times New Roman, so restate a font it does know. .mono opts back out. */
+    *{font-family:Arial,Helvetica,sans-serif !important}
+    .mono{font-family:Consolas,'Courier New',monospace !important}
+    /* Word rounds fractional line-heights up, which loosens every block; pin
+       them so paragraph spacing matches the other clients. */
+    body,table,td,p,a,span,div,h1{mso-line-height-rule:exactly}
+  </style>
+  <![endif]-->
+  <style>
+    body{margin:0;padding:0;background:#f1f5f9;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;word-spacing:normal}
+    table{border-collapse:collapse;mso-table-lspace:0pt;mso-table-rspace:0pt}
+    td{mso-line-height-rule:exactly}
+    img{border:0;height:auto;line-height:100%;outline:none;text-decoration:none;-ms-interpolation-mode:bicubic}
     a{text-decoration:none}
+    /* Neutralise iOS/Gmail auto-linking of phone numbers, dates and addresses. */
+    a[x-apple-data-detectors],.unstyled-auto-detected-link a,u+#body a,#MessageViewBody a{color:inherit!important;text-decoration:none!important;font-size:inherit!important;font-family:inherit!important;font-weight:inherit!important;line-height:inherit!important}
     @media only screen and (max-width:600px){
       .card{width:100%!important;border-radius:0!important}
       .px{padding-left:22px!important;padding-right:22px!important}
@@ -149,17 +173,27 @@ function shell({ title, preview = "", cardRows = "" }) {
     }
   </style>
 </head>
-<body style="margin:0;padding:0;background:#f1f5f9;font-family:${FONT}">
+<body id="body" style="margin:0;padding:0;background:#f1f5f9;font-family:${FONT}">
   <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">${preview}</div>
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9">
+  <!-- Filler stops the client from pulling body copy into the inbox preview. -->
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;mso-hide:all">&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+  <div role="article" aria-roledescription="email" aria-label="${title}" lang="en">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f1f5f9">
     <tr>
       <td align="center" style="padding:32px 12px">
-        <table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(15,23,42,.09)">
+        <!--[if mso]>
+        <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0"><tr><td>
+        <![endif]-->
+        <table role="presentation" class="card" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px;max-width:600px;background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 2px 16px rgba(15,23,42,.09)">
           ${cardRows}
         </table>
+        <!--[if mso]>
+        </td></tr></table>
+        <![endif]-->
       </td>
     </tr>
   </table>
+  </div>
 </body>
 </html>`;
 }

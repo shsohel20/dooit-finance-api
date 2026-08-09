@@ -30,11 +30,11 @@ const RFISchema = new Schema(
     sequence: { type: Number, index: true },
 
     // Links
-    case: { type: mongoose.Schema.ObjectId, ref: "Case", index: true }, // investigation hub
-    alert: { type: mongoose.Schema.ObjectId, ref: "Alert", index: true }, // provenance — triggering alert
-    client: { type: mongoose.Schema.ObjectId, ref: "Client" },
-    branch: { type: mongoose.Schema.ObjectId, ref: "Branch" },
-    customer: { type: mongoose.Schema.ObjectId, ref: "Customer" },
+    case: { type: mongoose.Schema.ObjectId, ref: "Case", index: true, default: null }, // investigation hub
+    alert: { type: mongoose.Schema.ObjectId, ref: "Alert", index: true, default: null }, // provenance — triggering alert
+    client: { type: mongoose.Schema.ObjectId, ref: "Client", default: null },
+    branch: { type: mongoose.Schema.ObjectId, ref: "Branch", default: null },
+    customer: { type: mongoose.Schema.ObjectId, ref: "Customer", default: null },
 
     primaryContactName: { type: String, trim: true },
     replyToEmail: { type: String, trim: true },

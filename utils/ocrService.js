@@ -57,3 +57,25 @@ exports.processEkybCompany = (buffer, originalName, mimetype) =>
  */
 exports.processEkybTrust = (buffer, originalName, mimetype) =>
   postEkyb("/process-ekyb-trust", buffer, originalName, mimetype);
+
+/**
+ * Source of Funds (SOF) document verification — /process-bank-documents.
+ * Same upstream OCR service as the eKYB endpoints, but takes a second
+ * "document_type" field (one of bank_statement | payslip | bank_cheque |
+ * bank_certificate) alongside the file, and — for bank_statement/payslip —
+ * returns an extra `analysis` block (patterns/anomalies/insights) on top of
+ * the usual { success, document_type, is_valid, rejection_reason, data }.
+ */
+exports.processBankDocument = async (buffer, originalName, mimetype, documentType) => {
+  const form = new FormData();
+  form.append("document_type", documentType);
+  form.append("image", buffer, { filename: originalName, contentType: mimetype });
+
+  const response = await axios.post(`${getBaseURL()}/process-bank-documents`, form, {
+    headers: form.getHeaders(),
+    maxBodyLength: Infinity,
+    timeout: 90_000,
+  });
+
+  return response.data;
+};

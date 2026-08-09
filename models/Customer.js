@@ -461,3 +461,6 @@ CustomerSchema.virtual("riskLabel").get(function () {
 // });
 
 module.exports = mongoose.model("Customer", CustomerSchema);
+// Exposed for reuse by other document-holding models (e.g. SofVerification)
+// so their per-document shape never drifts from Customer.documents.
+module.exports.DocumentMetaSchema = DocumentMetaSchema;

@@ -211,7 +211,10 @@ const ctaButton = (href, label) => `
 const detailRow = (label, value, mono = false) => `
     <tr>
       <td style="padding:9px 0;font-size:13px;color:#64748b;font-family:${FONT};white-space:nowrap;vertical-align:top">${label}</td>
-      <td style="padding:9px 0 9px 18px;font-size:14px;font-weight:700;color:#0f172a;text-align:right;word-break:break-word;font-family:${
+      <td ${
+        // .mono opts this cell out of the Outlook-wide Arial override in shell().
+        mono ? 'class="mono" ' : ""
+      }style="padding:9px 0 9px 18px;font-size:14px;font-weight:700;color:#0f172a;text-align:right;word-break:break-word;font-family:${
         mono
           ? "'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace"
           : FONT

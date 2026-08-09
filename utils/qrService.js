@@ -77,4 +77,32 @@ const generateQR = async ({
     }
 };
 
-module.exports = { generateQR };
+/**
+ * Generate a QR code for an arbitrary, already-built URL (e.g. a SOF
+ * verification upload link). Unlike generateQR(), the caller owns the full
+ * payload — this just renders it.
+ *
+ * @param {String} url
+ * @param {String} [format] - base64 | png | svg
+ */
+const generateQRFromUrl = async (url, format = "base64") => {
+  if (!url) throw new Error("url is required");
+
+  const qrOptions = {
+    errorCorrectionLevel: "H",
+    width: 300,
+    margin: 2,
+  };
+
+  switch (format) {
+    case "svg":
+      return await QRCode.toString(url, { ...qrOptions, type: "svg" });
+    case "png":
+      return await QRCode.toBuffer(url, { ...qrOptions, type: "png" });
+    case "base64":
+    default:
+      return await QRCode.toDataURL(url, qrOptions);
+  }
+};
+
+module.exports = { generateQR, generateQRFromUrl };
