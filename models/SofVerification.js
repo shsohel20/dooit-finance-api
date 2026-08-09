@@ -81,6 +81,10 @@ SofDocumentSchema.add({
 
 const SofVerificationSchema = new Schema(
   {
+    // One session per customer, across every tenant — the SOF evidence is the
+    // customer's, not any one client's, so there is deliberately no
+    // client/branch on this model. Tenant attribution lives on the RFI a send
+    // raises (recordSofRfi) and on Customer.relations.
     customer: {
       type: Schema.Types.ObjectId,
       ref: "Customer",
@@ -88,8 +92,6 @@ const SofVerificationSchema = new Schema(
       unique: true,
       index: true,
     },
-    client: { type: Schema.Types.ObjectId, ref: "Client", default: null },
-    branch: { type: Schema.Types.ObjectId, ref: "Branch", default: null },
 
     status: {
       type: String,
@@ -99,15 +101,9 @@ const SofVerificationSchema = new Schema(
 
     documents: { type: [SofDocumentSchema], default: [] },
 
-    // Rendered once (the URL it encodes never changes — it's just the
-    // customer id) and uploaded to the same file store as every other
-    // document (fileVaultService), so the admin tab can always show it
-    // without regenerating anything.
-    qrCode: {
-      url: { type: String, default: null },
-      mimeType: { type: String, default: "image/png" },
-      generatedAt: { type: Date, default: null },
-    },
+    // No qrCode field by design: the QR encodes only the upload URL, so it is
+    // rendered on read as a base64 data URL (see getSofVerification) rather
+    // than stored. Nothing to invalidate when the frontend origin changes.
 
     sentTo: {
       email: { type: String, default: null },

@@ -67,15 +67,28 @@ const customerDisplayName = (customer) => {
 };
 
 /**
+ * The tenant making this SOF request. Prefer the signed-in staff member's
+ * client — a customer can hold relations with several clients, so
+ * `relations[0]` is not necessarily the organisation asking; auth.js resolves
+ * the caller's own client onto req.user.clientBelongs. Falls back to the
+ * customer's first relation on sessionless (public) calls.
+ */
+const resolveRequestingClientId = (customer, req) =>
+  req?.user?.clientBelongs ||
+  req?.user?.client?._id ||
+  req?.user?.client ||
+  customer?.relations?.[0]?.client ||
+  null;
+
+/**
  * Client (tenant) branding for anything shown to the customer — the request
  * email header and the public upload page both co-brand Dooit with the
  * organisation that asked for the document. Client has no dedicated logo
  * field, so read the conventional Mixed keys (same as userController).
  * Best-effort: a missing client just means plain Dooit branding.
  */
-const resolveClientBranding = async (customer) => {
+const resolveClientBranding = async (clientId) => {
   try {
-    const clientId = customer?.relations?.[0]?.client;
     if (!clientId) return { name: "", logoUrl: "" };
     const clientDoc = await Client.findById(clientId)
       .select("name settings metadata")
@@ -165,7 +178,6 @@ const recordSofRfi = async ({ req, customer, sof, email, url, caseId }) => {
     // caseId is optional: the onboarding tab has no case, the case-manager tab
     // passes one so the RFI lands on that case's register.
     const link = caseId ? await resolveCaseLinkage({ caseId }) : {};
-    const relation = customer.relations?.[0] || {};
     const contactName = customerDisplayName(customer);
     const now = new Date();
 
@@ -197,8 +209,13 @@ const recordSofRfi = async ({ req, customer, sof, email, url, caseId }) => {
     return await RFI.create({
       case: link.caseId || null,
       alert: link.alert || null,
-      client: relation.client || link.client || null,
-      branch: relation.branch || link.branch || null,
+      // Tenant of the signed-in staff member raising it (auth.js resolves
+      // clientBelongs/branchBelongs for both client and branch users), same as
+      // rfiController.createRFI. Case linkage is the only fallback — for
+      // platform admins with no tenant of their own; never guessed from
+      // relations[0].
+      client: req?.user?.clientBelongs || link.client || null,
+      branch: req?.user?.branchBelongs || link.branch || null,
       customer: customer._id,
       primaryContactName: contactName,
       replyToEmail: email,
@@ -240,44 +257,43 @@ const SOF_UPLOAD_BASE = `${(process.env.FRONTEND_URL || "http://localhost:3000")
   "",
 )}/accept-invite`;
 
-const buildSofUrl = (customerId) => `${SOF_UPLOAD_BASE}/sof-upload?cid=${customerId}`;
+// `client` rides along so the public page can brand for the tenant that
+// actually raised the request instead of guessing from the customer's first
+// relation — validateSofCustomer checks it against the customer's relations
+// before honouring it.
+const buildSofUrl = (customerId, clientId) =>
+  `${SOF_UPLOAD_BASE}/sof-upload?cid=${customerId}` +
+  (clientId ? `&client=${clientId}` : "");
 
 /**
- * Get-or-create the customer's SOF session, generating + persisting the QR
- * image the first time (fileVaultService — same store every other document
- * goes through). Idempotent: safe to call on every admin tab load and on
- * every public validate/upload hit.
+ * Get-or-create the customer's SOF session. Idempotent: safe to call on every
+ * admin tab load and on every public validate/upload hit.
+ *
+ * No QR work here — the code is rendered on read (see getSofVerification), so
+ * there is nothing to persist or invalidate.
  */
 const ensureSofSession = async (customer) => {
-  let sof = await SofVerification.findOne({ customer: customer._id });
-  if (sof && sof.qrCode?.url) return sof;
+  const existing = await SofVerification.findOne({ customer: customer._id });
+  if (existing) return existing;
 
-  const relation = customer.relations?.[0] || {};
-  if (!sof) {
-    sof = new SofVerification({
-      customer: customer._id,
-      client: relation.client || null,
-      branch: relation.branch || null,
-    });
-  }
+  // Customer-scoped only — no client/branch on the session (see the model);
+  // tenant attribution belongs to the RFI raised at send time.
+  return SofVerification.create({ customer: customer._id });
+};
 
+/**
+ * Render an upload link as a base64 data URL, ready to drop straight into an
+ * <img src>. Same approach as the client/branch QR in middleware/auth.js —
+ * cheap to regenerate, and it always reflects the current FRONTEND_URL
+ * instead of an address baked in whenever the record was created.
+ */
+const renderSofQr = async (url) => {
   try {
-    const qrBuffer = await generateQRFromUrl(buildSofUrl(customer._id), "png");
-    const qrUpload = await fileVaultService.uploadFile(
-      qrBuffer,
-      `sof-qr-${customer._id}.png`,
-      "image/png",
-    );
-    const qrUrl = qrUpload?.file?.publicUrl;
-    if (qrUpload?.success && qrUrl) {
-      sof.qrCode = { url: qrUrl, mimeType: "image/png", generatedAt: new Date() };
-    }
+    return await generateQRFromUrl(url, "base64");
   } catch (err) {
-    console.error("[ensureSofSession] QR upload failed:", err.message);
+    console.error("[renderSofQr] QR generation failed:", err.message);
+    return null;
   }
-
-  await sof.save();
-  return sof;
 };
 
 // ── Admin: read (auto-create) the session ─────────────────────────────────────
@@ -289,12 +305,18 @@ exports.getSofVerification = asyncHandler(async (req, res, next) => {
   const customer = await loadGuardedCustomer(req, next);
   if (!customer) return;
 
-  const sof = await ensureSofSession(customer);
+  const url = buildSofUrl(customer._id, resolveRequestingClientId(customer, req));
+  const [sof, qrCode] = await Promise.all([
+    ensureSofSession(customer),
+    renderSofQr(url),
+  ]);
 
   res.status(200).json({
     success: true,
     data: sof,
-    url: buildSofUrl(customer._id),
+    url,
+    // base64 data URL, rendered per request — not stored on the session.
+    qrCode,
     docTypes: DOC_TYPES,
   });
 });
@@ -318,10 +340,11 @@ exports.sendSofEmail = asyncHandler(async (req, res, next) => {
   }
 
   const sof = await ensureSofSession(customer);
-  const url = buildSofUrl(customer._id);
+  const requestingClientId = resolveRequestingClientId(customer, req);
+  const url = buildSofUrl(customer._id, requestingClientId);
 
   const { name: clientName, logoUrl: clientLogoUrl } =
-    await resolveClientBranding(customer);
+    await resolveClientBranding(requestingClientId);
 
   try {
     await sendEmail({
@@ -416,7 +439,7 @@ exports.reviewSofDocument = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/sof-verification/validate?cid=
 // @access Public
 exports.validateSofCustomer = asyncHandler(async (req, res, next) => {
-  const { cid } = req.query;
+  const { cid, client: clientParam } = req.query;
   if (!cid) return next(new ErrorResponse("cid required", 400));
 
   const customer = await Customer.findById(cid).select("personalKyc uid relations");
@@ -426,8 +449,19 @@ exports.validateSofCustomer = asyncHandler(async (req, res, next) => {
 
   // Co-branding for the public page: it is Dooit's page, but the customer was
   // asked for the document by their own provider, so name (and where set, show)
-  // that organisation.
-  const client = await resolveClientBranding(customer);
+  // that organisation. The link carries the requesting tenant as ?client=
+  // (stamped by buildSofUrl from the sender's login). Honour it only if that
+  // client actually holds a relation with this customer — the param is
+  // public-facing, and a crafted URL must not brand the page as an arbitrary
+  // tenant. Otherwise fall back to the customer's first relation.
+  const relatedClientIds = (customer.relations || [])
+    .map((r) => (r?.client ? String(r.client) : null))
+    .filter(Boolean);
+  const brandingClientId =
+    clientParam && relatedClientIds.includes(String(clientParam))
+      ? clientParam
+      : relatedClientIds[0] || null;
+  const client = await resolveClientBranding(brandingClientId);
 
   res.status(200).json({
     success: true,
