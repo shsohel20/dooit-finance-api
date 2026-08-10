@@ -9,6 +9,7 @@ const {
   getSofVerification,
   sendSofEmail,
   reviewSofDocument,
+  reprocessSofDocument,
   validateSofCustomer,
   uploadSofDocument,
 } = require("../controllers/sofVerificationController");
@@ -50,6 +51,12 @@ router.patch(
   protect,
   authorizePermission("CUSTOMER.EDIT"),
   reviewSofDocument,
+);
+router.post(
+  "/:customerId/documents/:docId/reprocess",
+  protect,
+  authorizePermission("CUSTOMER.EDIT"),
+  reprocessSofDocument,
 );
 
 module.exports = router;

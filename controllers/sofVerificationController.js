@@ -433,6 +433,81 @@ exports.reviewSofDocument = asyncHandler(async (req, res, next) => {
   res.status(200).json({ success: true, message: "Document updated", data: sof });
 });
 
+// @desc   Re-run OCR on an already-stored document (e.g. after an OCR outage
+//         left it in needs_review). Pulls the file back from the vault and
+//         runs the same verification pipeline as the original upload.
+// @route  POST /api/v1/sof-verification/:customerId/documents/:docId/reprocess
+// @access Private (CUSTOMER.EDIT)
+exports.reprocessSofDocument = asyncHandler(async (req, res, next) => {
+  const customer = await loadGuardedCustomer(req, next);
+  if (!customer) return;
+
+  const sof = await SofVerification.findOne({ customer: customer._id });
+  if (!sof) return next(new ErrorResponse("No SOF verification session for this customer", 404));
+
+  const doc = sof.documents.id(req.params.docId);
+  if (!doc) return next(new ErrorResponse("Document not found in this SOF session", 404));
+  if (!doc.url) {
+    // Rejected-at-upload docs are never stored — nothing to re-run.
+    return next(new ErrorResponse("No stored file for this document — ask the customer to upload again", 400));
+  }
+
+  let buffer;
+  try {
+    const fileRes = await fetch(doc.url);
+    if (!fileRes.ok) throw new Error(`file store responded ${fileRes.status}`);
+    buffer = Buffer.from(await fileRes.arrayBuffer());
+  } catch (err) {
+    return next(new ErrorResponse(`Could not retrieve the stored file: ${err.message}`, 502));
+  }
+
+  let ocrResult = null;
+  let ocrError = null;
+  try {
+    ocrResult = await ocrService.processBankDocument(
+      buffer,
+      doc.name || `sof-${doc.docType}`,
+      doc.mimeType || "application/octet-stream",
+      doc.docType,
+    );
+  } catch (err) {
+    ocrError = err.message;
+    console.error("[reprocessSofDocument] OCR failed:", err.message);
+  }
+
+  // Same verdict rule as the original upload; another outage just leaves the
+  // doc in needs_review with the fresh error recorded.
+  doc.status =
+    ocrResult?.success === true
+      ? ocrResult.is_valid
+        ? "verified"
+        : "rejected"
+      : "needs_review";
+  doc.ocr = buildSofOcrRecord(ocrResult, { docType: doc.docType, ocrError });
+
+  sof.status = sof.documents.some((d) => d.status === "verified") ? "verified" : "in_review";
+  await sof.save();
+
+  logEvent({
+    req,
+    service: "kyc",
+    action: "sof_document_reprocessed",
+    customer: customer._id,
+    afterValue: { docId: req.params.docId, status: doc.status },
+  });
+
+  res.status(200).json({
+    success: true,
+    message:
+      doc.status === "verified"
+        ? "Document verified"
+        : doc.status === "rejected"
+          ? "Document could not be verified"
+          : "OCR still unavailable — document left in review",
+    data: sof,
+  });
+});
+
 // ── Public: no-login mobile upload flow ───────────────────────────────────────
 
 // @desc   Look up a customer before showing the mobile upload page
@@ -500,19 +575,11 @@ exports.uploadSofDocument = asyncHandler(async (req, res, next) => {
 
   const { buffer, originalname, mimetype } = req.file;
 
-  // Upload to storage first — we want the file kept even if OCR verification
-  // itself fails (upstream OCR outage shouldn't block evidence collection).
-  let publicUrl;
-  try {
-    const uploadRes = await fileVaultService.uploadFile(buffer, originalname, mimetype);
-    publicUrl = uploadRes?.file?.publicUrl;
-    if (!uploadRes?.success || !publicUrl) {
-      throw new Error(uploadRes?.message || "Upload failed");
-    }
-  } catch (err) {
-    return next(new ErrorResponse(`File upload failed: ${err.message}`, 502));
-  }
-
+  // OCR first, storage second: a document OCR positively rejects (not a valid
+  // bank document) is junk and never reaches the file server or the customer's
+  // document register. An OCR *outage* is different — the doc may well be
+  // valid, so it is stored as needs_review and can be re-run later via
+  // reprocessSofDocument.
   let ocrResult = null;
   let ocrError = null;
   try {
@@ -527,10 +594,25 @@ exports.uploadSofDocument = asyncHandler(async (req, res, next) => {
     status = ocrResult.is_valid ? "verified" : "rejected";
   }
 
+  let publicUrl = null;
+  if (status !== "rejected") {
+    try {
+      const uploadRes = await fileVaultService.uploadFile(buffer, originalname, mimetype);
+      publicUrl = uploadRes?.file?.publicUrl;
+      if (!uploadRes?.success || !publicUrl) {
+        throw new Error(uploadRes?.message || "Upload failed");
+      }
+    } catch (err) {
+      return next(new ErrorResponse(`File upload failed: ${err.message}`, 502));
+    }
+  }
+
   const docEntry = {
     docType,
     type: "sof_qr_upload",
     name: originalname,
+    // null for rejected docs — the attempt (and why) is still recorded via
+    // the OCR block below, there's just no stored file behind it.
     url: publicUrl,
     mimeType: mimetype,
     status,
@@ -544,22 +626,25 @@ exports.uploadSofDocument = asyncHandler(async (req, res, next) => {
 
   // Mirror into Customer.documents (DocumentMetaSchema) — same store the
   // reviewer Documents tab reads. updateOne + $push avoids re-running the
-  // Customer pre-save encryption hooks over untouched PII fields.
-  await Customer.updateOne(
-    { _id: cid },
-    {
-      $push: {
-        documents: {
-          name: originalname,
-          url: publicUrl,
-          mimeType: mimetype,
-          type: "sof_qr_upload",
-          docType,
-          uploadedAt: new Date(),
+  // Customer pre-save encryption hooks over untouched PII fields. Rejected
+  // docs have no stored file, so there is nothing to mirror.
+  if (publicUrl) {
+    await Customer.updateOne(
+      { _id: cid },
+      {
+        $push: {
+          documents: {
+            name: originalname,
+            url: publicUrl,
+            mimeType: mimetype,
+            type: "sof_qr_upload",
+            docType,
+            uploadedAt: new Date(),
+          },
         },
       },
-    },
-  );
+    );
+  }
 
   // Public route — req.user is undefined; logEvent/recordDevice leave actor null.
   logEvent({
