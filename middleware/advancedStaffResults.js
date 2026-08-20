@@ -61,7 +61,8 @@ module.exports = (Staff) => async (req, res, next) => {
 
     // ── text search ─────────────────────────────────────────────────────────
     if (!isEmpty(q)) {
-      const regex = new RegExp(q, "i");
+      // Escape user input — a raw pattern like (a+)+$ becomes a DB-side regex bomb
+      const regex = new RegExp(String(q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
       dbQuery.$or = [
         { "personal.firstName": regex },
         { "personal.lastName":  regex },

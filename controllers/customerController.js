@@ -4542,13 +4542,15 @@ exports.exportCustomers = asyncHandler(async (req, res, next) => {
   const relType = req.query.relationType || req.query.type;
   if (!isEmptyExport(relType)) dbQuery["relations.type"] = relType;
   if (!isEmptyExport(req.query.uid)) {
-    dbQuery.uid = new RegExp(String(req.query.uid).replace(/^#/, ""), "i");
+    // Escape user input before it becomes a $regex — see ruleEngineResults.js
+    const uid = String(req.query.uid).replace(/^#/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    dbQuery.uid = new RegExp(uid, "i");
   }
 
   // OR-groups combined via $and so search + email don't clobber each other.
   const andGroups = [];
   if (!isEmptyExport(req.query.q)) {
-    const rx = new RegExp(req.query.q, "i");
+    const rx = new RegExp(String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     andGroups.push({
       $or: [
         { "personalKyc.personal_form.customer_details.given_name": rx },
@@ -4558,8 +4560,9 @@ exports.exportCustomers = asyncHandler(async (req, res, next) => {
     });
   }
   if (!isEmptyExport(req.query.email)) {
+    // Raw email feeds hashForSearch below — only the regex is escaped
     const email = String(req.query.email).trim();
-    const rx = new RegExp(email, "i");
+    const rx = new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
     const orGroup = [
       { "personalKyc.personal_form.contact_details.email": rx },
       { "metadata.email": rx },

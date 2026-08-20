@@ -125,7 +125,7 @@ const RuleEngineSchema = new Schema(
         // ─────────────── Target entity ───────────────────────────────────────
         appliesTo: {
             type: String,
-            // enum: ['transaction', 'customer', 'account'],
+            // enum: ['transaction', 'customer','kyb],
             default: 'transaction',
             index: true,
         },

@@ -65,10 +65,12 @@ module.exports =
                     dbQuery["relations.branch"] = req.query.branchId;
                 }
 
-                // Customer ID — prefix/contains match (UI strips a leading '#')
+                // Customer ID — prefix/contains match (UI strips a leading '#').
+                // User input is escaped before it becomes a $regex — see peers
+                // like ruleEngineResults.js.
                 if (!isEmpty(req.query.uid)) {
                     const uid = String(req.query.uid).replace(/^#/, "").trim();
-                    if (uid) dbQuery.uid = new RegExp(uid, "i");
+                    if (uid) dbQuery.uid = new RegExp(uid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
                 }
 
                 // -----------------------------
@@ -77,7 +79,7 @@ module.exports =
                 const andGroups = [];
 
                 if (!isEmpty(req.query.q) && searchFields.length) {
-                    const regex = new RegExp(req.query.q, "i");
+                    const regex = new RegExp(String(req.query.q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
                     andGroups.push({ $or: searchFields.map((path) => ({ [path]: regex })) });
                 }
 
@@ -86,8 +88,9 @@ module.exports =
                 // email matches the linked user via emailHash; partial input still
                 // substring-matches the customer's own KYC/metadata email fields.
                 if (!isEmpty(req.query.email)) {
+                    // Raw email feeds hashForSearch below — only the regex is escaped
                     const email = String(req.query.email).trim();
-                    const regex = new RegExp(email, "i");
+                    const regex = new RegExp(email.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
                     const orGroup = [
                         { "personalKyc.personal_form.contact_details.email": regex },
                         { "metadata.email": regex },

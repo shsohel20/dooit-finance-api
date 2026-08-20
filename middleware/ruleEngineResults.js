@@ -27,6 +27,7 @@
 //   limit              — per page, capped at 200 (default: 25)
 
 const RuleEngine = require('../models/RuleEngine');
+const ruleEvaluation = require('../services/ruleEvaluation');
 
 const isDooit    = (u) => u?.userType === 'dooit';
 const userTenant = (u) => ({
@@ -151,6 +152,14 @@ const ruleEngineResults = async (req, res, next) => {
         const pagination = {};
         if (skip + limit < totalRecords) pagination.next = { page: page + 1, limit };
         if (skip > 0)                    pagination.prev = { page: page - 1, limit };
+
+        // Can the evaluation engine execute this rule (logic tree, structured
+        // conditions, or parseable DSL)? ~half the imported catalogue is
+        // natural-language prose — the UI uses this to mark rules that can't
+        // be backtested/evaluated.
+        for (const row of data) {
+            row.evaluable = !!ruleEvaluation.resolveExecutable(row);
+        }
 
         res.advancedResults = {
             success:     true,

@@ -1,9 +1,13 @@
 // controllers/ruleEngineController.js
 //
 // Renamed from `clientRuleController` — see models/RuleEngine.js for context.
+const mongoose = require("mongoose");
+const { isDeepStrictEqual } = require("util");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const RuleEngine = require("../models/RuleEngine");
+const Transaction = require("../models/Transaction");
+const ruleEvaluation = require("../services/ruleEvaluation");
 const { Parser } = require("json2csv");
 const { Readable } = require("stream");
 const csv = require("csv-parser");
@@ -35,7 +39,7 @@ const VALID_RISK_LABELS = new Set(["Low", "Medium", "High", "Critical", "Info"])
 const VALID_APPLIES_TO = new Set(["transaction", "customer", "account"]);
 const VALID_STATUSES = new Set(["draft", "active", "paused", "archived"]);
 const VALID_WINDOW_UNITS = new Set(["minute", "hour", "day"]);
-const VALID_ACTION_TYPES = new Set(["create_alert", "assign", "notify", "escalate", "block"]);
+const VALID_ACTION_TYPES = new Set(["create_alert", "assign", "notify", "escalate", "block", "create_report"]);
 
 // Safely JSON.parse a CSV cell. Returns the parsed value, or `undefined`
 // when the cell is blank / unparseable. The caller decides whether a parse
@@ -55,191 +59,9 @@ const tryParseDate = (raw) => {
 };
 
 // ── DSL → structured conditions ──────────────────────────────────────────────
-//
-// Parse a rule-condition string back into the same shape the UI builder
-// produces. Mirrors the inverse of `conditionToExpr` in
-// `ui/.../RuleEditor.js`. Tolerant: returns `null` for anything we can't
-// parse cleanly so the caller falls back to keeping the string only.
-//
-// Handles the operators the builder emits:
-//   gt/gte/lt/lte/eq/ne, in/nin, between, contains, startsWith, endsWith,
-//   exists, regex, and the common "=" alias for eq.
-
-const stripQuotes = (s) => s.trim().replace(/^["'](.*)["']$/, '$1');
-
-const coerceValue = (raw) => {
-    const t = stripQuotes(String(raw));
-    if (t === '') return t;
-    // Strip thousand-separator commas (e.g. "1,000" → 1000, "50,000" → 50000)
-    const stripped = t.replace(/,(?=\d{3}(\D|$))/g, '');
-    if (/^-?\d+(\.\d+)?$/.test(stripped)) {
-        const n = Number(stripped);
-        if (Number.isFinite(n)) return n;
-    }
-    if (t.toLowerCase() === 'true') return true;
-    if (t.toLowerCase() === 'false') return false;
-    return t;
-};
-
-const splitList = (inner) =>
-    inner.split(',').map((v) => coerceValue(v.trim())).filter((v) => v !== '');
-
-// Match against a single expression (no AND/OR splitters). Order matters —
-// longest/most-specific patterns first.
-const LEAF_PATTERNS = [
-    {
-        re: /^(.+?)\s+BETWEEN\s+(.+?)\s+AND\s+(.+)$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'between', min: coerceValue(m[2]), max: coerceValue(m[3]) })
-    },
-    {
-        re: /^(.+?)\s+NOT\s+IN\s+\[(.*)\]$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'nin', values: splitList(m[2]) })
-    },
-    {
-        re: /^(.+?)\s+IN\s+\[(.*)\]$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'in', values: splitList(m[2]) })
-    },
-    {
-        re: /^(.+?)\s+STARTS\s+WITH\s+(.+)$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'startsWith', value: stripQuotes(m[2]) })
-    },
-    {
-        re: /^(.+?)\s+ENDS\s+WITH\s+(.+)$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'endsWith', value: stripQuotes(m[2]) })
-    },
-    {
-        re: /^(.+?)\s+CONTAINS\s+(.+)$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'contains', value: stripQuotes(m[2]) })
-    },
-    {
-        re: /^(.+?)\s+MATCHES\s+\/(.+)\/$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'regex', value: m[2] })
-    },
-    {
-        re: /^(.+?)\s+EXISTS$/i,
-        build: (m) => ({ field: m[1].trim(), operator: 'exists' })
-    },
-    {
-        re: /^(.+?)\s*>=\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'gte', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*<=\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'lte', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*!=\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'ne', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*==\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'eq', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*>\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'gt', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*<\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'lt', value: coerceValue(m[2]) })
-    },
-    {
-        re: /^(.+?)\s*=\s*(.+)$/,
-        build: (m) => ({ field: m[1].trim(), operator: 'eq', value: coerceValue(m[2]) })
-    },
-];
-
-const parseLeaf = (expr) => {
-    const trimmed = expr.trim();
-    if (!trimmed) return null;
-    for (const p of LEAF_PATTERNS) {
-        const m = trimmed.match(p.re);
-        if (m) return p.build(m);
-    }
-    return null;
-};
-
-// Split the DSL on top-level AND / OR, ignoring:
-//   - the AND that is part of "BETWEEN x AND y"
-//   - any AND/OR appearing inside [...] lists
-// Returns [{ expr, combinator }] where the first row's combinator is 'AND'.
-const splitTopLevel = (s) => {
-    // Mask the AND inside BETWEEN first so it isn't a splitter
-    let masked = s.replace(
-        /(\bBETWEEN\b\s+\S+(?:\s+\S+)*?)\s+AND\s+/gi,
-        '$1 @@BAND@@ '
-    );
-    // Mask AND/OR inside bracket lists
-    masked = masked.replace(/\[([^\]]*)\]/g, (_, inner) =>
-        '[' +
-        inner
-            .replace(/\bAND\b/gi, '@@LAND@@')
-            .replace(/\bOR\b/gi, '@@LOR@@') +
-        ']'
-    );
-
-    const parts = masked.split(/\s+(AND|OR)\s+/i);
-    if (!parts.length) return [];
-
-    const tokens = [];
-    for (let i = 0; i < parts.length; i += 2) {
-        const expr = parts[i]
-            .replace(/@@BAND@@/g, 'AND')
-            .replace(/@@LAND@@/g, 'AND')
-            .replace(/@@LOR@@/g, 'OR')
-            .trim();
-        const combinator = i === 0 ? 'AND' : parts[i - 1].toUpperCase();
-        if (expr) tokens.push({ expr, combinator });
-    }
-    return tokens;
-};
-
-// Build the logic tree from leaves with combinators (AND has precedence over OR)
-// e.g. A AND B OR C  →  { logic: 'OR', children: [{ logic: 'AND', children: [A, B] }, C] }
-const buildLogicTreeFromLeaves = (leaves) => {
-    if (!leaves.length) return null;
-    const stripCombinator = ({ combinator, ...rest }) => rest;
-    if (leaves.length === 1) return stripCombinator(leaves[0]);
-
-    const orGroups = [];
-    let chunk = [stripCombinator(leaves[0])];
-    for (let i = 1; i < leaves.length; i++) {
-        if (leaves[i].combinator === 'OR') {
-            orGroups.push(chunk);
-            chunk = [stripCombinator(leaves[i])];
-        } else {
-            chunk.push(stripCombinator(leaves[i]));
-        }
-    }
-    orGroups.push(chunk);
-
-    const orChildren = orGroups.map((g) =>
-        g.length === 1 ? g[0] : { logic: 'AND', children: g }
-    );
-    return orChildren.length === 1
-        ? orChildren[0]
-        : { logic: 'OR', children: orChildren };
-};
-
-// Top-level: parse a DSL string into { conditions, logic } or null if any
-// part fails to parse (caller keeps just the string ruleCondition).
-const parseRuleConditionDSL = (dsl) => {
-    if (!dsl || typeof dsl !== 'string') return null;
-    const tokens = splitTopLevel(dsl);
-    if (!tokens.length) return null;
-
-    const leaves = [];
-    for (const t of tokens) {
-        const leaf = parseLeaf(t.expr);
-        if (!leaf) return null;        // bail on any unparseable expr
-        leaves.push({ ...leaf, combinator: t.combinator });
-    }
-    if (!leaves.length) return null;
-
-    const conditions = leaves.map(({ combinator, ...rest }) => rest);
-    const logic = buildLogicTreeFromLeaves(leaves);
-    return { conditions, logic };
-};
+// Extracted to utils/ruleConditionParser.js so services/ruleEvaluation can
+// share it without a circular require.
+const { parseRuleConditionDSL } = require("../utils/ruleConditionParser");
 
 // ── Import helpers ────────────────────────────────────────────────────────────
 
@@ -397,21 +219,25 @@ exports.filterRuleSection = (doc, requestBody) => {
     return true;
 };
 
-// @desc    Get distinct mainDomain + ruleDomainSubdomain values for this tenant
+// @desc    Get distinct mainDomain / ruleDomainSubdomain / category values for
+//          this tenant — feeds the filter + creatable dropdowns in the UI
 // @route   GET /api/v1/rule-engine/domains
 // @access  Private
 exports.getRuleDomains = asyncHandler(async (req, res) => {
     const filter = { ...tenantFilter(req.user), deletedAt: null };
+    const nonEmpty = { $nin: [null, ""] };
 
-    const [mainDomains, subDomains] = await Promise.all([
-        RuleEngine.distinct("mainDomain",        { ...filter, mainDomain:         { $ne: null, $ne: "" } }),
-        RuleEngine.distinct("ruleDomainSubdomain",{ ...filter, ruleDomainSubdomain:{ $ne: null, $ne: "" } }),
+    const [mainDomains, subDomains, categories] = await Promise.all([
+        RuleEngine.distinct("mainDomain",          { ...filter, mainDomain:          nonEmpty }),
+        RuleEngine.distinct("ruleDomainSubdomain", { ...filter, ruleDomainSubdomain: nonEmpty }),
+        RuleEngine.distinct("category",            { ...filter, category:            nonEmpty }),
     ]);
 
     res.status(200).json({
         success:     true,
         mainDomains: mainDomains.filter(Boolean).sort(),
         subDomains:  subDomains.filter(Boolean).sort(),
+        categories:  categories.filter(Boolean).sort(),
     });
 });
 
@@ -476,19 +302,36 @@ exports.getRule = asyncHandler(async (req, res, next) => {
         );
     }
 
-    res.status(200).json({ success: true, data: rule });
+    // Same flag the list middleware attaches — can the engine execute this rule?
+    const data = rule.toObject();
+    data.evaluable = !!ruleEvaluation.resolveExecutable(data);
+
+    res.status(200).json({ success: true, data });
 });
 
 // @desc    Update rule
 // @route   PUT /api/v1/rule-engine/:id
 // @access  Private — dooit: system rules only; client: own rules only
 exports.updateRule = asyncHandler(async (req, res, next) => {
-    const existing = await RuleEngine.findById(req.params.id).select('client branch status');
+    const existing = await RuleEngine.findById(req.params.id)
+        .select('client branch status ruleCondition logic conditions aggregation actions');
     if (!existing || !canWrite(existing, req.user)) {
         return next(new ErrorResponse(`Rule not found with id ${req.params.id}`, 404));
     }
 
     const update = pickWritable(req.body);
+
+    // The UI resends logic-bearing fields on every save; drop the ones that
+    // are unchanged so the model's version hook only bumps on real logic
+    // changes (auditors rely on version as a "logic changed" signal).
+    const existingObj = existing.toObject();
+    const normalize = (v) => JSON.parse(JSON.stringify(v ?? null));
+    for (const key of ["ruleCondition", "logic", "conditions", "aggregation", "actions"]) {
+        if (key in update && isDeepStrictEqual(normalize(update[key]), normalize(existingObj[key]))) {
+            delete update[key];
+        }
+    }
+
     update.updatedBy = req.user._id;
 
     const rule = await RuleEngine.findByIdAndUpdate(req.params.id, update, {
@@ -772,8 +615,6 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
 
                 const dslParsed = parseRuleConditionDSL(ruleCondition);
 
-                console.log(dslParsed)
-
                 if (dslParsed) {
                     conditions = dslParsed.conditions;
                     logic = dslParsed.logic;
@@ -892,5 +733,259 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
         autoFilled: autoFills.length,
         skippedDetails: skipped,
         autoFilledDetails: autoFills,
+    });
+});
+
+// ── Backtest ──────────────────────────────────────────────────────────────────
+
+// Hard cap on how many transactions a single backtest run will evaluate.
+// The response reports `truncated: true` when the range holds more.
+const BACKTEST_MAX_SCAN = 20000;
+const BACKTEST_DEFAULT_DAYS = 90;
+// Widest window a single run may cover — bounds the zero-filled per-day
+// series (one entry per day) and keeps a typo'd "from" year from producing
+// a decades-long scan.
+const BACKTEST_MAX_RANGE_DAYS = 731;
+
+// Minimal customer projection the evaluator's customer.* aliases read.
+const BACKTEST_CUSTOMER_SELECT = "isPep sanction amlStatus kycStatus country status given_name surname";
+const BACKTEST_PARTY_PATHS = ["sender", "receiver", "beneficiary", "intermediary"];
+
+// @desc    Backtest a rule against historical transactions (read-only —
+//          creates no alerts, bumps no telemetry)
+// @route   POST /api/v1/rule-engine/backtest
+// @access  Private (tenant-scoped)
+//
+// Body:
+//   ruleId       — Mongo _id of a saved rule (must pass canView), OR
+//   rule         — inline draft {conditions|logic|ruleCondition, aggregation, …}
+//   from / to    — ISO dates; default: last 90 days ending now
+//   sampleLimit  — max matched samples returned (1–100, default 25)
+//   clientId     — dooit only: narrow the transaction pool to one client
+exports.backtestRule = asyncHandler(async (req, res, next) => {
+    const { ruleId, rule: inlineRule, from, to, sampleLimit, clientId } = req.body || {};
+
+    // Same guard as createRule — a client user without a resolved tenant must
+    // never fall through to an unscoped (all-tenants) transaction query.
+    const { client, branch } = userTenant(req.user);
+    if (!client && !isDooit(req.user)) {
+        return next(new ErrorResponse("A tenant is required to run a backtest", 400));
+    }
+
+    // ── 1. Resolve the rule under test ────────────────────────────────────
+    let rule;
+    if (ruleId) {
+        const doc = await RuleEngine.findById(ruleId).lean();
+        if (!doc || !canView(doc, req.user)) {
+            return next(new ErrorResponse(`Rule not found with id ${ruleId}`, 404));
+        }
+        rule = doc;
+    } else if (inlineRule && typeof inlineRule === "object") {
+        rule = pickWritable(inlineRule);
+    } else {
+        return next(new ErrorResponse("Provide ruleId or an inline rule to backtest", 400));
+    }
+
+    const executable = ruleEvaluation.resolveExecutable(rule);
+    if (!executable) {
+        return next(
+            new ErrorResponse(
+                "Rule has no evaluable logic — no logic tree, no structured conditions, and its DSL string could not be parsed",
+                422
+            )
+        );
+    }
+
+    // ── 2. Date window ────────────────────────────────────────────────────
+    const toDate = to ? new Date(to) : new Date();
+    const fromDate = from
+        ? new Date(from)
+        : new Date(toDate.getTime() - BACKTEST_DEFAULT_DAYS * 86400e3);
+    if (isNaN(toDate) || isNaN(fromDate)) {
+        return next(new ErrorResponse("Invalid from/to date", 400));
+    }
+    if (fromDate >= toDate) {
+        return next(new ErrorResponse("`from` must be before `to`", 400));
+    }
+    if (toDate - fromDate > BACKTEST_MAX_RANGE_DAYS * 86400e3) {
+        return next(
+            new ErrorResponse(`Date range too wide — maximum ${BACKTEST_MAX_RANGE_DAYS} days per run`, 400)
+        );
+    }
+
+    // ── 3. Tenant-scoped transaction pool ─────────────────────────────────
+    // Mirrors transactionController.buildTxFilter tenancy.
+    const txFilter = { timestamp: { $gte: fromDate, $lte: toDate } };
+    if (client) {
+        txFilter.client = client;
+    } else if (isDooit(req.user) && clientId) {
+        if (!mongoose.isValidObjectId(clientId)) {
+            return next(new ErrorResponse("Invalid clientId", 400));
+        }
+        txFilter.client = clientId;
+    }
+    if (branch) txFilter.branch = branch;
+
+    const totalInRange = await Transaction.countDocuments(txFilter);
+
+    // Autopopulate is disabled and replaced with a minimal projection —
+    // the evaluator only reads a handful of customer flags.
+    const cursor = Transaction.find(txFilter)
+        .sort({ timestamp: 1 })
+        .limit(BACKTEST_MAX_SCAN)
+        .setOptions({ autopopulate: false })
+        .populate(
+            BACKTEST_PARTY_PATHS.map((p) => ({
+                path: `${p}.customer`,
+                select: BACKTEST_CUSTOMER_SELECT,
+            }))
+        )
+        .lean()
+        .cursor();
+
+    // ── 4. Streamed evaluation ────────────────────────────────────────────
+    const limit = Math.min(Math.max(Number(sampleLimit) || 25, 1), 100);
+    const perDay = new Map();      // 'YYYY-MM-DD' → {evaluated, matched}
+    const fieldMissCounts = new Map();
+    const uniqueSubjects = new Set();
+    const matchedRows = [];        // slim rows for aggregation windows
+    const sample = [];
+    let scanned = 0;
+    let matchedCount = 0;
+    let matchedAmount = 0;
+    let lastScannedTs = null;      // cursor is sorted asc → ends at the max
+
+    for await (const txn of cursor) {
+        scanned++;
+        const tsRaw = new Date(txn.timestamp || txn.createdAt || 0);
+        if (!isNaN(tsRaw)) lastScannedTs = tsRaw;
+        const dayKey = (isNaN(tsRaw) ? new Date(0) : tsRaw).toISOString().slice(0, 10);
+        let day = perDay.get(dayKey);
+        if (!day) { day = { evaluated: 0, matched: 0 }; perDay.set(dayKey, day); }
+        day.evaluated++;
+
+        const result = ruleEvaluation.evaluateTree(executable.tree, txn);
+        for (const f of result.fieldMisses) {
+            fieldMissCounts.set(f, (fieldMissCounts.get(f) || 0) + 1);
+        }
+        if (!result.matched) continue;
+
+        matchedCount++;
+        day.matched++;
+        const amount = Number(ruleEvaluation.effectiveAmount(txn)) || 0;
+        matchedAmount += amount;
+        const subject = ruleEvaluation.subjectKey(txn);
+        uniqueSubjects.add(subject);
+        matchedRows.push({ id: txn._id, ts: txn.timestamp || txn.createdAt, subject, amount });
+
+        if (sample.length < limit) {
+            sample.push({
+                id: String(txn._id),
+                uid: txn.uid || txn.reference || null,
+                timestamp: txn.timestamp || txn.createdAt,
+                type: txn.type,
+                channel: txn.channel || null,
+                status: txn.status,
+                amount: txn.amount,
+                currency: txn.currency,
+                convertedAmountAUD: txn.convertedAmountAUD ?? null,
+                senderName: txn.sender?.name || null,
+                receiverName: txn.receiver?.name || null,
+                leaves: result.leaves,
+            });
+        }
+    }
+
+    // ── 5. Aggregation windows (velocity rules) ───────────────────────────
+    const aggregated = ruleEvaluation.hasAggregation(rule);
+    let aggregation = null;
+    if (aggregated) {
+        const { windows, firedWindows, firedTxnIds } = ruleEvaluation.applyAggregation(
+            rule.aggregation,
+            matchedRows
+        );
+        aggregation = {
+            window: rule.aggregation.window || null,
+            count: rule.aggregation.count ?? null,
+            sumThreshold: rule.aggregation.sumThreshold ?? null,
+            windowsEvaluated: windows.length,
+            windowsFired: firedWindows.length,
+            txnsInFiredWindows: firedTxnIds.size,
+            firedWindows: firedWindows.slice(0, limit).map((w) => ({
+                subject: w.subject,
+                windowStart: w.windowStart,
+                count: w.count,
+                sum: w.sum,
+            })),
+        };
+        for (const s of sample) s.inFiredWindow = firedTxnIds.has(s.id);
+    }
+
+    // Would-be alert volume: one per fired window for velocity rules,
+    // one per matched transaction otherwise (doc 72 §5.2: alert per fired rule).
+    const wouldFireAlerts = aggregated ? aggregation.windowsFired : matchedCount;
+
+    // ── 6. Daily series — zero-filled so the chart shows true gaps ────────
+    const series = [];
+    for (let t = Date.UTC(fromDate.getUTCFullYear(), fromDate.getUTCMonth(), fromDate.getUTCDate());
+         t <= toDate.getTime();
+         t += 86400e3) {
+        const key = new Date(t).toISOString().slice(0, 10);
+        const d = perDay.get(key);
+        series.push({ date: key, evaluated: d?.evaluated || 0, matched: d?.matched || 0 });
+    }
+
+    const rangeDays = Math.max(1, (toDate - fromDate) / 86400e3);
+
+    // When the scan hit BACKTEST_MAX_SCAN the window was only covered up to
+    // the last scanned transaction — divide the alert rate by the days
+    // actually covered, not the full requested range.
+    const truncated = totalInRange > scanned;
+    const coveredDays = truncated && lastScannedTs
+        ? Math.max(1, (lastScannedTs - fromDate) / 86400e3)
+        : rangeDays;
+
+    logEvent({
+        req,
+        service: "rule",
+        action: "rule_backtest",
+        target: rule.ruleId || (ruleId ? String(ruleId) : "inline-draft"),
+        afterValue: {
+            from: fromDate,
+            to: toDate,
+            scanned,
+            matched: matchedCount,
+            wouldFireAlerts,
+            source: executable.source,
+        },
+    });
+
+    res.status(200).json({
+        success: true,
+        rule: {
+            _id: rule._id || null,
+            ruleId: rule.ruleId || null,
+            ruleName: rule.ruleName || "Inline draft",
+            version: rule.version || null,
+            riskLabel: rule.riskLabel || null,
+            caseType: rule.caseType || null,
+        },
+        evaluationSource: executable.source, // 'logic' | 'conditions' | 'dsl'
+        range: { from: fromDate, to: toDate, days: Math.round(rangeDays) },
+        scanned,
+        totalInRange,
+        truncated,
+        matchedCount,
+        hitRate: scanned ? matchedCount / scanned : 0,
+        wouldFireAlerts,
+        alertsPerDay: wouldFireAlerts / coveredDays,
+        uniqueCustomers: uniqueSubjects.size,
+        matchedAmount,
+        aggregation,
+        perDay: series,
+        sample,
+        fieldMisses: [...fieldMissCounts.entries()]
+            .map(([field, count]) => ({ field, count }))
+            .sort((a, b) => b.count - a.count),
     });
 });
