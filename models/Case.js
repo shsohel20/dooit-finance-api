@@ -96,7 +96,8 @@ const CaseSchema = new Schema(
         closedAt: { type: Date, default: null },
 
         // ── Linked records ───────────────────────────────────────────────────
-        linkedCustomers:    [{ type: Schema.Types.ObjectId, ref: 'Customer' }], // Need customer single 
+        customer:           { type: Schema.Types.ObjectId, ref: 'Customer', default: null }, // Primary customer (POI)
+        linkedCustomers:    [{ type: Schema.Types.ObjectId, ref: 'Customer' }], // POI 
         linkedAlerts:       [{ type: Schema.Types.ObjectId, ref: 'Alert' }], // Should be same customer but income
         linkedTransactions: [{ type: Schema.Types.ObjectId, ref: 'Transaction' }],
 

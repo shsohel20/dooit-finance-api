@@ -2575,6 +2575,7 @@ async function seed() {
       status: v.caseStatus,
       closureReason: isClosed ? v.closureReason : null,
       closedAt: isClosed ? new Date(when.getTime() + days(4)) : null,
+      customer: customer._id, // Primary customer (POI) — same person the chain is built on
       linkedCustomers: [customer._id],
       linkedAlerts: [alert._id],
       linkedTransactions: [txn._id],

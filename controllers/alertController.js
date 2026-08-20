@@ -526,6 +526,8 @@ exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
     type,
     caseType: sanitizeCaseType(alert.caseType),
     linkedAlerts: [alert._id],
+    // Primary customer (POI) — the escalated alert's customer.
+    customer: alert.customer ? alert.customer._id : null,
     linkedCustomers: alert.customer ? [alert.customer._id] : [],
     linkedTransactions: alert.transaction ? [alert.transaction._id] : [],
     riskScore: alert.riskScore || null,

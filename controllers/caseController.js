@@ -97,6 +97,12 @@ const populateCase = (query) =>
       'uid caseType riskScore riskLabel status createdAt ruleId ruleName explanation alertOrigin'
     )
     .populate({
+      // Primary customer (POI) — same shape as linkedCustomers below.
+      path: 'customer',
+      select: 'uid user personalKyc relations kycStatus isPep sanction country',
+      populate: { path: 'user', select: 'name email photoUrl avatar' },
+    })
+    .populate({
       // kycStatus/isPep/sanction/country back the customer-profile screening
       // badges. Encrypted fields (name, phone) are deliberately excluded — a
       // lean() query bypasses decryptForRole and would return ciphertext.
@@ -322,6 +328,10 @@ exports.createCase = asyncHandler(async (req, res, next) => {
     caseType: derivedCaseType,
     tags: tags || [],
     linkedAlerts: alertIds || [],
+    // Primary customer (POI) is derived, not client-supplied: the first
+    // alert's customer when the case comes from alerts, else the first
+    // linked customer.
+    customer: alertCustomers[0] || mergedCustomers[0] || null,
     linkedCustomers: mergedCustomers,
     linkedTransactions: mergedTransactions,
     riskScore,
