@@ -16,7 +16,7 @@
 //   caseType           — exact: Fraud | AML | Compliance | TF
 //   riskLabel          — exact: Low | Medium | High | Critical | Info
 //   status             — exact: draft | active | paused | archived
-//   appliesTo          — exact: transaction | customer | account
+//   appliesTo          — exact: transaction | customer
 //   mainDomain         — exact match
 //   ruleDomainSubdomain— exact match
 //   riskScoreMin       — number (inclusive)

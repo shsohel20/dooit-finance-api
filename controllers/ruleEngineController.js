@@ -36,7 +36,10 @@ const CSV_HEADERS = {
 
 const VALID_CASE_TYPES = new Set(["Fraud", "AML", "Compliance", "TF"]);
 const VALID_RISK_LABELS = new Set(["Low", "Medium", "High", "Critical", "Info"]);
-const VALID_APPLIES_TO = new Set(["transaction", "customer", "account"]);
+const VALID_APPLIES_TO = new Set(["transaction", "customer"]);
+const VALID_ENGINES = new Set(["predicate", "aggregate", "screening", "manual"]);
+const VALID_GROUP_BY = new Set(["customer", "sender", "beneficiary"]);
+const VALID_DEDUPE_BY = new Set(["rule_customer_txn", "rule_customer_day"]);
 const VALID_STATUSES = new Set(["draft", "active", "paused", "archived"]);
 const VALID_WINDOW_UNITS = new Set(["minute", "hour", "day"]);
 const VALID_ACTION_TYPES = new Set(["create_alert", "assign", "notify", "escalate", "block", "create_report"]);
@@ -114,8 +117,12 @@ const WRITABLE_FIELDS = [
     "riskScore",
     "riskLabel",
     "appliesTo",
+    "engine",
     "category",
     "status",
+    "dedupeBy",
+    "cooldownMinutes",
+    "slaHours",
     "effectiveFrom",
     "effectiveTo",
     "logic",
@@ -454,6 +461,7 @@ exports.exportRulesCsv = asyncHandler(async (req, res, next) => {
         { label: "Risk Score", value: "riskScore" },
         { label: "Risk Label", value: "riskLabel" },
         { label: "Applies To", value: "appliesTo" },
+        { label: "Engine", value: "engine" },
         { label: "Category", value: "category" },
         { label: "Status", value: "status" },
         { label: "Version", value: "version" },
@@ -648,6 +656,10 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
                         aggJson.window.unit = 'minute';
                         fills.push('aggregation.window.unit defaulted to "minute"');
                     }
+                    if (aggJson.groupBy && !VALID_GROUP_BY.has(aggJson.groupBy)) {
+                        aggJson.groupBy = 'customer';
+                        fills.push('aggregation.groupBy defaulted to "customer"');
+                    }
                     aggregation = aggJson;
                 }
 
@@ -660,6 +672,21 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
                     actions = actJson
                         .filter((a) => a && VALID_ACTION_TYPES.has(a.type))
                         .map((a) => ({ type: a.type, params: a.params || {} }));
+                }
+                // A rule with no actions can never produce anything — fall back
+                // to the schema default so imported rules fire alerts.
+                if (!actions.length) {
+                    actions = [{ type: "create_alert", params: {} }];
+                    fills.push('actions defaulted to [create_alert]');
+                }
+
+                // engine: how the rule evaluates (schema default 'predicate';
+                // 'aggregate' is implied whenever an aggregation window is given)
+                const rawEngine = (row["Engine"] || "").trim().toLowerCase();
+                let engine = VALID_ENGINES.has(rawEngine) ? rawEngine : "predicate";
+                if (engine === "predicate" && aggregation && (aggregation.count || aggregation.sumThreshold)) {
+                    engine = "aggregate";
+                    fills.push('engine set to "aggregate" (aggregation present)');
                 }
 
                 // ── 9. Collect auto-fill report ───────────────────────────
@@ -676,6 +703,7 @@ exports.importRulesCsv = asyncHandler(async (req, res, next) => {
                     riskScore,
                     riskLabel,
                     appliesTo,
+                    engine,
                     status,
                     effectiveFrom,
                     effectiveTo,
@@ -864,7 +892,8 @@ exports.backtestRule = asyncHandler(async (req, res, next) => {
         if (!day) { day = { evaluated: 0, matched: 0 }; perDay.set(dayKey, day); }
         day.evaluated++;
 
-        const result = ruleEvaluation.evaluateTree(executable.tree, txn);
+        // Customer rules resolve their fields on the customer, not the txn
+        const result = ruleEvaluation.evaluateTree(executable.tree, txn, { subject: rule.appliesTo });
         for (const f of result.fieldMisses) {
             fieldMissCounts.set(f, (fieldMissCounts.get(f) || 0) + 1);
         }

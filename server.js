@@ -102,6 +102,12 @@ startCraReviewNotificationJob();
 const { startBillingCycleJob } = require("./services/billing/billingCycleJob");
 startBillingCycleJob();
 
+// TBML screening — chases the runs the OSINT engine is still working on and
+// caches each finished report, so a submission never blocks a request and a
+// settled report is never fetched twice.
+const { startTbmlPollJob } = require("./services/tbmlScreening");
+startTbmlPollJob();
+
 //Handle unhandled promise rejection
 process.on("unhandledRejection", (err, promise) => {
   console.log(`Error: ${err.message}`.red);

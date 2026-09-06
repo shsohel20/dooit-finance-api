@@ -14,6 +14,11 @@ const {
   reviewAlert,
   dismissAlert,
   escalateAlertToCase,
+  addAlertNote,
+  getAlertAudit,
+  getRelatedTransactions,
+  getAlertReports,
+  getAttachableCases,
 } = require("../controllers/alertController");
 
 const Alert = require("../models/Alert");
@@ -62,6 +67,16 @@ router
   .route("/:id/assign-analyst")
   .put(authorizePermission("ALERT.EDIT"), assignAnalyst);
 
+// ── Details-page companions ──────────────────────────────────────────────────
+// Analyst notes live on alert.activity (type 'note'); this is the only writer.
+router.route("/:id/notes").post(authorizePermission("ALERT.EDIT"), addAlertNote);
+// Alert-scoped audit trail (AuditLog.alert) — readable with the alert itself.
+router.route("/:id/audit").get(authorizePermission("ALERT.GET"), getAlertAudit);
+// Other transactions of the alert's customer, for the Transaction & Parties tab.
+router.route("/:id/related-transactions").get(authorizePermission("ALERT.GET"), getRelatedTransactions);
+// Compliance reports raised from this alert (works before and after escalation).
+router.route("/:id/reports").get(authorizePermission("ALERT.GET"), getAlertReports);
+
 // ── AML alert lifecycle ───────────────────────────────────────────────────────
 // Analyst picks up an alert for review
 router.route("/:id/review").put(authorizePermission("ALERT.EDIT"), reviewAlert);
@@ -69,7 +84,13 @@ router.route("/:id/review").put(authorizePermission("ALERT.EDIT"), reviewAlert);
 // Dismiss an alert (dismissed | false_positive)
 router.route("/:id/dismiss").put(authorizePermission("ALERT.EDIT"), dismissAlert);
 
-// Promote an alert to a full investigation case
+// Open cases of the alert's customer it could be attached to (escalate dialog)
+router
+  .route("/:id/attachable-cases")
+  .get(authorizePermission("ALERT.GET"), getAttachableCases);
+
+// Promote an alert to an investigation case — body { caseId? | attach: 'auto' }
+// attaches to an existing case of the same customer, otherwise a case is created.
 router
   .route("/:id/escalate")
   .post(authorizePermission("CASE.ADD", "ALERT.EDIT"), escalateAlertToCase);

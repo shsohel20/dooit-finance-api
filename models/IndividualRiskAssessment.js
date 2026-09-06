@@ -37,8 +37,8 @@ const IndividualRiskAssessmentSchema = new Schema(
       adverseMedia: {},
     },
 
-    riskScore: Number,
-    riskLabel: String,
+    riskScore: { type: Number, min: 0, max: 100 },
+    riskLabel: { type: String, enum: [...require("./schemas/riskShared").RISK_LABELS, null] },
 
     // reporting entity type the product catalogue was scoped to
     entityType: { type: String, default: "" },

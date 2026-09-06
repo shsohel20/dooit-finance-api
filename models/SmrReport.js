@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { draftFields } = require("./schemas/reportShared");
 
 const { Schema } = mongoose;
 
@@ -211,11 +212,26 @@ const SMRSpec = new Schema(
       },
       suspicionReasons: [String],
       otherReasons: [String],
+      // Screening + pattern facts behind the suspicion, computed by
+      // services/caseAnalysis — never taken from the AI (docs/74 §4.2).
+      suspiciousIndicators: {
+        pep: { type: Boolean, default: false },
+        sanctions: { type: Boolean, default: false },
+        adverseMedia: { type: Boolean, default: false },
+        structuringCandidates: { type: Number, default: 0 },
+        relatedPartyTransactions: { type: Number, default: 0 },
+        highRiskJurisdictions: { type: [String], default: [] },
+        rulesTriggered: { type: [String], default: [] },
+      },
     },
 
-    // PART B
+    // PART B — the narrative the AI drafts and the analyst owns
     partB: {
       groundsForSuspicion: String,
+      // The same grounds as discrete points, for the filing's bullet list.
+      groundsList: { type: [String], default: [] },
+      // Working notes; promoting these to a CaseNote stays an analyst action.
+      investigationNotes: { type: String, default: "" },
     },
 
     // PART C
@@ -252,6 +268,9 @@ const SMRSpec = new Schema(
     partH: {
       reportingEntity: ReportingEntitySchema,
     },
+
+    // ── Draft provenance (alerts snapshot, aiMeta, editedFields) ──
+    ...draftFields(),
 
     // metadata + audit
     metadata: {

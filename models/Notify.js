@@ -3,6 +3,10 @@ const mongoose = require("mongoose");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 
 const { Schema } = mongoose;
+
+// Background-job lifecycle (doc 72 §6.1). The 201 is returned before the
+// job runs, so this is the only way a caller learns what happened.
+const NOTIFY_STATUSES = ["pending", "processing", "processed", "failed", "no_match"];
 const DocumentMetaSchema = new Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -49,6 +53,13 @@ const NotifySchema = new Schema(
 
     isActive: { type: Boolean, default: false, index: true },
 
+    // ── Processing outcome ───────────────────────────────────────────────
+    status: { type: String, enum: NOTIFY_STATUSES, default: "pending", index: true },
+    processedAt: { type: Date, default: null },
+    error: { type: String, default: null },                          // last failure message
+    alerts: [{ type: Schema.Types.ObjectId, ref: "Alert" }],         // what this notify produced
+    evaluation: { type: Schema.Types.Mixed, default: null },         // { firedRules, evaluatedRuleCount, misses }
+
     // generic metadata - may include transactionId, smrId, ecddId, customerId etc.
     metadata: { type: Schema.Types.Mixed, default: {} },
 
@@ -84,3 +95,4 @@ NotifySchema.index({
 });
 
 module.exports = mongoose.model("Notify", NotifySchema);
+module.exports.NOTIFY_STATUSES = NOTIFY_STATUSES;

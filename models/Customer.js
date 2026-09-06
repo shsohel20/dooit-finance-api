@@ -5,6 +5,7 @@ const {
   buildRiskAssessmentPerRelation,
 } = require("../utils/riskAssessment");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { RiskSignalSchema, EvaluationStateSchema } = require("./schemas/riskShared");
 const { roleEncryptionPlugin } = require("../utils/roleEncryptionPlugin");
 const { type } = require("os");
 
@@ -262,7 +263,14 @@ const CustomerSchema = new Schema(
     checks:{
     type: [Schema.Types.Mixed],
      default: []
-    }
+    },
+
+    // Typed facts with no dedicated column, readable by customer rules as
+    // signals.<key> (e.g. device_fingerprint_banned, sender_risk_tier).
+    signals: { type: [RiskSignalSchema], default: [] },
+
+    // What the rule engine last did to this customer (appliesTo:'customer' rules)
+    evaluation: { type: EvaluationStateSchema, default: () => ({}) },
   },
   {
     timestamps: true,

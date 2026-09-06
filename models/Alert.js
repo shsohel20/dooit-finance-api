@@ -4,6 +4,9 @@ const mongoosePaginate = require('mongoose-paginate-v2');
 // const AutoIncrement = require('mongoose-sequence')(mongoose);
 
 const { Schema } = mongoose;
+const {
+  RISK_LABELS, CASE_TYPES, PRIORITIES, normalizeCaseType, slaFields, addOverdueVirtual,
+} = require('./schemas/riskShared');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Sub-schemas
@@ -69,22 +72,26 @@ const AlertSchema = new Schema(
     // ── Classification ───────────────────────────────────────────────────
     // Inherited from the rule that fired, but stored on the alert so it
     // is queryable even after the rule is updated or deleted.
-    caseType: { type: String, trim: true, default: null, index: true },  // Fraud | AML | TF | Compliance
+    // Normalised on write: "aml" -> "AML", unknown ("Regular", "Default") -> "AML",
+    // so the enum never rejects an AI/legacy value and downstream filters can
+    // rely on the four values.
+    caseType: { type: String, enum: CASE_TYPES, set: normalizeCaseType, default: 'AML', index: true },
 
     // ── Risk ─────────────────────────────────────────────────────────────
     riskScore: { type: Number, min: 0, max: 100, default: 0 },
     riskLabel: {
       type: String,
-      enum: ['Low', 'Medium', 'High', 'Critical', 'Info'],
+      enum: RISK_LABELS,
       default: 'Low',
     },
 
     // ── Priority ─────────────────────────────────────────────────────────
     // Separate from riskLabel: an analyst can raise/lower operational
     // priority without changing the risk classification.
+    // 'critical' added so mapRiskToPriority(Critical) and Case.priority agree.
     priority: {
       type: String,
-      enum: ['low', 'medium', 'high'],
+      enum: PRIORITIES,
       default: 'medium',
       index: true,
     },
@@ -123,13 +130,11 @@ const AlertSchema = new Schema(
     // ── Case linkage ─────────────────────────────────────────────────────
     linkedCase: { type: Schema.Types.ObjectId, ref: 'Case', default: null, index: true },
 
-    // ── SLA ──────────────────────────────────────────────────────────────
-    slaDeadline: { type: Date, default: null },
-    slaStatus: {
-      type: String,
-      enum: ['on_time', 'at_risk', 'breached'],
-      default: 'on_time',
-    },
+    // Provenance: the report-notify request that produced this alert (doc 72 §6.2)
+    notify: { type: Schema.Types.ObjectId, ref: 'Notify', default: null, index: true },
+
+    // ── SLA (shared shape with Case) ─────────────────────────────────────
+    ...slaFields(),
 
     // ── Deduplication ────────────────────────────────────────────────────
     // Set by the rule engine: e.g. hash(ruleId + customerId + txnId).
@@ -181,13 +186,7 @@ AlertSchema.index({ 'riskScore': -1 });
 // Virtuals
 // ─────────────────────────────────────────────────────────────────────────────
 
-AlertSchema.virtual('isOverdue').get(function () {
-  if (!this.slaDeadline) return false;
-  return (
-    !['dismissed', 'false_positive', 'escalated_to_case'].includes(this.status) &&
-    new Date() > this.slaDeadline
-  );
-});
+addOverdueVirtual(AlertSchema, ['dismissed', 'false_positive', 'escalated_to_case']);
 
 
 

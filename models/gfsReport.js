@@ -3,10 +3,18 @@ const mongoose = require("mongoose");
 const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { riskFields } = require("./schemas/riskShared");
+const { draftFields } = require("./schemas/reportShared");
 
 const { Schema } = mongoose;
 
-/* Small sub-schemas */
+/* Small sub-schemas.
+ *
+ * The original hand-entry fields are kept as they were so existing records
+ * still read; the additions (docs/74 §7.3) are what services/caseAnalysis can
+ * fill automatically — real amounts, currencies, countries and risk flags
+ * rather than a name and a number. */
+
 const TransactionSchema = new Schema(
   {
     id: { type: String }, // optional client-side id
@@ -19,20 +27,41 @@ const TransactionSchema = new Schema(
     toAccount: { type: String },
     reference: { type: String },
     cryptoAddress: { type: String },
+
+    // ── from the case analysis ──
+    transaction: { type: Schema.Types.ObjectId, ref: "Transaction" },
+    uid: { type: String },
+    subtype: { type: String },
+    currency: { type: String },
+    amountAUD: { type: Number, default: null }, // null when no conversion exists
+    status: { type: String },
+    channel: { type: String },
+    direction: { type: String }, // in | out | internal | third_party
+    counterparty: { type: String },
+    counterpartyCountry: { type: String },
+    purpose: { type: String },
+    riskFlags: { type: [String], default: [] },
+    relatedParty: { type: Boolean, default: false },
   },
   { _id: false }
 );
 
+// Other financial institutions seen on the counterparty side.
 const OFISchema = new Schema(
   {
     id: { type: String },
     name: { type: String },
     reportDate: { type: Date },
     scamType: { type: String },
+
+    country: { type: String },
+    bic: { type: String },
+    transactionCount: { type: Number, default: 0 },
   },
   { _id: false }
 );
 
+// Persons of interest: counterparties, and our own customers linked to the case.
 const POISchema = new Schema(
   {
     id: { type: String },
@@ -40,6 +69,13 @@ const POISchema = new Schema(
     bank: { type: String },
     account: { type: String },
     reference: { type: String },
+
+    customer: { type: Schema.Types.ObjectId, ref: "Customer", default: null },
+    relationship: { type: String }, // Subject | Linked customer | Counterparty
+    country: { type: String },
+    institution: { type: String },
+    transactionCount: { type: Number, default: 0 },
+    totalAmountAUD: { type: Number, default: 0 },
   },
   { _id: false }
 );
@@ -50,6 +86,25 @@ const IPSchema = new Schema(
     address: { type: String },
     country: { type: String },
     date: { type: Date },
+
+    count: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
+// Crypto legs. Was `[String]` — see seeds/migrate-gfs-crypto-addresses.js.
+const CryptoAddressSchema = new Schema(
+  {
+    address: { type: String },
+    txHash: { type: String },
+    network: { type: String },
+    cluster: { type: String },
+    hops: { type: Number, default: null },
+    chainalysisScore: { type: Number, default: null },
+    direction: { type: String },
+    amount: { type: Number, default: null },
+    currency: { type: String },
+    amountAUD: { type: Number, default: null },
   },
   { _id: false }
 );
@@ -99,8 +154,21 @@ const GFSSchema = new Schema(
     customerAge: { type: Number, default: 0 },
     accountOpeningDate: { type: Date },
 
+    // customer profile facts (from Customer / KYC)
+    customerType: { type: String, default: "" },
+    onboardingChannel: { type: String, default: "" },
+    occupation: { type: String, default: "" },
+    kycStatus: { type: String, default: "" },
+    amlRiskLabels: { type: [String], default: [] },
+    pepFlag: { type: Boolean, default: false },
+    sanctionsFlag: { type: Boolean, default: false },
+    adverseMediaFlag: { type: Boolean, default: false },
+    expectedTradingVolume: { type: String, default: "" },
+    residentialAddress: { type: String, default: "" },
+
     // source / purpose
     sourceOfFunds: { type: String, default: "" },
+    sourceOfWealth: { type: String, default: "" },
     accountOpeningPurpose: { type: String, default: "" },
 
     // review period & totals
@@ -110,12 +178,43 @@ const GFSSchema = new Schema(
     totalWithdrawn: { type: Number, default: 0 },
     totalSuspicionAmount: { type: Number, default: 0 },
 
+    // derived activity shape (services/caseAnalysis)
+    netFlowAUD: { type: Number, default: 0 },
+    passThroughRatio: { type: Number, default: null }, // null when there is no inflow
+    peakDailyVolumeAUD: { type: Number, default: 0 },
+    activeDays: { type: Number, default: 0 },
+    transactionCount: { type: Number, default: 0 },
+    structuringCandidates: { type: Number, default: 0 },
+    unconvertedCount: { type: Number, default: 0 }, // legs with no AUD conversion
+    jurisdictionsInvolved: { type: [String], default: [] },
+    riskFlags: { type: [String], default: [] },
+
     // collections
     transactions: { type: [TransactionSchema], default: [] },
     ofis: { type: [OFISchema], default: [] }, // other financial institutions / reports
     pois: { type: [POISchema], default: [] }, // persons of interest
+    // The plain address list a filing prints. Deliberately still [String]:
+    // retyping it to an object array makes Mongoose cast every stored address
+    // into an object keyed by character index on read — silently destroying it
+    // in any environment where a migration had not run. The forensic detail
+    // lives alongside it in `cryptoLegs`.
     cryptoAddresses: { type: [String], default: [] },
+    cryptoLegs: { type: [CryptoAddressSchema], default: [] },
     ipAddresses: { type: [IPSchema], default: [] },
+
+    // links to other filings
+    linkedToSMR: { type: Boolean, default: false },
+
+    // ── Narrative (AI-written; docs/74 §4.3) ──
+    suspicionSummary: { type: String, default: "" },
+    behavioralChange: { type: Boolean, default: false }, // derived, not AI
+    behavioralChangeDescription: { type: String, default: "" },
+
+    // ── Risk, as our Case derived it ──
+    ...riskFields({ nullable: true }),
+
+    // ── Draft provenance ──
+    ...draftFields(),
 
     // misc
     customerCountry: { type: String, default: "Australia" },

@@ -3,11 +3,8 @@ const mongoose = require("mongoose");
 const asyncHandler = require("../middleware/async");
 const ErrorResponse = require("../utils/errorResponse");
 const Notify = require("../models/Notify");
-const { default: axios } = require("axios");
-const Alert = require("../models/Alert");
 const Transaction = require("../models/Transaction");
-const reportAPI_risk = process.env.REPORT_AI_API_RISK;
-const reportAPI_eccd = process.env.REPORT_AI_API_ECCD;
+const ruleAlerting = require("../services/ruleAlerting");
 
 function isValidId(id) {
   return mongoose.Types.ObjectId.isValid(id);
@@ -107,96 +104,26 @@ exports.createNotify = asyncHandler(async (req, res, next) => {
   await notify.save();
 
   
-  void (async () => {
-    try {
-      const notifyPopulateObject = await Notify.findById(notify._id).populate('createdBy updatedBy resourceId');
-      const reportApiEndPoint = `${reportAPI_risk}/risk/alert`; //TODO
-      const doc = Array.isArray(notifyPopulateObject.documents) ? notifyPopulateObject.documents[0] ?? null : null
-      let payload = {
-        customer: {},
-        transaction: {},
-        notes: body.notes ?? "",
-        docs: doc?.url ?? '',
-      };
-
-      // console.log("notifyPopulateObject", notifyPopulateObject)
-      if (notifyPopulateObject.resourceType === "Transaction") payload.transaction = notifyPopulateObject.resourceId;
-      else payload.customer = notifyPopulateObject.resourceId;
-      // console.log("payload", payload)
-
-      // console.log(payload)
-
-      const response = await axios.post(reportApiEndPoint, payload, { timeout: 10000 });
-      const data = typeof response.data === "string" ? JSON.parse(response.data) : response.data || {};
-      const { caseType, riskScore, riskLabel } = data;
-
-      // console.log("data", data)
-
-      const transaction = notifyPopulateObject.resourceType === "Transaction" ? notifyPopulateObject?.resourceId?._id : null;
-
-      let transactionRadom = null
-
-      if (!transaction) {
-        const customerId = payload.customer?._id
-
-        const count = await Transaction.countDocuments({ customer: customerId });
-
-        const random = Math.floor(Math.random() * count);
-
-        transactionRadom = await Transaction.findOne({ customer: customerId })
-          .skip(random)
-          .lean();
-      }
-      const alertPayload = {
-        client,
-        branch,
-        customer: notifyPopulateObject?.resourceId?.customer ?? notifyPopulateObject?.resourceId?._id ?? null,
-        analyst: req.user?.id || null,
-        transaction: transaction || transactionRadom,
-        caseType: caseType || "Fraud",
-        riskScore: riskScore || 0,
-        riskLabel: riskLabel || "Unknown",
-        activity: [{ title: "Initial Review", details: "Reviewed the transaction for possible fraud" }],
-        activityNote: [{ note: "Customer contacted for verification" }],
-        status: "new",
-        createdBy: req.user?.id || null,
-        settings: { priority: "urgent" },
-        metadata: { ...payload, source: "system" },
-      };
-
-      const alert = await Alert.create(alertPayload);
-      const alertPopulate = await Alert.findById(alert._id)
-        .populate("customer")
-        .populate("analyst")
-        .populate("transaction").lean();
-      const reportApiEndPointForEcdd = `${reportAPI_eccd}/ecdd_report_v2`;
-
-
-
-
-
-      const ecddPayload = {
-        alert: {
-          ...alertPopulate,
-          transaction: transactionRadom
-        }
-      }
-
-      // console.log("ecddPayload", ecddPayload)
-      const eccdResponse = await axios.post(reportApiEndPointForEcdd, ecddPayload, { timeout: 100000 });
-      const dataeccdResponse = typeof eccdResponse.data === "string" ? JSON.parse(eccdResponse.data) : eccdResponse.data || {};
-
-      // console.log("dataeccdResponse", dataeccdResponse)
-    } catch (err) {
-      if (err.code === 'ECONNREFUSED') {
-        console.error('Risk API is unreachable:');
-      } else if (err.response) {
-        console.error('Risk API error response:', err.response.data);
-      } else {
-        console.error('Unexpected background error:', err.message);
-      }
-    }
-  })();
+  // ── Rule engine (doc 72 §5.2 / E1) ───────────────────────────────────
+  // Evaluate the reported resource against the active rule catalogue and
+  // create one alert per fired rule, with rule snapshot, dedup key, SLA and
+  // telemetry. Runs after the 201 so the UI stays responsive; the outcome is
+  // recorded on the Notify (status / alerts / evaluation) for the caller.
+  //
+  // The external AI services (`/risk/alert`, `/ecdd_report_v2`) are no
+  // longer called from this flow: the verdict comes from the rule engine, and
+  // ECDD belongs on the Case after escalation (doc 72 K5).
+  void ruleAlerting.processNotify(notify, {
+    analyst: req.user?.id || null,
+    createdBy: req.user?.id || null,
+    // The reviewer is logged in, so their tenant is the answer — it outranks
+    // the reported resource's own. An admin has no tenant of their own, and the
+    // engine then resolves it from the transaction or the customer's relations
+    // rather than raising a tenant-less alert (utils/resolveTenant).
+    user: req.user,
+    client,
+    branch,
+  });
   res.status(201).json({
     succeed: true,
     data: notify,

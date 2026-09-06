@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { draftFields } = require("./schemas/reportShared");
 
 const { Schema } = mongoose;
 
@@ -63,6 +64,22 @@ const RFISchema = new Schema(
       ],
       default: "Draft",
     },
+
+    // ── Draft (AI-written request text; the analyst edits before sending) ──
+    // Why each item is being asked for — shown to the analyst, not to the customer.
+    itemsRationale: { type: String, default: "" },
+    draftSubject: { type: String, default: "" },
+    draftBody: { type: String, default: "" },
+
+    // Tipping-off control (AML/CTF Act s123): sending an RFI can tip off a
+    // customer who is the subject of an SMR. `deliveryBlocked` is set by OUR
+    // rule — an SMR in review or approved on the same case — not by the AI.
+    tippingOffWarning: { type: Boolean, default: false },
+    deliveryBlocked: { type: Boolean, default: false },
+    deliveryBlockReason: { type: String, default: "" },
+
+    // ── Draft provenance ──
+    ...draftFields(),
 
     settings: { type: Schema.Types.Mixed, default: {} },
     metadata: { type: Schema.Types.Mixed, default: {} },

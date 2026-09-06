@@ -11,7 +11,10 @@
     "test": "jest --testPathPatterns=tests/training --runInBand --forceExit",
     "test:watch": "jest --testPathPatterns=tests/training --runInBand --watch",
     "test:staff": "jest --testPathPatterns=tests/staff --runInBand --forceExit",
-    "test:billing": "jest --testPathPatterns=tests/billing --runInBand --forceExit"
+    "test:billing": "jest --testPathPatterns=tests/billing --runInBand --forceExit",
+    "test:rule-engine": "jest --testPathPatterns=tests/rule-engine --runInBand --forceExit",
+    "test:alerts": "jest --testPathPatterns=tests/alerts --runInBand --forceExit",
+    "test:cases": "jest --testPathPatterns=tests/cases --runInBand --forceExit"
   },
   "jest": {
     "testEnvironment": "node",

@@ -111,10 +111,37 @@ const splitAgainstOptions = (options, values = []) => {
   return { selected, extras };
 };
 
+/**
+ * Maps the monitoring engine's internal risk flags onto the Part A
+ * suspicion-reason labels above.
+ *
+ * The flags are engine vocabulary ('rapid-movement'); Part A is a fixed
+ * checklist, so an unmapped flag renders as an unticked box and the reason
+ * effectively disappears from the lodged report. Anything without a mapping
+ * falls back to the closest general option rather than being written through raw.
+ */
+const SMR_REASON_BY_FLAG = {
+  structuring: 'Avoiding reporting obligations',
+  'threshold-avoidance': 'Avoiding reporting obligations',
+  'high-value': 'Unusually large transfer',
+  'cash-intensive': 'Unusual use/exchange of cash',
+  'high-risk-jurisdiction': 'Country/jurisdiction risk',
+  'rapid-movement': 'Unusual account activity',
+};
+
+/** Risk flags -> de-duplicated Part A reasons (never empty). */
+const suspicionReasonsForFlags = (flags = []) => {
+  const mapped = flags.map((f) => SMR_REASON_BY_FLAG[f]).filter(Boolean);
+  const unique = Array.from(new Set(mapped));
+  return unique.length ? unique : ['Inconsistent with customer profile'];
+};
+
 module.exports = {
   DESIGNATED_SERVICES,
   SUSPICION_REASONS,
   OFFENCE_TYPES,
   SERVICE_STATUSES,
+  SMR_REASON_BY_FLAG,
+  suspicionReasonsForFlags,
   splitAgainstOptions,
 };

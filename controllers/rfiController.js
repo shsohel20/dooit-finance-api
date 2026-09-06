@@ -143,7 +143,10 @@ exports.getRFI = asyncHandler(async (req, res, next) => {
   const rfi = await RFI.findById(req.params.id)
     .populate("client")
     .populate("customer")
-    .populate("sentBy");
+    .populate("sentBy")
+    // Same context the list carries: the Case hub and the originating alert
+    .populate({ path: "case", select: "uid title status caseType riskLabel priority linkedTransactions", populate: { path: "linkedTransactions", select: "uid amount currency type status timestamp" } })
+    .populate({ path: "alert", select: "uid status caseType riskScore riskLabel priority transaction linkedCase", populate: { path: "transaction", select: "uid amount currency type status timestamp" } });
   if (!rfi)
     return next(
       new ErrorResponse(`RFI not found with id ${req.params.id}`, 404)
@@ -238,6 +241,42 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
   if (!rfi)
     return next(new ErrorResponse(`RFI not found with id ${rfiId}`, 404));
 
+  // ── Tipping-off control (AML/CTF Act s123) ──────────────────────────────
+  // Asking the customer for information while a suspicious matter report about
+  // them is being prepared can tip them off, which is an offence. A live SMR on
+  // the same case blocks the send outright — the analyst must resolve the SMR
+  // first. docs/74 C9.
+  const caseId = rfi.case?._id || rfi.case;
+  if (caseId) {
+    const SMR = require("../models/SmrReport");
+    const liveSmr = await SMR.findOne({
+      caseId,
+      status: { $in: ["review", "approved"] },
+    })
+      .select("uid status")
+      .lean();
+
+    if (liveSmr) {
+      // Record the block on the RFI so the UI can explain it without asking again.
+      await RFI.updateOne(
+        { _id: rfi._id },
+        {
+          $set: {
+            tippingOffWarning: true,
+            deliveryBlocked: true,
+            deliveryBlockReason: `SMR ${liveSmr.uid} is ${liveSmr.status} on this case.`,
+          },
+        }
+      );
+      return next(
+        new ErrorResponse(
+          `Cannot send: SMR ${liveSmr.uid} is ${liveSmr.status} on this case. Sending an information request now risks tipping off the subject.`,
+          409
+        )
+      );
+    }
+  }
+
   const fromStatus = rfi.status;
 
   // compute deadlines if missing
@@ -263,10 +302,34 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
 
   const clientName = rfi.client?.name || "Unknown";
   const customerName = rfi.customer?.user?.name || "Unknown";
-  const email = rfi.customer?.user?.email;
   const caseNumber = rfi.metadata?.caseNumber || rfi.case?.uid || "Unknown";
   const primaryContactName = rfi.client?.contacts?.name || "Unknown";
-  const replyToEmail = rfi.client?.contacts?.email || "Unknown";
+
+  // ── Who the letter goes to ───────────────────────────────────────────────
+  // An information request is addressed to the CUSTOMER; the reply-to is the
+  // reporting entity's compliance mailbox. Both were wrong before: the code
+  // read the customer's address and then ignored it, using the reply-to as the
+  // recipient and sending every request to one hardcoded personal inbox — so
+  // no RFI had ever reached a customer (docs/74 C19).
+  const customerEmail = rfi.customer?.user?.email || null;
+  const replyTo =
+    rfi.replyToEmail || rfi.client?.contacts?.email || rfi.client?.email || process.env.FROM_EMAIL || null;
+
+  // Safety valve for non-production: with RFI_REDIRECT_TO set, every request is
+  // delivered to that mailbox instead of the customer, so a staging or demo
+  // environment cannot email real people. The intended recipient is still
+  // resolved, recorded on the RFI and shown in the audit note.
+  const redirectTo = (process.env.RFI_REDIRECT_TO || "").trim() || null;
+  const to = redirectTo || customerEmail;
+
+  if (!to) {
+    return next(
+      new ErrorResponse(
+        `No email address on file for ${customerName} — an information request cannot be sent.`,
+        400
+      )
+    );
+  }
 
   const context = {
     clientName,
@@ -275,7 +338,7 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
     uid: rfi.uid,
     primaryContactName:
       rfi.primaryContactName || primaryContactName || "Unknown",
-    replyToEmail: rfi.replyToEmail || replyToEmail,
+    replyToEmail: replyTo,
     requestedItems: rfi.requestedItems.map((it) =>
       typeof it === "string" ? it : it.text
     ),
@@ -286,25 +349,22 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
 
   const { subject, body } = fillTemplate(type, context);
 
-  // send email (text body)
-  const to = context.replyToEmail;
-  if (!to)
-    return next(
-      new ErrorResponse("Reply-To/recipient email not configured for RFI", 400)
-    );
-
   try {
     await sendEmail({
-      email: "shsohel.tc@gmail.com",
+      email: to,
       subject,
       message: body,
-      replyTo: context.replyToEmail,
+      replyTo,
     });
 
     rfi.sentAt = new Date();
     rfi.sentBy = req.user?.id;
     rfi.activityNote.push({
-      note: `RFI ${type} sent to ${to} by ${req.user?.id || "system"}`,
+      // Records the real recipient, and says so plainly when a redirect was in
+      // force — an audit must never read as though the customer was written to.
+      note:
+        `RFI ${type} sent to ${to} by ${req.user?.id || "system"}` +
+        (redirectTo ? ` (redirected from ${customerEmail || "no customer address"} by RFI_REDIRECT_TO)` : ""),
       by: req.user?.id,
     });
 
@@ -336,7 +396,7 @@ exports.sendRFI = asyncHandler(async (req, res, next) => {
 
     res.status(200).json({
       succeed: true,
-      message: `RFI ${type} email sent to ${email}`,
+      message: `RFI ${type} email sent to ${to}`,
       data: rfi,
     });
   } catch (err) {

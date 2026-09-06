@@ -23,6 +23,7 @@ const dummyImport = require("./dummyImport");
 const ecddReport = require("./ecdd-report");
 const smrReport = require("./smr-report");
 const gfsReport = require("./gfs-report");
+const dismissalReport = require("./dismissal-report");
 const iftiReport = require("./ifti-report");
 const ttrReport = require("./ttr-report");
 const alert = require("./alert");
@@ -40,6 +41,7 @@ const privacy = require("./privacy");
 const rolePermission = require("./rolePermission");
 const trainingModule = require("./trainingModule");
 const cases = require("./cases");
+const tbml = require("./tbml");
 const devices = require("./devices");
 const audit = require("./audit");
 const assignmentRoutes = require("./trainingAssignment");
@@ -127,6 +129,7 @@ router.use("/ecdd-report", ecddReport);
 router.use("/alert", alert);
 router.use("/rfi", rfi);
 router.use("/gfs-report", gfsReport);
+router.use("/dismissal-report", dismissalReport);
 router.use("/ifti-report", iftiReport);
 router.use("/ttr-report", ttrReport);
 router.use("/report-notify", notify);
@@ -143,6 +146,8 @@ router.use("/role-permissions", rolePermission);
 
 // Case Management
 router.use("/cases", cases);
+// TBML screening (OSINT Engine), cached and tenant-scoped here
+router.use("/tbml", tbml);
 router.use("/devices", devices);
 router.use("/audit", audit);
 

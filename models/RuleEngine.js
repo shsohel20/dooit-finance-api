@@ -2,6 +2,7 @@
 const mongoose = require('mongoose');
 
 const { Schema } = mongoose;
+const { RISK_LABELS, CASE_TYPES } = require('./schemas/riskShared');
 
 /**
  * Structured condition leaf
@@ -9,9 +10,23 @@ const { Schema } = mongoose;
  * { field: "country", operator: "in", values: ["IR","KP"] }
  * { field: "amount", operator: "between", min: 1000, max: 5000 }
  */
+// A leaf field is a schema path ("amount", "customer.isPep") or an analyst
+// label still awaiting mapping ("Account open days"). It must never contain
+// operator / grouping characters — those mean the DSL parser split a sentence
+// in the wrong place (e.g. field = "New account (").
+const LEAF_FIELD_PATTERN = /^[^()<>=!&|]+$/;
+
 const ConditionLeafSchema = new Schema(
     {
-        field: { type: String, trim: true, required: true },
+        field: {
+            type: String,
+            trim: true,
+            required: true,
+            validate: {
+                validator: (v) => LEAF_FIELD_PATTERN.test(v),
+                message: 'Condition field must not contain operator characters ( ) < > = ! & |',
+            },
+        },
         operator: {
             type: String,
             enum: [
@@ -101,7 +116,9 @@ const RuleEngineSchema = new Schema(
         // ─────────────── Classification ──────────────────────────────────────
         caseType: {
             type: String,
-            // enum: ['Fraud', 'AML', 'Compliance', 'TF'],
+            // Re-enabled 21 Aug 2026 — the whole corpus already uses only these
+            // four values; the controller's sanitizeCaseType maps the rest.
+            enum: CASE_TYPES,
             required: true,
         },
         riskScore: {
@@ -112,21 +129,38 @@ const RuleEngineSchema = new Schema(
         },
         riskLabel: {
             type: String,
-            enum: ['Low', 'Medium', 'High', 'Critical', 'Info'],
+            enum: RISK_LABELS,
             required: true,
         },
 
         // ─────────────── Versioning ──────────────────────────────────────────
         // Auditors need "show me the rule as it was when alert X fired".
-        // Bump on every meaningful logic change; persist history elsewhere
-        // (a RuleEngineVersion model) when you build it.
+        // Bumped on every logic change by the hooks below; each version's
+        // snapshot is persisted to RuleEngineVersion (see recordVersion).
         version: { type: Number, default: 1 },
 
         // ─────────────── Target entity ───────────────────────────────────────
+        // Which document the rule is evaluated against. Only these two subjects
+        // are supported (account/KYB were dropped). Backfilled by
+        // seeds/classify-rule-applies-to.js for the imported corpus.
         appliesTo: {
             type: String,
-            // enum: ['transaction', 'customer','kyb],
+            enum: ['transaction', 'customer'],
             default: 'transaction',
+            index: true,
+        },
+
+        // HOW the rule is evaluated (appliesTo says against WHAT). Set by
+        // seeds/repair-rule-conditions.js for the imported corpus; the UI
+        // builder always produces 'predicate'.
+        //   predicate  — logic/conditions evaluated per document
+        //   aggregate  — predicate + `aggregation` window (velocity/structuring)
+        //   screening  — list/PEP/sanctions match; resolves to a customer flag
+        //   manual     — narrative typology; engine skips it, analysts apply it
+        engine: {
+            type: String,
+            enum: ['predicate', 'aggregate', 'screening', 'manual'],
+            default: 'predicate',
             index: true,
         },
 
@@ -159,7 +193,26 @@ const RuleEngineSchema = new Schema(
             },
             count: { type: Number, min: 1 },          // e.g. ≥ 5 txns
             sumThreshold: { type: Number, min: 0 },   // e.g. ≥ 50,000 in window
+            // Which party the window is bucketed by. 'customer' = the subject
+            // customer (ruleEvaluation.subjectKey); 'sender'/'beneficiary' =
+            // that party's account/name, for "N transfers to same beneficiary".
+            groupBy: {
+                type: String,
+                enum: ['customer', 'sender', 'beneficiary'],
+                default: 'customer',
+            },
         },
+
+        // ─────────────── Re-fire control (doc 72 §6.3) ───────────────────────
+        // Consumed by the evaluator once alerts are produced from rules (E1/E3).
+        // Until then they are schema-only; defaults match today's behaviour.
+        dedupeBy: {
+            type: String,
+            enum: ['rule_customer_txn', 'rule_customer_day'],
+            default: 'rule_customer_txn',
+        },
+        cooldownMinutes: { type: Number, min: 0, default: 0 }, // suppress re-fire inside window
+        slaHours: { type: Number, min: 0, default: null },     // per-rule SLA override
 
         // ─────────────── Actions (what the rule does when it fires) ──────────
         actions: {
@@ -177,7 +230,9 @@ const RuleEngineSchema = new Schema(
                     params: { type: Schema.Types.Mixed, default: {} },
                 },
             ],
-            default: [],
+            // A rule with no actions is inert; firing an alert is what every
+            // rule is for, so that is the default rather than [].
+            default: () => [{ type: 'create_alert', params: {} }],
         },
 
         // ─────────────── Lifecycle ───────────────────────────────────────────
@@ -228,23 +283,64 @@ const VERSIONED_PATHS = ['ruleCondition', 'logic', 'conditions', 'aggregation', 
 
 RuleEngineSchema.pre('save', function (next) {
     if (this.isNew) return next();
-    if (VERSIONED_PATHS.some((p) => this.isModified(p))) {
+    const changed = VERSIONED_PATHS.filter((p) => this.isModified(p));
+    if (changed.length) {
         this.version = (this.version || 1) + 1;
+        this.$locals.changedPaths = changed;
     }
     next();
+});
+
+// Persist a snapshot of every version (first save and each bump). Best-effort:
+// a history write must never fail the rule write itself.
+const recordVersion = async (doc, changedPaths) => {
+    if (!doc) return;
+    try {
+        const RuleEngineVersion = mongoose.model('RuleEngineVersion');
+        await RuleEngineVersion.record(doc, { changedPaths });
+    } catch (err) {
+        console.error('[RuleEngine] version snapshot failed:', err.message);
+    }
+};
+
+RuleEngineSchema.post('save', async function (doc) {
+    const changed = doc.$locals.changedPaths || [];
+    if (doc.version === 1 || changed.length) await recordVersion(doc, changed);
 });
 
 // Same logic for findOneAndUpdate / findByIdAndUpdate paths used by the
 // existing controllers — `pre('save')` does not fire for those.
 RuleEngineSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (next) {
     const update = this.getUpdate() || {};
-    const $set = update.$set || update;
+    // Callers pass either { $set: {...} } or a bare { field: value } object
+    // (updateRule does the latter). Mixing a bare field with $inc makes
+    // Mongoose drop the operator, so normalise to an explicit $set first.
+    // (Timestamps may already have added a $set with updatedAt, so merge —
+    // don't only wrap when $set is absent.)
+    const bare = {};
+    for (const k of Object.keys(update)) {
+        if (!k.startsWith('$')) { bare[k] = update[k]; delete update[k]; }
+    }
+    if (Object.keys(bare).length) update.$set = { ...(update.$set || {}), ...bare };
+    const $set = update.$set || {};
     const touched = VERSIONED_PATHS.some((p) => Object.prototype.hasOwnProperty.call($set, p));
     if (touched) {
         update.$inc = { ...(update.$inc || {}), version: 1 };
         this.setUpdate(update);
+        this.$locals = this.$locals || {};
+        this.$locals.changedPaths = VERSIONED_PATHS.filter((p) => Object.prototype.hasOwnProperty.call($set, p));
     }
     next();
+});
+
+// findOneAndUpdate returns the doc -> snapshot it. updateOne/updateMany do not
+// (the repair/migration scripts use those deliberately, no history wanted).
+RuleEngineSchema.post('findOneAndUpdate', async function (doc) {
+    const changed = (this.$locals && this.$locals.changedPaths) || [];
+    if (!changed.length || !doc) return;
+    // Callers without { new: true } receive the pre-update doc - re-read it
+    const fresh = this.getOptions().new ? doc : await this.model.findById(doc._id);
+    await recordVersion(fresh, changed);
 });
 
 /**

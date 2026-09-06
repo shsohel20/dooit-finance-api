@@ -9,13 +9,24 @@ const {
   updateWatchers,
   getCaseAlerts,
   getCaseReports,
+  draftCaseReport,
+  getCaseAnalysis,
+  updateReviewWindow,
+  getCaseInvestigation,
+  saveCaseInvestigation,
   getCaseAnalytics,
   fileSAR,
   linkAlerts,
   unlinkAlert,
+  linkCustomers,
+  unlinkCustomer,
   deleteCase,
   addNote,
   getCaseNotes,
+  getCaseDocuments,
+  addCaseDocument,
+  setCaseDocumentTbml,
+  removeCaseDocument,
   getAuditLog,
   getInvestigators,
 } = require('../controllers/caseController');
@@ -28,6 +39,8 @@ const {
   validateAddNote,
   validateAssignment,
   validateLinkAlerts,
+  validateLinkCustomers,
+  validateReviewWindow,
 } = require('../middleware/caseValidation');
 
 const router = express.Router();
@@ -87,8 +100,38 @@ router
   .route('/:id/alerts/:alertId')
   .delete(authorizePermission('CASE.EDIT'), unlinkAlert);
 
+// ── Customer (POI) linkage ────────────────────────────────────────────────────
+// POST   → add customers as persons of interest on this case
+// DELETE → remove one POI (the primary customer cannot be removed)
+router
+  .route('/:id/customers')
+  .post(authorizePermission('CASE.EDIT'), validateLinkCustomers, linkCustomers);
+
+router
+  .route('/:id/customers/:customerId')
+  .delete(authorizePermission('CASE.EDIT'), unlinkCustomer);
+
+// ── Investigation Hub progress (the 12-step workflow's memory) ────────────────
+router
+  .route('/:id/investigation')
+  .get(authorizePermission('CASE.GET'), getCaseInvestigation)
+  .put(authorizePermission('CASE.EDIT'), saveCaseInvestigation);
+
+// ── Transaction analysis (the facts every report draft is built from) ─────────
+router.route('/:id/analysis').get(authorizePermission('CASE.GET'), getCaseAnalysis);
+
+// Pin the period the analysis covers
+router
+  .route('/:id/review-window')
+  .patch(authorizePermission('CASE.EDIT'), validateReviewWindow, updateReviewWindow);
+
 // ── Reports (ECDD/SMR/TTR/IFTI/GFS/RFI attached to this case) ─────────────────
 router.route('/:id/reports').get(authorizePermission('CASE.GET'), getCaseReports);
+
+// Draft one report from this case: our facts + the AI's narrative
+router
+  .route('/:id/reports/:type/draft')
+  .post(authorizePermission('CASE.EDIT'), draftCaseReport);
 
 // ── Record a SAR/SMR filing decision on the case ──────────────────────────────
 router.route('/:id/sar').post(authorizePermission('CASE.EDIT'), fileSAR);
@@ -98,6 +141,21 @@ router
   .route('/:id/notes')
   .get(authorizePermission('CASE.GET'), getCaseNotes)
   .post(authorizePermission('CASE.EDIT'), validateAddNote, addNote);
+
+// ── Documents (case evidence; the bytes live in FileVault) ────────────────────
+router
+  .route('/:id/documents')
+  .get(authorizePermission('CASE.GET'), getCaseDocuments)
+  .post(authorizePermission('CASE.EDIT'), addCaseDocument);
+
+// Link a stored document to the TBML screening run it was submitted to
+router
+  .route('/:id/documents/:documentId/tbml')
+  .patch(authorizePermission('CASE.EDIT'), setCaseDocumentTbml);
+
+router
+  .route('/:id/documents/:documentId')
+  .delete(authorizePermission('CASE.EDIT'), removeCaseDocument);
 
 // ── Audit trail ───────────────────────────────────────────────────────────────
 router.route('/:id/audit').get(authorizePermission('CASE.GET'), getAuditLog);

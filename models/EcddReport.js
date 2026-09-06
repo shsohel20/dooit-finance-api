@@ -3,6 +3,8 @@ const mongoose = require("mongoose");
 const uniqueValidator = require("mongoose-unique-validator");
 const mongoosePaginate = require("mongoose-paginate-v2");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
+const { riskFields } = require("./schemas/riskShared");
+const { draftFields, ReportIpSchema } = require("./schemas/reportShared");
 
 const { Schema } = mongoose;
 
@@ -86,8 +88,12 @@ const EcddReportSchema = new Schema(
     customerName: { type: String, trim: true, default: "" },
     abn: { type: String, trim: true, default: "" },
     onboardingDate: { type: Date, default: null },
-    accountPurpose: { type: String, default: "Digital Currency Exchange" },
+    // No default: an unset purpose must read as unknown, not as a guess.
+    accountPurpose: { type: String, default: "" },
     expectedVolume: { type: Number, default: null }, // store numeric if possible
+    // The customer's own words ("$1,000 – $5,000 per month") — a range cannot
+    // be forced into `expectedVolume` without inventing a number.
+    expectedVolumeText: { type: String, trim: true, default: "" },
     annualIncome: { type: Number, default: null }, // millions or raw, be consistent
     beneficialOwner: { type: String, trim: true, default: "" },
     directors: { type: String, trim: true, default: "" },
@@ -97,10 +103,12 @@ const EcddReportSchema = new Schema(
     isSanctioned: { type: String, enum: ["Yes", "No"], default: "No" },
     relatedParty: { type: String, trim: true, default: "N/A" },
 
-    // Transaction analysis
+    // Transaction analysis — the review window and its AUD totals
     accountCreationDate: { type: Date, default: null },
+    analysisStartDate: { type: Date, default: null },
     analysisEndDate: { type: Date, default: null },
     totalDepositsAUD: { type: Number, default: 0 },
+    totalWithdrawalsAUD: { type: Number, default: 0 },
     totalWithdrawalsUSDT: { type: Number, default: 0 },
     totalWithdrawalsETH: { type: Number, default: 0 },
     totalWithdrawalsBTC: { type: Number, default: 0 },
@@ -108,15 +116,32 @@ const EcddReportSchema = new Schema(
     withdrawalDetails: { type: String, default: "" },
     additionalInfo: { type: String, default: "" },
 
-    // Behavioral
+    // Behavioral — the count stays (the form and PDF read it); the detail
+    // behind it lives in `ipAddresses`.
     ipLocations: { type: Number, default: null },
+    ipAddresses: { type: [ReportIpSchema], default: [] },
     registeredAddress: { type: String, default: "" },
 
-    // Auto-generated summaries (can be overridden in UI)
+    // ── Narrative (the ONLY fields the AI service may fill; docs/74 §4.1) ──
     profileSummary: { type: String, default: "" },
     transactionAnalysis: { type: String, default: "" },
     behavioralAnalysis: { type: String, default: "" },
     recommendation: { type: String, default: "" },
+    recommendationType: {
+      type: String,
+      enum: ["SMR", "RFI", "ECDD", "monitor", "offboard", "no_action", null],
+      default: null,
+    },
+    decisionRationale: { type: String, default: "" },
+    immediateActions: { type: [String], default: [] },
+    keyIndicators: { type: [String], default: [] },
+    typologies: { type: [String], default: [] },
+
+    // ── Risk, as our Case derived it (never the AI's own score) ──
+    ...riskFields({ nullable: true }),
+
+    // ── Draft provenance (alerts snapshot, aiMeta, editedFields, analysis) ──
+    ...draftFields({ withAnalysis: true }),
 
     // operational
     status: {

@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 const { Schema } = mongoose;
+const { RiskSignalSchema, EvaluationStateSchema } = require("./schemas/riskShared");
 const AutoIncrement = require("mongoose-sequence")(mongoose);
 const autopopulate = require("mongoose-autopopulate");
 
@@ -115,8 +116,15 @@ const TransactionSchema = new Schema(
       weight: { type: Number },
     },
 
-    riskScore: { type: Number, default: 0, index: true },
+    riskScore: { type: Number, min: 0, max: 100, default: 0, index: true },
     riskFlags: [{ type: String, trim: true, index: true }],
+
+    // Typed facts with no dedicated column, readable by rules as signals.<key>
+    // (e.g. beneficiary_on_watchlist, cash_transaction). See schemas/riskShared.js.
+    signals: { type: [RiskSignalSchema], default: [] },
+
+    // What the rule engine last did to this transaction (doc 72 E2)
+    evaluation: { type: EvaluationStateSchema, default: () => ({}) },
 
     forensic: {
       walletCluster: { type: String, trim: true },

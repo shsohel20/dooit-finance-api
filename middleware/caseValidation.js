@@ -101,3 +101,32 @@ exports.validateLinkAlerts = (req, res, next) => {
 };
 
 
+
+exports.validateLinkCustomers = (req, res, next) => {
+  const { customerIds } = req.body;
+
+  if (!customerIds)                return next(new ErrorResponse('customerIds is required', 400));
+  if (!Array.isArray(customerIds)) return next(new ErrorResponse('customerIds must be an array', 400));
+  if (customerIds.length === 0)    return next(new ErrorResponse('customerIds must not be empty', 400));
+  if (customerIds.some((id) => !isObjectIdLike(id)))
+    return next(new ErrorResponse('customerIds must contain valid IDs', 400));
+  next();
+};
+
+exports.validateReviewWindow = (req, res, next) => {
+  const { start, end } = req.body;
+  const errors = [];
+
+  const parsed = {};
+  for (const [key, value] of Object.entries({ start, end })) {
+    if (value === undefined || value === null || value === '') continue;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) errors.push(`${key} must be a valid date`);
+    else parsed[key] = date;
+  }
+  if (parsed.start && parsed.end && parsed.start > parsed.end)
+    errors.push('start must be before end');
+
+  if (errors.length) return next(new ErrorResponse(errors.join('; '), 400));
+  next();
+};

@@ -7,19 +7,21 @@ const AuditLog = require("../models/AuditLog");
 const Customer = require("../models/Customer");
 const User = require("../models/User");
 const Transaction = require("../models/Transaction");
-const { linkTransactionsToCase } = require("../utils/transactionCaseLink");
 const { auditContext } = require("../utils/auditContext");
 const { logEvent } = require("../utils/audit");
+const { priorityForRiskLabel, CASE_TYPES } = require("../models/schemas/riskShared");
+const { bumpRuleTelemetry } = require("../services/ruleAlerting");
+// Escalate-or-attach + entity pull-through live in the case-linking service
+// (docs/74 §6.1) so this controller and caseController link alerts identically.
+const {
+  populateCase,
+  attachAlertsToCase,
+  findAttachableCase,
+  listAttachableCases,
+} = require("../services/caseLinking");
 
-// Maps Alert.riskLabel → Case.priority
-const mapRiskToPriority = (riskLabel) => {
-  const r = (riskLabel || "").toLowerCase();
-  if (r === "critical") return "critical";
-  if (r === "high") return "high";
-  if (r === "medium") return "medium";
-  if (r === "low") return "low";
-  return "medium";
-};
+// Maps Alert.riskLabel → Case.priority (shared with the rule engine)
+const mapRiskToPriority = priorityForRiskLabel;
 
 // Maps Alert.caseType → Case.type enum
 const mapAlertTypeToCase = (caseType) => {
@@ -30,8 +32,7 @@ const mapAlertTypeToCase = (caseType) => {
   return "other";
 };
 
-const VALID_CASE_TYPES = ["Fraud", "AML", "Compliance", "TF"];
-const sanitizeCaseType = (val) => (VALID_CASE_TYPES.includes(val) ? val : null);
+const sanitizeCaseType = (val) => (CASE_TYPES.includes(val) ? val : null);
 
 // @desc   Get all alerts
 // @route  GET /api/v1/alerts
@@ -124,19 +125,9 @@ exports.createAlert = asyncHandler(async (req, res, next) => {
     status: status || "new",
   });
 
-  // Telemetry: if this alert was fired by a RuleEngine rule, bump its counters.
-  // Best-effort — never block alert creation on a telemetry failure.
-  if (ruleRef) {
-    try {
-      const RuleEngine = require("../models/RuleEngine");
-      await RuleEngine.updateOne(
-        { _id: ruleRef },
-        { $set: { lastFiredAt: new Date() }, $inc: { hitCount: 1 } }
-      );
-    } catch (e) {
-      console.error("[alert] rule telemetry update failed:", e.message);
-    }
-  }
+  // Telemetry: if this alert was fired by a RuleEngine rule, bump its counters
+  // (best-effort, shared with the rule engine's own alert path).
+  await bumpRuleTelemetry(ruleRef);
 
   logEvent({
     req,
@@ -195,12 +186,24 @@ exports.createDummyAlert = asyncHandler(async (req, res, next) => {
 // @route  GET /api/v1/alerts/:id
 // @access Private
 exports.getAlert = asyncHandler(async (req, res, next) => {
+  // The details page is built on this one response (docs/72 Status box):
+  // customer (+ its login user), analyst, transaction (parties auto-populate),
+  // the rule with enough of its definition to explain the hit, the case hub
+  // and the notify that raised it.
   const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
-    .populate("customer")
-    .populate("analyst")
+    .populate({ path: "customer", populate: { path: "user", select: "name email photoUrl avatar" } })
+    .populate("analyst", "name email photoUrl avatar")
     .populate("transaction")
-    .populate("ruleRef", "name version caseType")
-    .populate("linkedCase", "uid title status");
+    .populate(
+      "ruleRef",
+      "ruleId ruleName version caseType engine appliesTo ruleCondition descriptiveExplanation " +
+        "riskScore riskLabel mainDomain ruleDomainSubdomain category hitCount lastFiredAt " +
+        "cooldownMinutes dedupeBy slaHours actions status"
+    )
+    .populate({ path: "linkedCase", select: "uid title status priority caseType assignedTo slaDeadline", populate: { path: "assignedTo", select: "name" } })
+    .populate("notify", "uid status notes createdAt")
+    .populate("activity.createdBy", "name")
+    .populate("auditLogs.performedBy", "name");
 
   if (!alert) {
     return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
@@ -350,6 +353,138 @@ exports.assignAnalyst = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc   Add an analyst note to an alert (appends to alert.activity as type 'note')
+// @route  POST /api/v1/alert/:id/notes
+// @access Private (ALERT.EDIT)
+exports.addAlertNote = asyncHandler(async (req, res, next) => {
+  const message = String(req.body?.message || req.body?.note || "").trim();
+  if (!message) return next(new ErrorResponse("message is required", 400));
+  if (message.length > 4000) return next(new ErrorResponse("message must be 4000 characters or fewer", 400));
+
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!alert) return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+
+  alert.activity.push({
+    type: "note",
+    title: req.body?.title ? String(req.body.title).trim().slice(0, 200) : "Analyst note",
+    message,
+    createdBy: req.user._id,
+  });
+  await alert.save();
+
+  logEvent({
+    req,
+    service: "alert",
+    action: "alert_note_added",
+    alert: alert._id,
+    customer: alert.customer || undefined,
+    afterValue: { length: message.length },
+  });
+
+  const note = alert.activity[alert.activity.length - 1];
+  res.status(201).json({ succeed: true, data: { ...note.toObject(), createdBy: { _id: req.user._id, name: req.user.name } } });
+});
+
+// @desc   Audit trail for one alert (AuditLog collection, newest first)
+// @route  GET /api/v1/alert/:id/audit
+// @access Private (ALERT.GET)
+exports.getAlertAudit = asyncHandler(async (req, res, next) => {
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } }).select("_id").lean();
+  if (!alert) return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+
+  const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 100));
+  const logs = await AuditLog.find({ alert: alert._id })
+    .sort({ createdAt: -1 })
+    .limit(limit)
+    .populate("user", "name email")
+    .populate("actor", "name email")
+    .populate("case", "uid title")
+    .lean();
+
+  res.status(200).json({ succeed: true, count: logs.length, data: logs });
+});
+
+// @desc   Other transactions of the alert's customer (any party role), newest first
+// @route  GET /api/v1/alert/:id/related-transactions?days=90&limit=20
+// @access Private (ALERT.GET)
+exports.getRelatedTransactions = asyncHandler(async (req, res, next) => {
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select("customer transaction client")
+    .lean();
+  if (!alert) return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  if (!alert.customer) return res.status(200).json({ succeed: true, count: 0, total: 0, data: [] });
+
+  const days = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 90));
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const since = new Date(Date.now() - days * 86400e3);
+
+  const filter = {
+    _id: { $ne: alert.transaction || null },
+    timestamp: { $gte: since },
+    $or: ["sender", "receiver", "beneficiary", "intermediary"].map((p) => ({ [`${p}.customer`]: alert.customer })),
+  };
+  if (alert.client) filter.client = alert.client;
+
+  const [total, data] = await Promise.all([
+    Transaction.countDocuments(filter),
+    Transaction.find(filter)
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .select("uid amount currency convertedAmountAUD type subtype channel status timestamp riskScore riskFlags sender receiver beneficiary investigation")
+      .lean({ autopopulate: false }),
+  ]);
+
+  res.status(200).json({ succeed: true, count: data.length, total, days, data });
+});
+
+// @desc   Compliance reports raised from this alert — by alert ref, by the
+//         legacy caseNumber = alert.uid key (ECDD / SMR), and via the linked case.
+// @route  GET /api/v1/alert/:id/reports
+// @access Private (ALERT.GET)
+exports.getAlertReports = asyncHandler(async (req, res, next) => {
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select("uid linkedCase")
+    .lean();
+  if (!alert) return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+
+  // Lazy requires keep this controller's import list honest for the common paths
+  const EcddReport = require("../models/EcddReport");
+  const SMR = require("../models/SmrReport");
+  const TTR = require("../models/TtrReport");
+  const IFTI = require("../models/IftiReport");
+  const GFS = require("../models/gfsReport");
+  const RFI = require("../models/Rfi");
+  const AlertDismissal = require("../models/AlertDismissal");
+
+  const caseId = alert.linkedCase || null;
+  // ECDD / SMR key on caseId + caseNumber; TTR / IFTI / GFS / RFI key on case.
+  const byCaseId = [{ alert: alert._id }, { caseNumber: alert.uid }];
+  const byCase = [{ alert: alert._id }];
+  if (caseId) { byCaseId.push({ caseId }); byCase.push({ case: caseId }); }
+
+  const [ecdd, smr, ttr, ifti, gfs, rfi, dismissal] = await Promise.all([
+    EcddReport.find({ $or: byCaseId }).select("uid status createdAt updatedAt customerName fullName caseNumber alert caseId").sort({ createdAt: -1 }).lean(),
+    SMR.find({ $or: byCaseId }).select("uid status createdAt updatedAt caseNumber alert caseId metadata.austracReference").sort({ createdAt: -1 }).lean(),
+    TTR.find({ $or: byCase }).select("uid status createdAt updatedAt referenceNumber completionDate alert case").sort({ createdAt: -1 }).lean(),
+    IFTI.find({ $or: byCase }).select("uid status createdAt updatedAt alert case").sort({ createdAt: -1 }).lean(),
+    GFS.find({ $or: byCase }).select("uid status createdAt updatedAt customerName customerUID alert case").sort({ createdAt: -1 }).lean(),
+    RFI.find({ $or: byCase }).select("uid status createdAt updatedAt primaryContactName responseDeadline sentAt alert case").sort({ createdAt: -1 }).lean(),
+    // A dismissal always belongs to one alert, so it is never matched by case.
+    AlertDismissal.find({ alert: alert._id }).select("uid status createdAt updatedAt title dismissalType requiresEscalation alert case").sort({ createdAt: -1 }).lean(),
+  ]);
+
+  const counts = { ecdd: ecdd.length, smr: smr.length, ttr: ttr.length, ifti: ifti.length, gfs: gfs.length, rfi: rfi.length, dismissal: dismissal.length };
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  // Same derivation as the case endpoint: a SAR is filed iff an approved SMR exists
+  const sarFiled = smr.some((s) => String(s.status).toLowerCase() === "approved");
+
+  res.status(200).json({
+    succeed: true,
+    data: { ecdd, smr, ttr, ifti, gfs, rfi, dismissal },
+    summary: { counts, total, sarFiled, linkedCase: caseId },
+  });
+});
+
 // @desc   ECCD Dummy Data for Presentation
 // @route  GET /api/v1/alerts/:caseNumber/eccd-dummy
 // @access Private
@@ -361,45 +496,30 @@ exports.getDummyEccdData = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Alert not found with Case Number ${caseNumber}`, 404));
   }
 
-  let eccdData = alert.metadata?.ecddReport || null;
-  let usedFallback = false;
-  let sourceUid = null;
+  // Only ever this alert's own stored ECDD.
+  //
+  // This used to fall back to `$sample`-ing a RANDOM other alert's ECDD payload
+  // — returning it AND saving it onto this alert — so one customer's
+  // due-diligence narrative could be written into another's record and filed
+  // from there (docs/74 C16). Nothing legitimate can come from that, so the
+  // fallback and its write-back are gone: an alert with no ECDD says so.
+  //
+  // To draft a real ECDD from the case's own facts, use
+  // POST /cases/:id/reports/ecdd/draft (docs/74 §6.3).
+  const eccdData = alert.metadata?.ecddReport || null;
 
   if (!eccdData) {
-    const samples = await Alert.aggregate([
-      {
-        $match: {
-          _id: { $ne: alert._id },
-          isDeleted: { $ne: true },
-          "metadata.ecddReport": { $ne: null },
-        },
-      },
-      { $sample: { size: 1 } },
-      { $project: { uid: 1, "metadata.ecddReport": 1 } },
-    ]);
-
-    if (samples.length > 0) {
-      eccdData = samples[0].metadata.ecddReport;
-      sourceUid = samples[0].uid;
-      usedFallback = true;
-
-      if (!alert.metadata) alert.metadata = {};
-      alert.metadata.ecddReport = eccdData;
-      alert.markModified("metadata");
-      await alert.save();
-    }
-  }
-
-  if (!eccdData) {
-    return res.status(200).json({ succeed: false, data: null, message: "No ECCD data available." });
+    return res.status(200).json({
+      succeed: false,
+      data: null,
+      message: `No ECDD data stored on alert ${alert.uid}. Draft one from its case instead.`,
+    });
   }
 
   res.status(200).json({
     succeed: true,
     data: eccdData,
-    message: usedFallback
-      ? `ECCD copied from alert ${sourceUid} and saved to alert ${alert.uid}`
-      : `ECCD returned from alert ${alert.uid}`,
+    message: `ECDD returned from alert ${alert.uid}`,
   });
 });
 
@@ -510,7 +630,18 @@ exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
     );
   }
 
+  // A case belongs to the tenant whose alert raised it — not to whoever
+  // happened to press escalate. Taking this from `req.user` meant a dooit admin
+  // (who has no client of their own) escalating a client's alert created a
+  // client-less case, invisible to that client's own case list (docs/74 C15).
+  const caseTenant = {
+    client: alert.client || tenant.client || null,
+    branch: alert.branch || tenant.branch || null,
+  };
+
   const {
+    caseId,            // attach to this case explicitly
+    attach,            // 'auto' → attach to the customer's newest open case, else create
     title = `Investigation — ${alert.uid}`,
     description,
     priority = mapRiskToPriority(alert.riskLabel),
@@ -518,64 +649,88 @@ exports.escalateAlertToCase = asyncHandler(async (req, res, next) => {
     assignedTo,
   } = req.body;
 
-  const newCase = await Case.create({
-    ...tenant,
-    title,
-    description,
-    priority,
-    type,
-    caseType: sanitizeCaseType(alert.caseType),
-    linkedAlerts: [alert._id],
-    // Primary customer (POI) — the escalated alert's customer.
-    customer: alert.customer ? alert.customer._id : null,
-    linkedCustomers: alert.customer ? [alert.customer._id] : [],
-    linkedTransactions: alert.transaction ? [alert.transaction._id] : [],
-    riskScore: alert.riskScore || null,
-    riskLabel: alert.riskLabel || null,
-    assignedTo: assignedTo || null,
-    createdBy: req.user._id,
-  });
+  // ── 1. Attach to an existing case? ──────────────────────────────────────────
+  // Same customer (POI), same tenant, not closed. docs/74 §6.1 "escalate-or-attach".
+  let targetCase = null;
+  if (caseId) {
+    const caseFilter = { _id: caseId, isDeleted: { $ne: true } };
+    if (tenant.client) caseFilter.client = tenant.client;
+    targetCase = await Case.findOne(caseFilter);
+    if (!targetCase) {
+      return next(new ErrorResponse(`Case not found with id ${caseId}`, 404));
+    }
+    if (targetCase.status === "closed") {
+      return next(new ErrorResponse(`Case ${targetCase.uid} is closed — reopen it before attaching alerts`, 400));
+    }
+  } else if (attach === "auto") {
+    // Search the alert's own tenant, so an admin attaches to the right
+    // client's open case rather than to nothing.
+    targetCase = await findAttachableCase({ customerId: alert.customer?._id, tenant: caseTenant });
+  }
+  const attached = !!targetCase;
 
-  // Sync the alert's transaction → Case (investigation.case + flagged)
-  if (alert.transaction) {
-    await linkTransactionsToCase([alert.transaction._id || alert.transaction], newCase);
+  // ── 2. Otherwise create the case (links are added in step 3) ───────────────
+  if (!targetCase) {
+    targetCase = await Case.create({
+      ...caseTenant,
+      title,
+      description,
+      priority,
+      type,
+      caseType: sanitizeCaseType(alert.caseType),
+      assignedTo: assignedTo || null,
+      createdBy: req.user._id,
+    });
+
+    await AuditLog.create({
+      ...caseTenant,
+      case: targetCase._id,
+      user: req.user._id,
+      action: "case_created",
+      details: `Case created by escalating alert ${alert.uid} (${alert.riskLabel || ""} ${alert.caseType || ""})`,
+      ...auditContext(req),
+    });
   }
 
-  alert.status = "escalated_to_case";
-  alert.linkedCase = newCase._id;
-  if (!alert.analyst) alert.analyst = req.user._id;
-  alert.activity.push({
-    type: "activity",
-    title: "Escalated to case",
-    message: `Case "${title}" created by ${req.user.name || req.user._id}`,
-    createdBy: req.user._id,
-  });
-  await alert.save();
-
-  await AuditLog.create({
-    ...tenant,
-    case: newCase._id,
-    user: req.user._id,
-    action: "case_created",
-    details: `Case created by escalating alert ${alert.uid} (${alert.riskLabel || ""} ${alert.caseType || ""})`,
-    ...auditContext(req),
+  // ── 3. Link the alert: pulls its customer, transaction and the transaction's
+  //       party customers onto the case, re-derives risk, syncs the alert. ───
+  await attachAlertsToCase(targetCase, [alert.toObject()], {
+    user: req.user,
+    req,
+    activityTitle: attached ? "Attached to case" : "Escalated to case",
   });
 
   logEvent({
     req,
     service: "alert",
-    action: "alert_escalated",
+    action: attached ? "alert_attached_to_case" : "alert_escalated",
     alert: alert._id,
-    case: newCase._id,
+    case: targetCase._id,
     customer: alert.customer?._id || undefined,
     target: alert.uid,
   });
 
-  const populated = await Case.findById(newCase._id)
-    .populate("createdBy", "name email avatar")
-    .populate("assignedTo", "name email avatar")
-    .populate("linkedAlerts", "uid caseType riskScore riskLabel status")
-    .lean();
+  const populated = await populateCase(Case.findById(targetCase._id)).lean();
+  res.status(attached ? 200 : 201).json({ succeed: true, attached, data: populated });
+});
 
-  res.status(201).json({ succeed: true, data: populated });
+// @desc   Open cases of this alert's customer that the alert could be attached to
+//         (feeds the "Attach to CA-… / Create new case" choice in the escalate dialog)
+// @route  GET /api/v1/alert/:id/attachable-cases
+// @access Private (ALERT.GET)
+exports.getAttachableCases = asyncHandler(async (req, res, next) => {
+  const alert = await Alert.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select("customer client")
+    .lean();
+  if (!alert) {
+    return next(new ErrorResponse(`Alert not found with id ${req.params.id}`, 404));
+  }
+
+  const tenant = {
+    client: req?.user?.client?._id || null,
+    branch: req?.user?.branch?._id || null,
+  };
+  const data = alert.customer ? await listAttachableCases({ customerId: alert.customer, tenant }) : [];
+
+  res.status(200).json({ succeed: true, count: data.length, data });
 });

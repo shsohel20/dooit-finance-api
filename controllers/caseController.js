@@ -13,8 +13,33 @@ const TTR = require('../models/TtrReport');
 const IFTI = require('../models/IftiReport');
 const GFS = require('../models/gfsReport');
 const RFI = require('../models/Rfi');
+const Customer = require('../models/Customer');
 const { linkTransactionsToCase } = require('../utils/transactionCaseLink');
 const { auditContext } = require('../utils/auditContext');
+const { customerRelatedToTenant } = require('../utils/customerTenantGuard');
+// Alert / customer linkage rules + the shared populate live in one service
+// (docs/74 §6.1) so escalate, link and create all behave the same way.
+const {
+  populateCase,
+  partyCustomersOf,
+  deriveCaseRisk,
+  attachAlertsToCase,
+  detachAlertFromCase,
+  addCustomersToCase,
+  removeCustomerFromCase,
+} = require('../services/caseLinking');
+const { analyseCase } = require('../services/caseAnalysis');
+const { draftReport, SUPPORTED_TYPES } = require('../services/reportDrafts');
+const { resolveCaseLinkage } = require('../utils/resolveCaseLinkage');
+const { isValidDismissalType, DISMISSAL_CODES } = require('../utils/dismissalTypes');
+const AlertDismissal = require('../models/AlertDismissal');
+const CaseInvestigation = require('../models/CaseInvestigation');
+const { logEvent } = require('../utils/audit');
+
+// How long a cached analysis snapshot stays usable. The cache is also dropped
+// whenever the case itself changes (links, status) — this only bounds staleness
+// caused by NEW transactions arriving for a POI.
+const ANALYSIS_CACHE_TTL_MS = 15 * 60 * 1000;
 
 // ── Status machine ────────────────────────────────────────────────────────────
 const STATUS_TRANSITIONS = {
@@ -61,16 +86,6 @@ const checkCaseAccess = (caseDoc, req, { requireAssignment = false } = {}) => {
   return null;
 };
 
-// Maps Alert.riskLabel → Case.priority
-const mapRiskToPriority = (riskLabel) => {
-  const r = (riskLabel || '').toLowerCase();
-  if (r === 'critical') return 'critical';
-  if (r === 'high') return 'high';
-  if (r === 'medium') return 'medium';
-  if (r === 'low') return 'low';
-  return 'medium';
-};
-
 // Maps Alert.caseType → Case.type enum
 const mapAlertTypeToCase = (caseType) => {
   const t = (caseType || '').toLowerCase().replace(/\s+/g, '_');
@@ -79,41 +94,6 @@ const mapAlertTypeToCase = (caseType) => {
   if (t === 'transaction_monitoring') return 'transaction_monitoring';
   return 'other';
 };
-
-// Only pass alert.caseType to Case if it matches Case.caseType enum
-const VALID_CASE_TYPES = ['Fraud', 'AML', 'Compliance', 'TF'];
-const sanitizeCaseType = (val) => (VALID_CASE_TYPES.includes(val) ? val : null);
-
-const populateCase = (query) =>
-  query
-    .populate('createdBy', 'name email avatar')
-    .populate('assignedTo', 'name email avatar')
-    .populate('reviewer', 'name email avatar')
-    .populate('watchers', 'name email avatar')
-    // ruleId/ruleName/explanation drive the "Alert Type" and "Detection Rule"
-    // stats on the case detail page.
-    .populate(
-      'linkedAlerts',
-      'uid caseType riskScore riskLabel status createdAt ruleId ruleName explanation alertOrigin'
-    )
-    .populate({
-      // Primary customer (POI) — same shape as linkedCustomers below.
-      path: 'customer',
-      select: 'uid user personalKyc relations kycStatus isPep sanction country',
-      populate: { path: 'user', select: 'name email photoUrl avatar' },
-    })
-    .populate({
-      // kycStatus/isPep/sanction/country back the customer-profile screening
-      // badges. Encrypted fields (name, phone) are deliberately excluded — a
-      // lean() query bypasses decryptForRole and would return ciphertext.
-      path: 'linkedCustomers',
-      select: 'uid user personalKyc relations kycStatus isPep sanction country',
-      populate: { path: 'user', select: 'name email photoUrl avatar' },
-    })
-    .populate(
-      'linkedTransactions',
-      'uid amount currency convertedAmountAUD type status timestamp sender receiver riskScore riskFlags channel'
-    );
 
 // Σ linked-transaction value in AUD (converted where available, else raw amount).
 const sumNetActivity = (txns) =>
@@ -294,16 +274,22 @@ exports.createCase = asyncHandler(async (req, res, next) => {
   }
 
   const firstAlert       = resolvedAlerts[0];
-  const derivedPriority  = priority  || (firstAlert ? mapRiskToPriority(firstAlert.riskLabel) : 'medium');
+  // Risk comes from the linked alerts: the top-scoring alert wins (docs/74 C10).
+  const derivedRisk      = deriveCaseRisk(resolvedAlerts);
+  const derivedPriority  = priority  || derivedRisk?.priority || 'medium';
   const derivedType      = type      || (firstAlert ? mapAlertTypeToCase(firstAlert.caseType) : 'other');
-  const derivedCaseType  = caseType  || sanitizeCaseType(firstAlert?.caseType);
+  const derivedCaseType  = caseType  || derivedRisk?.caseType || null;
 
   // ── Derive linked entities from alerts ───────────────────────────────────────
   const alertCustomers    = resolvedAlerts.map((a) => a.customer).filter(Boolean);
   const alertTransactions = resolvedAlerts.map((a) => a.transaction).filter(Boolean);
 
-  const mergedCustomers    = [...new Set([...(linkedCustomers || []), ...alertCustomers.map(String)])];
   const mergedTransactions = [...new Set([...(linkedTransactions || []), ...alertTransactions.map(String)])];
+  // Customers that are parties on those transactions are POIs too (doc 66 G13).
+  const partyCustomers     = await partyCustomersOf(mergedTransactions);
+  const mergedCustomers    = [
+    ...new Set([...(linkedCustomers || []), ...alertCustomers.map(String), ...partyCustomers]),
+  ];
 
   // ── Validate assignedTo is an investigator ───────────────────────────────────
   if (assignedTo) {
@@ -313,14 +299,11 @@ exports.createCase = asyncHandler(async (req, res, next) => {
     }
   }
 
-  // ── Aggregate risk score ─────────────────────────────────────────────────────
-  const riskScores = resolvedAlerts.map((a) => a.riskScore).filter((s) => s != null);
-  const riskScore  = riskScores.length > 0
-    ? Math.round(riskScores.reduce((s, v) => s + v, 0) / riskScores.length)
-    : null;
-
   const newCase = await Case.create({
-    ...tenant,
+    // The alerts' own tenant wins over the caller's: an admin creating a case
+    // from a client's alerts must not produce a client-less case (docs/74 C15).
+    client: firstAlert?.client || tenant.client || null,
+    branch: firstAlert?.branch || tenant.branch || null,
     title,
     description,
     priority: derivedPriority,
@@ -334,7 +317,8 @@ exports.createCase = asyncHandler(async (req, res, next) => {
     customer: alertCustomers[0] || mergedCustomers[0] || null,
     linkedCustomers: mergedCustomers,
     linkedTransactions: mergedTransactions,
-    riskScore,
+    riskScore: derivedRisk?.riskScore ?? null,
+    riskLabel: derivedRisk?.riskLabel ?? null,
     assignedTo: assignedTo || null,
     createdBy: req.user._id,
   });
@@ -592,12 +576,14 @@ exports.getCaseReports = asyncHandler(async (req, res, next) => {
   if (accessErr) return next(accessErr);
 
   const id = caseDoc._id;
-  const [ecdd, smr, ttr, ifti, gfs, rfi] = await Promise.all([
+  const [ecdd, smr, ttr, ifti, gfs, rfi, dismissal] = await Promise.all([
     EcddReport.find({ caseId: id })
-      .select('uid status createdAt customerName fullName caseNumber customer alert riskAssessment')
+      .select('uid status createdAt customerName fullName caseNumber customer alert riskAssessment' +
+        ' aiMeta.scope.mismatch aiMeta.error.code')
       .sort({ createdAt: -1 }).lean(),
     SMR.find({ caseId: id })
-      .select('uid status createdAt caseNumber customer alert metadata.austracReference')
+      .select('uid status createdAt caseNumber customer alert metadata.austracReference' +
+        ' aiMeta.scope.mismatch aiMeta.error.code')
       .sort({ createdAt: -1 }).lean(),
     TTR.find({ case: id })
       .select('uid status createdAt referenceNumber completionDate customer alert')
@@ -606,16 +592,23 @@ exports.getCaseReports = asyncHandler(async (req, res, next) => {
       .select('uid status createdAt customer alert')
       .sort({ createdAt: -1 }).lean(),
     GFS.find({ case: id })
-      .select('uid status createdAt customerName customerUID customer alert')
+      .select('uid status createdAt customerName customerUID customer alert' +
+        ' aiMeta.scope.mismatch aiMeta.error.code')
       .sort({ createdAt: -1 }).lean(),
     RFI.find({ case: id })
-      .select('uid status createdAt primaryContactName responseDeadline customer alert')
+      .select('uid status createdAt primaryContactName responseDeadline customer alert' +
+        ' aiMeta.scope.mismatch aiMeta.error.code')
+      .sort({ createdAt: -1 }).lean(),
+    AlertDismissal.find({ case: id })
+      .select('uid status createdAt title dismissalType requiresEscalation customer alert' +
+        ' aiMeta.scope.mismatch aiMeta.error.code')
       .sort({ createdAt: -1 }).lean(),
   ]);
 
   const counts = {
     ecdd: ecdd.length, smr: smr.length, ttr: ttr.length,
     ifti: ifti.length, gfs: gfs.length, rfi: rfi.length,
+    dismissal: dismissal.length,
   };
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
   // Derived: a SAR is "filed" iff an approved SMR exists on this case.
@@ -623,9 +616,282 @@ exports.getCaseReports = asyncHandler(async (req, res, next) => {
 
   res.status(200).json({
     succeed: true,
-    data: { ecdd, smr, ttr, ifti, gfs, rfi },
+    data: { ecdd, smr, ttr, ifti, gfs, rfi, dismissal },
     summary: { counts, total, sarFiled },
   });
+});
+
+// ── GET /cases/:id/analysis ─────────────────────────────────────────────────────
+// The case's transaction analysis: every figure the ECDD / SMR / GFS / RFI
+// drafts are built from, computed by us (docs/74 §6.2). Query params:
+//   from, to  — analyse an ad-hoc window (never cached, never persisted)
+//   refresh   — "true" recomputes even when a fresh snapshot exists
+exports.getCaseAnalysis = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } }).lean();
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  const { from, to, refresh } = req.query;
+  const adHocWindow = !!(from || to);
+
+  // Reuse the snapshot only when it is newer than the case (so any link or
+  // status change invalidates it) and still inside the TTL.
+  const cache = caseDoc.analysis || {};
+  const computedAt = cache.computedAt ? new Date(cache.computedAt) : null;
+  const isFresh =
+    computedAt &&
+    cache.snapshot &&
+    computedAt >= new Date(caseDoc.updatedAt) &&
+    Date.now() - computedAt.getTime() < ANALYSIS_CACHE_TTL_MS;
+
+  if (!adHocWindow && refresh !== 'true' && isFresh) {
+    return res.status(200).json({ succeed: true, cached: true, data: cache.snapshot });
+  }
+
+  const analysis = await analyseCase(caseDoc, { from, to });
+
+  // An ad-hoc window is one analyst's question, not the case's own view.
+  if (!adHocWindow) {
+    await Case.updateOne(
+      { _id: caseDoc._id },
+      { $set: { 'analysis.computedAt': analysis.computedAt, 'analysis.snapshot': analysis } },
+      // Caching must not bump updatedAt — that would invalidate what we just wrote.
+      { timestamps: false }
+    );
+  }
+
+  res.status(200).json({ succeed: true, cached: false, data: analysis });
+});
+
+// ── PATCH /cases/:id/review-window ──────────────────────────────────────────────
+// Pin the period the analysis (and every report drafted from it) covers.
+// Sending an empty body clears it back to the derived default.
+exports.updateReviewWindow = asyncHandler(async (req, res, next) => {
+  const { start, end } = req.body;
+
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  caseDoc.reviewWindow = {
+    start: start ? new Date(start) : null,
+    end: end ? new Date(end) : null,
+    source: start || end ? 'analyst' : 'default',
+  };
+  await caseDoc.save();
+
+  await logAudit(
+    caseDoc._id, req.user._id, 'review_window_updated',
+    start || end
+      ? `Review window set to ${start || '—'} → ${end || 'now'}`
+      : 'Review window reset to the derived default',
+    getTenant(req), req);
+
+  // Recompute immediately so the caller gets the numbers for the new window.
+  const analysis = await analyseCase(caseDoc.toObject(), {});
+  await Case.updateOne(
+    { _id: caseDoc._id },
+    { $set: { 'analysis.computedAt': analysis.computedAt, 'analysis.snapshot': analysis } },
+    { timestamps: false }
+  );
+
+  res.status(200).json({ succeed: true, data: analysis });
+});
+
+// ── GET /cases/:id/investigation ────────────────────────────────────────────────
+// The analyst's progress through the Investigation Hub. Returns `null` when the
+// case has never been worked on, so the UI seeds its own empty defaults rather
+// than this endpoint inventing a shape it does not own (docs/74 C18).
+exports.getCaseInvestigation = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select('uid client assignedTo')
+    .lean();
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  const investigation = await CaseInvestigation.findOne({ case: caseDoc._id })
+    .populate('lastSavedBy', 'name email')
+    .lean();
+
+  res.status(200).json({ succeed: true, data: investigation || null });
+});
+
+// ── PUT /cases/:id/investigation ────────────────────────────────────────────────
+// Save progress. Called by autosave as the analyst works, so it merges the keys
+// it is given rather than replacing the record — a tab that only knows about the
+// SMR part must not blank out the narrative.
+//
+// Deliberately NOT audited on every call: autosave would bury the case's audit
+// trail. The first save is recorded (the investigation opened), and every save
+// stamps `lastSavedBy` + `updatedAt`, which is what an auditor needs to see who
+// was working and when.
+exports.saveCaseInvestigation = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select('uid client branch assignedTo')
+    .lean();
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  // Only the analyst's own work is writable — never the linkage or attribution.
+  const WRITABLE = [
+    'activeStep', 'stepsDone', 'checklist', 'selections', 'pois',
+    'customTypologies', 'customReasons', 'dateRange',
+    'narrativeTemplate', 'narrative', 'smr',
+    'decision', 'managerReview', 'ongoingMonitoring',
+  ];
+
+  const update = { lastSavedBy: req.user._id };
+  for (const key of WRITABLE) {
+    if (req.body[key] !== undefined) update[key] = req.body[key];
+  }
+
+  const existing = await CaseInvestigation.findOne({ case: caseDoc._id }).select('_id').lean();
+
+  const investigation = await CaseInvestigation.findOneAndUpdate(
+    { case: caseDoc._id },
+    {
+      $set: update,
+      $setOnInsert: {
+        case: caseDoc._id,
+        client: caseDoc.client || null,
+        branch: caseDoc.branch || null,
+        createdBy: req.user._id,
+      },
+    },
+    { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true }
+  ).lean();
+
+  if (!existing) {
+    await logAudit(
+      caseDoc._id, req.user._id, 'investigation_started',
+      'Investigation Hub opened and progress saved for the first time', getTenant(req), req);
+  }
+
+  res.status(existing ? 200 : 201).json({ succeed: true, created: !existing, data: investigation });
+});
+
+// ── POST /cases/:id/reports/:type/draft ─────────────────────────────────────────
+// Draft an ECDD / SMR / GFS / RFI for this case: every figure and identity from
+// our own models via services/caseAnalysis, the prose from the AI service's
+// narrative whitelist (docs/74 §6.3). The draft is saved even if the AI is
+// unavailable — `aiMeta.error` then records why the narrative is empty.
+//
+// Body: { alertId?, regenerate? }. Without `regenerate` an existing draft is
+// returned untouched, so the endpoint is safe to call twice.
+exports.draftCaseReport = asyncHandler(async (req, res, next) => {
+  const type = String(req.params.type || '').toLowerCase();
+  if (!SUPPORTED_TYPES.includes(type)) {
+    return next(
+      new ErrorResponse(`type must be one of: ${SUPPORTED_TYPES.join(', ')}`, 400)
+    );
+  }
+
+  // The report forms hold whatever reference they were opened with — a Case id
+  // or uid, or the originating Alert's id or uid — so resolve all four through
+  // the shared helper rather than making every caller find the Case first.
+  let caseDoc = mongoose.isValidObjectId(req.params.id)
+    ? await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } }).lean()
+    : null;
+
+  if (!caseDoc) {
+    const link = await resolveCaseLinkage({ caseId: req.params.id, caseNumber: req.params.id });
+    if (link.caseId) {
+      caseDoc = await Case.findOne({ _id: link.caseId, isDeleted: { $ne: true } }).lean();
+    }
+  }
+
+  if (!caseDoc) {
+    return next(
+      new ErrorResponse(
+        `No case found for ${req.params.id}. An alert must be escalated to a case before a report can be drafted from it.`,
+        404
+      )
+    );
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  // A report is about a person and their activity; without either there is
+  // nothing to state.
+  if (!caseDoc.customer && !(caseDoc.linkedCustomers || []).length) {
+    return next(
+      new ErrorResponse('This case has no customer (POI) to report on — link one first', 400)
+    );
+  }
+
+  const { alertId, dismissalType, regenerate } = req.body || {};
+  if (alertId && !(caseDoc.linkedAlerts || []).some((a) => String(a) === String(alertId))) {
+    return next(new ErrorResponse('alertId is not linked to this case', 400));
+  }
+
+  // A dismissal closes one alert, so it cannot be drafted for a whole case.
+  if (type === 'dismissal') {
+    if (!alertId) {
+      return next(new ErrorResponse('alertId is required to draft a dismissal', 400));
+    }
+    if (!isValidDismissalType(dismissalType)) {
+      return next(
+        new ErrorResponse(
+          `dismissalType must be one of: generic, ${DISMISSAL_CODES.join(', ')}`,
+          400
+        )
+      );
+    }
+  }
+
+  const { report, created, regenerated } = await draftReport({
+    caseDoc,
+    type,
+    alertId,
+    dismissalType,
+    regenerate: regenerate === true || regenerate === 'true',
+    user: req.user,
+  });
+
+  if (created || regenerated) {
+    const failure = report.aiMeta?.error?.code;
+    // A narrative written from data outside this client is worth an audit line
+    // of its own — it is the reason the draft needs a careful read (C15).
+    const scopeMismatch = report.aiMeta?.scope?.mismatch;
+    await logAudit(
+      caseDoc._id, req.user._id, created ? 'report_drafted' : 'report_redrafted',
+      `${type.toUpperCase()} ${report.uid || report._id} ${created ? 'drafted' : 're-drafted'}` +
+        (failure ? ` (narrative unavailable: ${failure})` : '') +
+        (scopeMismatch
+          ? ` (summary service saw ${report.aiMeta.scope.theirTransactionCount} transaction(s) vs this client's ${report.aiMeta.scope.ourTransactionCount} — narrative may reach beyond this client)`
+          : ''),
+      getTenant(req), req);
+
+    logEvent({
+      req,
+      service: 'report',
+      action: created ? 'report_drafted' : 'report_redrafted',
+      reportType: type.toUpperCase(),
+      target: report.uid || String(report._id),
+      case: caseDoc._id,
+      customer: report.customer || undefined,
+      afterValue: {
+        sectionsUsed: report.aiMeta?.sectionsUsed || [],
+        aiError: failure || null,
+        client: report.aiMeta?.client || null,
+        scopeMismatch: !!scopeMismatch,
+      },
+    });
+  }
+
+  res.status(created ? 201 : 200).json({ succeed: true, created, regenerated, data: report });
 });
 
 // ── GET /cases/analytics ────────────────────────────────────────────────────────
@@ -824,35 +1090,13 @@ exports.linkAlerts = asyncHandler(async (req, res, next) => {
     );
   }
 
-  const existing = caseDoc.linkedAlerts.map(String);
-  const newIds   = alertIds.filter((id) => !existing.includes(String(id)));
+  // Links the alerts and pulls through their customers (incl. transaction
+  // parties) and transactions, then re-derives the case risk. Audit included.
+  const { addedAlertIds } = await attachAlertsToCase(caseDoc, alerts, { user: req.user, req });
 
-  if (newIds.length === 0) {
+  if (addedAlertIds.length === 0) {
     return next(new ErrorResponse('All provided alerts are already linked to this case', 400));
   }
-
-  caseDoc.linkedAlerts.push(...newIds);
-  await caseDoc.save();
-
-  await Alert.updateMany(
-    { _id: { $in: newIds } },
-    {
-      $set: { status: 'escalated_to_case', linkedCase: caseDoc._id },
-      $push: {
-        activity: {
-          type: 'activity',
-          title: 'Linked to case',
-          message: `Linked to case "${caseDoc.title}" by ${req.user.name || req.user._id}`,
-          createdBy: req.user._id,
-        },
-      },
-    }
-  );
-
-  const uids = alerts.filter((a) => newIds.includes(String(a._id))).map((a) => a.uid);
-  await logAudit(
-    caseDoc._id, req.user._id, 'alert_linked',
-    `${newIds.length} alert(s) linked: [${uids.join(', ')}]`, tenant, req);
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -874,26 +1118,60 @@ exports.unlinkAlert = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse('Alert is not linked to this case', 404));
   }
 
-  const alert = await Alert.findById(alertId).lean();
-  caseDoc.linkedAlerts.splice(idx, 1);
-  await caseDoc.save();
+  const alert = (await Alert.findById(alertId).lean()) || { _id: alertId };
 
-  await Alert.findByIdAndUpdate(alertId, {
-    $set: { linkedCase: null, status: 'under_review' },
-    $push: {
-      activity: {
-        type: 'activity',
-        title: 'Unlinked from case',
-        message: `Unlinked from case "${caseDoc.title}" by ${req.user.name || req.user._id}`,
-        createdBy: req.user._id,
-      },
-    },
-  });
+  // Removes the alert, drops its transaction if no other linked alert still
+  // uses it, re-derives the case risk and writes the audit row.
+  await detachAlertFromCase(caseDoc, alert, { user: req.user, req });
 
+  const updated = await populateCase(Case.findById(req.params.id)).lean();
+  res.status(200).json({ succeed: true, data: updated });
+});
+
+// ── POST /cases/:id/customers ─────────────────────────────────────────────────
+// Add customers as persons of interest (POIs) on the case, e.g. a counterparty
+// the analyst wants to investigate alongside the primary customer.
+exports.linkCustomers = asyncHandler(async (req, res, next) => {
+  const { customerIds } = req.body;
+
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  // Every customer must exist and be related to the caller's tenant.
   const tenant = getTenant(req);
-  await logAudit(
-    caseDoc._id, req.user._id, 'alert_unlinked',
-    `Alert ${alert?.uid || alertId} unlinked from case`, tenant, req);
+  const customers = await Customer.find({ _id: { $in: customerIds } }).select('relations').lean();
+  if (customers.length !== new Set(customerIds.map(String)).size) {
+    return next(new ErrorResponse('One or more customerIds not found', 404));
+  }
+  const foreign = customers.filter((c) => !customerRelatedToTenant(c, tenant.client, tenant.branch));
+  if (foreign.length) {
+    return next(new ErrorResponse('One or more customers are not in your tenant', 403));
+  }
+
+  const { addedCustomerIds } = await addCustomersToCase(caseDoc, customerIds, { user: req.user, req });
+  if (addedCustomerIds.length === 0) {
+    return next(new ErrorResponse('All provided customers are already linked to this case', 400));
+  }
+
+  const updated = await populateCase(Case.findById(req.params.id)).lean();
+  res.status(200).json({ succeed: true, data: updated });
+});
+
+// ── DELETE /cases/:id/customers/:customerId ──────────────────────────────────
+// The primary POI (`case.customer`) cannot be removed — the service enforces it.
+exports.unlinkCustomer = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  await removeCustomerFromCase(caseDoc, req.params.customerId, { user: req.user, req });
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });
@@ -1014,4 +1292,165 @@ exports.getInvestigators = asyncHandler(async (req, res, next) => {
     }));
 
   res.status(200).json({ succeed: true, data: investigators, count: investigators.length });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case documents
+//
+// Evidence attached to a case. The bytes are already in FileVault by the time
+// these run — the UI uploads there first (POST /file-vault/upload) and sends us
+// the reference. We hold the reference and, for a trade document, the id of the
+// TBML screening run it was submitted to.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Loads a case the caller is allowed to touch, or returns the error to pass to
+// next(). Every documents handler starts the same way.
+//
+// `populate` is off by default: the write handlers need a real document to save,
+// and populating a subdocument ref would write the populated object back.
+const loadCaseForDocuments = async (req, { populate = false } = {}) => {
+  let query = Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (populate) query = query.populate('documents.uploadedBy', 'name email');
+
+  const caseDoc = await query;
+  if (!caseDoc) {
+    return { error: new ErrorResponse(`Case not found with id ${req.params.id}`, 404) };
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return { error: accessErr };
+  return { caseDoc };
+};
+
+// ── GET /cases/:id/documents ─────────────────────────────────────────────────
+exports.getCaseDocuments = asyncHandler(async (req, res, next) => {
+  const { caseDoc, error } = await loadCaseForDocuments(req, { populate: true });
+  if (error) return next(error);
+
+  // Newest first — an analyst is almost always looking for what was just added.
+  const documents = [...(caseDoc.documents || [])].sort(
+    (a, b) => new Date(b.uploadedAt || 0) - new Date(a.uploadedAt || 0)
+  );
+
+  res.status(200).json({ succeed: true, data: documents, count: documents.length });
+});
+
+// ── POST /cases/:id/documents ────────────────────────────────────────────────
+exports.addCaseDocument = asyncHandler(async (req, res, next) => {
+  const { name, url, mimeType, type, sizeBytes, tbml } = req.body;
+
+  if (!url) {
+    return next(new ErrorResponse('url is required — upload to /file-vault/upload first', 400));
+  }
+
+  const { caseDoc, error } = await loadCaseForDocuments(req);
+  if (error) return next(error);
+
+  caseDoc.documents.push({
+    name: name || 'Untitled document',
+    url,
+    mimeType: mimeType || null,
+    type: type || 'other',
+    sizeBytes: sizeBytes ?? null,
+    uploadedAt: new Date(),
+    uploadedBy: req.user._id,
+    // Present when the same file was handed to the TBML engine in one step.
+    ...(tbml?.reportId && {
+      tbml: {
+        reportId:     tbml.reportId,
+        submissionId: tbml.submissionId || null,
+        status:       tbml.status || 'PENDING',
+        dbSource:     tbml.dbSource ?? null,
+        submittedAt:  new Date(),
+      },
+    }),
+  });
+
+  await caseDoc.save();
+  const added = caseDoc.documents[caseDoc.documents.length - 1];
+
+  await logAudit(
+    caseDoc._id, req.user._id, 'document_added',
+    `Document "${added.name}" attached` + (added.tbml?.reportId ? ` and submitted for TBML screening (${added.tbml.reportId})` : ''),
+    getTenant(req), req
+  );
+
+  logEvent({
+    req,
+    service: 'case',
+    action: 'case_document_added',
+    target: caseDoc.uid || String(caseDoc._id),
+    case: caseDoc._id,
+    afterValue: { name: added.name, type: added.type, tbmlReportId: added.tbml?.reportId || null },
+  });
+
+  res.status(201).json({ succeed: true, data: added });
+});
+
+// ── PATCH /cases/:id/documents/:documentId/tbml ──────────────────────────────
+// Records (or refreshes) the screening run a stored document was submitted to.
+// Screening a document that is already in the vault is a separate step from
+// attaching it, so this is its own endpoint rather than a re-upload.
+exports.setCaseDocumentTbml = asyncHandler(async (req, res, next) => {
+  const { reportId, submissionId, status, dbSource } = req.body;
+  if (!reportId) return next(new ErrorResponse('reportId is required', 400));
+
+  const { caseDoc, error } = await loadCaseForDocuments(req);
+  if (error) return next(error);
+
+  const document = caseDoc.documents.id(req.params.documentId);
+  if (!document) {
+    return next(new ErrorResponse(`Document not found with id ${req.params.documentId}`, 404));
+  }
+
+  document.tbml = {
+    reportId,
+    submissionId: submissionId || document.tbml?.submissionId || null,
+    status: status || 'PENDING',
+    dbSource: dbSource ?? document.tbml?.dbSource ?? null,
+    submittedAt: new Date(),
+  };
+
+  await caseDoc.save();
+
+  await logAudit(
+    caseDoc._id, req.user._id, 'document_screened',
+    `Document "${document.name}" submitted for TBML screening (${reportId})`,
+    getTenant(req), req
+  );
+
+  res.status(200).json({ succeed: true, data: document });
+});
+
+// ── DELETE /cases/:id/documents/:documentId ──────────────────────────────────
+exports.removeCaseDocument = asyncHandler(async (req, res, next) => {
+  const { caseDoc, error } = await loadCaseForDocuments(req);
+  if (error) return next(error);
+
+  const document = caseDoc.documents.id(req.params.documentId);
+  if (!document) {
+    return next(new ErrorResponse(`Document not found with id ${req.params.documentId}`, 404));
+  }
+
+  const { name } = document;
+  document.deleteOne();
+  await caseDoc.save();
+
+  // The file itself stays in FileVault. Detaching evidence from a case is not
+  // authority to destroy it — vault retention is its own decision.
+  await logAudit(
+    caseDoc._id, req.user._id, 'document_removed',
+    `Document "${name}" detached from the case (the file remains in FileVault)`,
+    getTenant(req), req
+  );
+
+  logEvent({
+    req,
+    service: 'case',
+    action: 'case_document_removed',
+    target: caseDoc.uid || String(caseDoc._id),
+    case: caseDoc._id,
+    beforeValue: { name },
+  });
+
+  res.status(200).json({ succeed: true, data: { _id: req.params.documentId } });
 });

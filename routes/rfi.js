@@ -31,7 +31,10 @@ router
       { path: "client" },
       { path: "customer" },
       { path: "branch" },
-      { path: "case", populate: { path: "transaction" } },
+      // Investigation hub (null until the alert is escalated) and the
+      // originating alert — the alert-details page lists RFIs by `?alert=<id>`.
+      { path: "case", select: "uid title status caseType riskLabel priority customer linkedTransactions", populate: { path: "linkedTransactions", select: "uid amount currency type status timestamp" } },
+      { path: "alert", select: "uid status caseType riskScore riskLabel priority customer transaction linkedCase", populate: { path: "transaction", select: "uid amount currency type status timestamp" } },
     ]),
     getRFIs,
   )
@@ -42,7 +45,10 @@ router
         { path: "client" },
         { path: "customer" },
         { path: "branch" },
-        { path: "case", populate: { path: "transaction" } },
+        // Investigation hub (null until the alert is escalated) and the
+      // originating alert — the alert-details page lists RFIs by `?alert=<id>`.
+      { path: "case", select: "uid title status caseType riskLabel priority customer linkedTransactions", populate: { path: "linkedTransactions", select: "uid amount currency type status timestamp" } },
+      { path: "alert", select: "uid status caseType riskScore riskLabel priority customer transaction linkedCase", populate: { path: "transaction", select: "uid amount currency type status timestamp" } },
       ],
       filterRFISection,
     ),

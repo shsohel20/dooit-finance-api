@@ -1,9 +1,46 @@
 const mongoose = require('mongoose');
 const uniqueValidator  = require('mongoose-unique-validator');
 const mongoosePaginate = require('mongoose-paginate-v2');
-const AutoIncrement    = require('mongoose-sequence')(mongoose);
 
 const { Schema } = mongoose;
+const { riskFields, slaFields, addOverdueVirtual } = require('./schemas/riskShared');
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Case document
+//
+// Evidence attached to a case — a trade invoice, a bank statement, a registry
+// extract. The bytes live in FileVault (POST /file-vault/upload); this records
+// only the reference, the same { name, url, mimeType, type } shape Client and
+// Branch use for their documents.
+//
+// `tbml` is the link back to a TBML screening run at osint.dooit.ai. It is on
+// the document rather than the case because a case can hold several trade
+// documents and each is screened on its own — and because the OSINT Engine
+// keeps the report, not us: all we hold is the id needed to fetch it again.
+// ─────────────────────────────────────────────────────────────────────────────
+const CaseDocumentSchema = new Schema(
+    {
+        name:       { type: String, trim: true },
+        url:        { type: String, trim: true },
+        mimeType:   { type: String, trim: true },
+        // e.g. 'trade_document', 'bank_statement', 'company_registry'
+        type:       { type: String, trim: true, default: 'other' },
+        sizeBytes:  { type: Number, default: null },
+        uploadedAt: { type: Date, default: Date.now },
+        uploadedBy: { type: Schema.Types.ObjectId, ref: 'Users', default: null },
+
+        tbml: {
+            reportId:     { type: String, default: null },
+            submissionId: { type: String, default: null },
+            // Mirrors the engine's OSINTStatus so the case list can say a
+            // screening is still running without calling out to it.
+            status:       { type: String, default: null },
+            dbSource:     { type: Number, default: null },
+            submittedAt:  { type: Date, default: null },
+        },
+    },
+    { timestamps: false }
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Case schema
@@ -21,8 +58,10 @@ const { Schema } = mongoose;
 const CaseSchema = new Schema(
     {
         // ── Identity ─────────────────────────────────────────────────────────
-        uid:      { type: String, unique: true, sparse: true, index: true },
-        sequence: { type: Number, index: true },
+        // No `sequence`: the uid no longer counts, so nothing needs one (see the
+        // pre('save') hook below). Cases written before this keep whatever
+        // sequence they were given — Mongoose simply ignores the stored field.
+        uid: { type: String, unique: true, sparse: true, index: true },
 
         // ── Multi-tenant ─────────────────────────────────────────────────────
         client: { type: Schema.Types.ObjectId, ref: 'Client', default: null, index: true },
@@ -60,12 +99,7 @@ const CaseSchema = new Schema(
 
         // ── Risk ─────────────────────────────────────────────────────────────
         // Derived from linked alerts; updated when alerts are added/removed.
-        riskScore: { type: Number, min: 0, max: 100, default: null },
-        riskLabel: {
-            type:    String,
-            enum:    ['Low', 'Medium', 'High', 'Critical', 'Info', null],
-            default: null,
-        },
+        ...riskFields({ nullable: true }),
 
         // ── Priority ─────────────────────────────────────────────────────────
         priority: {
@@ -129,13 +163,30 @@ const CaseSchema = new Schema(
         decidedAt:     { type: Date, default: null },
         decidedBy:     { type: Schema.Types.ObjectId, ref: 'Users', default: null },
 
-        // ── SLA ──────────────────────────────────────────────────────────────
-        slaDeadline: { type: Date, default: null },
-        slaStatus: {
-            type:    String,
-            enum:    ['on_time', 'at_risk', 'breached'],
-            default: 'on_time',
+        // ── Review window (docs/74 §6.2) ──────────────────────────────────────
+        // The period the case's transaction analysis covers. Left empty until an
+        // analyst pins one down; the analysis service then falls back to
+        // "30 days before the earliest alert / transaction → now".
+        reviewWindow: {
+            start:  { type: Date, default: null },
+            end:    { type: Date, default: null },
+            source: { type: String, enum: ['default', 'analyst'], default: 'default' },
         },
+
+        // Cached result of GET /cases/:id/analysis — the numbers every ECDD /
+        // SMR / GFS / RFI draft is built from. Written with `timestamps: false`
+        // so caching does not itself invalidate the cache.
+        analysis: {
+            computedAt: { type: Date, default: null },
+            snapshot:   { type: Schema.Types.Mixed, default: null },
+        },
+
+        // ── SLA ──────────────────────────────────────────────────────────────
+        ...slaFields(),
+
+        // ── Evidence ─────────────────────────────────────────────────────────
+        // Files attached to the case; the bytes live in FileVault.
+        documents: { type: [CaseDocumentSchema], default: [] },
 
         // ── Metadata ─────────────────────────────────────────────────────────
         tags:     [{ type: String, trim: true }],
@@ -168,10 +219,7 @@ CaseSchema.index({ title: 'text', description: 'text' });
 // Virtuals
 // ─────────────────────────────────────────────────────────────────────────────
 
-CaseSchema.virtual('isOverdue').get(function () {
-    if (!this.slaDeadline) return false;
-    return !['closed'].includes(this.status) && new Date() > this.slaDeadline;
-});
+addOverdueVirtual(CaseSchema, ['closed']);
 
 // Convenience: total linked alert count (populated separately via CaseNote / AuditLog)
 CaseSchema.virtual('alertCount').get(function () {
@@ -190,19 +238,25 @@ CaseSchema.virtual('gfsReports',  { ref: 'GFS',        localField: '_id', foreig
 CaseSchema.virtual('rfis',        { ref: 'RFI',        localField: '_id', foreignField: 'case' });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Plugins — AutoIncrement registered first so sequence is set before pre-save
+// Identity
 // ─────────────────────────────────────────────────────────────────────────────
 
-CaseSchema.plugin(AutoIncrement, {
-    inc_field: 'sequence',
-    id:        'case_sequence',
-    start_seq: 1,
-});
-
-// uid is derived from sequence; sequence is guaranteed set by AutoIncrement above.
+// The uid is minted here, in the same write as the case, and deliberately does
+// NOT come from an auto-increment sequence.
+//
+// It used to be `CA-<padded sequence>` derived from mongoose-sequence's counter.
+// That plugin assigns `sequence` in a hook that runs AFTER the schema's own
+// pre('save') hooks, so the derivation always read `undefined` and every case
+// created through the API was saved with no uid at all — invisible only because
+// the seeder sets its own. A timestamp plus a short random suffix needs no
+// counter, no plugin-ordering assumption and no second write, and matches how
+// every other record here mints a uid (TXN_, ECDD_, SMR_, GFS_, RFI_, DISM_,
+// NOTIFY_). The suffix is what makes two cases created in the same millisecond
+// safe against the unique index.
 CaseSchema.pre('save', function (next) {
-    if (this.isNew && !this.uid && this.sequence) {
-        this.uid = `CA-${String(this.sequence).padStart(7, '0')}`;
+    if (this.isNew && !this.uid) {
+        const suffix = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+        this.uid = `CA-${Date.now()}-${suffix}`;
     }
     next();
 });

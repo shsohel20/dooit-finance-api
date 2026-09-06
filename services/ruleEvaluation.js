@@ -22,6 +22,38 @@ const PARTY_PATHS = ["sender", "receiver", "beneficiary", "intermediary"];
 
 // ── Field resolution ─────────────────────────────────────────────────────────
 
+const { signalKey } = require("../models/schemas/riskShared");
+
+// ── Risk signals ─────────────────────────────────────────────────────────────
+// `signals[]` (Transaction + Customer) holds typed facts with no column of
+// their own. A rule can say `signals.beneficiary_on_watchlist` or just the
+// analyst label "Beneficiary on watchlist" — both resolve to the same key.
+const signalValue = (doc, rawField) => {
+    const list = doc && Array.isArray(doc.signals) ? doc.signals : [];
+    if (!list.length) return undefined;
+    const key = signalKey(rawField.replace(/^signals\./i, ""));
+    const now = Date.now();
+    const hit = list.find(
+        (s) => s && s.key === key && (!s.expiresAt || new Date(s.expiresAt).getTime() > now)
+    );
+    return hit ? hit.value : undefined;
+};
+
+// ── Derived customer facts ───────────────────────────────────────────────────
+// Values rules ask for that exist only implicitly on the Customer document.
+const DAY_MS = 86400e3;
+const yearsSince = (d) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / (365.25 * DAY_MS)) : undefined);
+const daysSince = (d) => (d ? Math.floor((Date.now() - new Date(d).getTime()) / DAY_MS) : undefined);
+const customerDob = (c) => c?.personalKyc?.personal_form?.customer_details?.date_of_birth;
+const customerSince = (c) => (c?.relations || []).map((r) => r?.registeredAt).filter(Boolean).sort()[0] || c?.createdAt;
+const DERIVED_CUSTOMER = {
+    age:               (c) => yearsSince(customerDob(c)),
+    customer_age:      (c) => yearsSince(customerDob(c)),
+    sender_age:        (c) => yearsSince(customerDob(c)),
+    account_open_days: (c) => daysSince(customerSince(c)),
+    account_age_days:  (c) => daysSince(customerSince(c)),
+};
+
 const getPath = (obj, path) =>
     path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
@@ -89,13 +121,51 @@ const FIELD_ALIASES = {
     kyc_status:             (txn) => customerValues(txn, "kycStatus"),
 };
 
+// Customer-subject aliases: the same analyst vocabulary, resolved directly on
+// a Customer document (appliesTo:'customer' rules are evaluated against the
+// customer itself — there is no transaction to hop through).
+const CUSTOMER_ALIASES = {
+    pep:        (c) => c?.isPep,
+    pep_status: (c) => c?.isPep,
+    ispep:      (c) => c?.isPep,
+    sanction:   (c) => c?.sanction,
+    sanctions:  (c) => c?.sanction,
+    amlstatus:  (c) => c?.amlStatus,
+    aml_status: (c) => c?.amlStatus,
+    kycstatus:  (c) => c?.kycStatus,
+    kyc_status: (c) => c?.kycStatus,
+    country:    (c) => c?.country,
+    status:     (c) => c?.status,
+    ...DERIVED_CUSTOMER,
+};
+
 /**
- * Resolve a rule field name against a transaction context.
- * Returns { found, value } where value may be an array (any-match).
+ * Resolve a rule field name against a Customer document (subject = customer).
+ * Accepts both bare paths ("isPep", "personalKyc.…") and the transaction-side
+ * spelling ("customer.isPep") so a rule can be re-targeted without rewriting.
  */
-const resolveField = (txn, rawField) => {
+const resolveCustomerField = (customer, rawField) => {
+    const field = rawField.replace(/^customer\./i, "");
+    const aliasKey = field.toLowerCase().replace(/\s+/g, "_");
+    const alias = CUSTOMER_ALIASES[aliasKey] || CUSTOMER_ALIASES[aliasKey.replace(/[._]/g, "")];
+    let value = alias ? alias(customer) : getPath(customer, field);
+    // Fall back to a typed signal ("Device fingerprint banned" → signals.device_fingerprint_banned)
+    if (value === undefined) value = signalValue(customer, field);
+    const empty = value === undefined || value === null || value === "";
+    return { found: !empty, value };
+};
+
+/**
+ * Resolve a rule field name against a subject document.
+ * Returns { found, value } where value may be an array (any-match).
+ * `opts.subject` is 'transaction' (default) or 'customer' — mirrors
+ * RuleEngine.appliesTo.
+ */
+const resolveField = (txn, rawField, opts = {}) => {
     if (!rawField || typeof rawField !== "string") return { found: false, value: undefined };
     const field = rawField.trim();
+
+    if (opts.subject === "customer") return resolveCustomerField(txn, field);
 
     // 1. Alias map (normalized: lowercase, dots/spaces collapsed)
     const aliasKey = field.toLowerCase().replace(/\s+/g, "_").replace(/^(txn|transaction)\./, "");
@@ -113,9 +183,23 @@ const resolveField = (txn, rawField) => {
         return { found: values.length > 0, value: values };
     }
 
-    // 3. Literal dotted/plain schema path on the transaction
+    // 3. Derived customer facts asked for on a transaction rule ("Sender age")
+    const derivedKey = aliasKey.replace(/^customer_/, "");
+    if (DERIVED_CUSTOMER[derivedKey] || DERIVED_CUSTOMER[aliasKey]) {
+        const fn = DERIVED_CUSTOMER[derivedKey] || DERIVED_CUSTOMER[aliasKey];
+        const values = compact(partyCustomers(txn).map(fn));
+        if (values.length) return { found: true, value: values };
+    }
+
+    // 4. Literal dotted/plain schema path on the transaction
     const direct = getPath(txn, field);
     if (direct !== undefined) return { found: direct !== null, value: direct };
+
+    // 5. Typed signal — on the transaction first, then on any party customer
+    const own = signalValue(txn, field);
+    if (own !== undefined) return { found: true, value: own };
+    const fromCustomers = compact(partyCustomers(txn).map((c) => signalValue(c, field)));
+    if (fromCustomers.length) return { found: true, value: fromCustomers };
 
     return { found: false, value: undefined };
 };
@@ -226,8 +310,8 @@ const expectedLabel = (leaf) => {
  * Evaluate one condition leaf against a transaction.
  * Returns { pass, found, field, operator, expected, actual }.
  */
-const evalLeaf = (leaf, txn) => {
-    const { found, value } = resolveField(txn, leaf.field);
+const evalLeaf = (leaf, txn, opts = {}) => {
+    const { found, value } = resolveField(txn, leaf.field, opts);
     const result = {
         field: leaf.field,
         operator: leaf.operator,
@@ -265,14 +349,14 @@ const isLeafNode = (node) => node && typeof node === "object" && node.field && n
  * transaction. All leaves are evaluated (no short-circuit) so callers get the
  * full matched/missed picture. Returns boolean; pushes leaf results into `out`.
  */
-const evalNode = (node, txn, out) => {
+const evalNode = (node, txn, out, opts = {}) => {
     if (isLeafNode(node)) {
-        const r = evalLeaf(node, txn);
+        const r = evalLeaf(node, txn, opts);
         out.push(r);
         return r.pass;
     }
     if (node && Array.isArray(node.children) && node.children.length) {
-        const results = node.children.map((c) => evalNode(c, txn, out));
+        const results = node.children.map((c) => evalNode(c, txn, out, opts));
         return String(node.logic).toUpperCase() === "OR"
             ? results.some(Boolean)
             : results.every(Boolean);
@@ -300,12 +384,14 @@ const resolveExecutable = (rule) => {
 };
 
 /**
- * Evaluate a resolved tree against one transaction.
+ * Evaluate a resolved tree against one subject document.
+ * `opts.subject` = 'transaction' (default) | 'customer' — pass the rule's
+ * appliesTo so customer rules resolve fields on the Customer itself.
  * Returns { matched, leaves, matchedLeaves, missedLeaves, fieldMisses }.
  */
-const evaluateTree = (tree, txn) => {
+const evaluateTree = (tree, txn, opts = {}) => {
     const leaves = [];
-    const matched = evalNode(tree, txn, leaves);
+    const matched = evalNode(tree, txn, leaves, opts);
     return {
         matched,
         leaves,
@@ -373,6 +459,7 @@ const hasAggregation = (rule) =>
     (rule.aggregation.count != null || rule.aggregation.sumThreshold != null);
 
 module.exports = {
+    signalValue,
     resolveField,
     evalLeaf,
     resolveExecutable,
