@@ -14,7 +14,8 @@
       "PowerShell(node --check controllers/onboardingJourneyController.js)",
       "PowerShell(node --check models/SumsubSyncAudit.js)",
       "PowerShell(Remove-Item models\\\\SumsubSyncAudit.js -Confirm:$false)",
-      "PowerShell(node --check models/AuditLog.js)"
+      "PowerShell(node --check models/AuditLog.js)",
+      "Skill(claude-api)"
     ],
     "additionalDirectories": [
       "f:\\Fintech\\dooit-api\\.claude\\skills"

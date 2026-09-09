@@ -53,9 +53,15 @@ const CaseInvestigationSchema = new Schema(
         pois: { type: [Schema.Types.Mixed], default: [] },
         customTypologies: { type: [String], default: [] },
         customReasons: { type: [String], default: [] },
+        // The period under review (wizard step 3). `start`/`end` bound the
+        // activity being investigated; `reviewFrom`/`reviewTo` bound the window
+        // the analyst actually examined, which is usually wider — an analyst who
+        // reviewed a full year to explain a six-week spike must be able to say so.
         dateRange: {
             start: { type: Date, default: null },
             end: { type: Date, default: null },
+            reviewFrom: { type: Date, default: null },
+            reviewTo: { type: Date, default: null },
         },
 
         // ── Narrative (step 7) ───────────────────────────────────────────────
