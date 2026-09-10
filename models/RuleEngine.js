@@ -356,3 +356,7 @@ RuleEngineSchema.virtual('isInEffect').get(function () {
 });
 
 module.exports = mongoose.model('RuleEngine', RuleEngineSchema);
+
+// Reused by models/Workflow.js — a workflow's condition branches speak the same
+// DSL as a rule's conditions. One vocabulary, one set of operators, one guard.
+module.exports.ConditionLeafSchema = ConditionLeafSchema;

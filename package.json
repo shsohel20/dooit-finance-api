@@ -14,7 +14,8 @@
     "test:billing": "jest --testPathPatterns=tests/billing --runInBand --forceExit",
     "test:rule-engine": "jest --testPathPatterns=tests/rule-engine --runInBand --forceExit",
     "test:alerts": "jest --testPathPatterns=tests/alerts --runInBand --forceExit",
-    "test:cases": "jest --testPathPatterns=tests/cases --runInBand --forceExit"
+    "test:cases": "jest --testPathPatterns=tests/cases --runInBand --forceExit",
+    "test:workflow": "jest --testPathPatterns=tests/workflow --runInBand --forceExit"
   },
   "jest": {
     "testEnvironment": "node",
