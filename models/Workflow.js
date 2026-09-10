@@ -236,10 +236,14 @@ WorkflowSchema.pre(['findOneAndUpdate', 'updateOne', 'updateMany'], function (ne
     next();
 });
 
+// findOneAndUpdate returns the doc -> snapshot it. updateOne/updateMany do not
+// (the repair/migration scripts use those deliberately, no history wanted).
 WorkflowSchema.post('findOneAndUpdate', async function (doc) {
     const changed = (this.$locals && this.$locals.changedPaths) || [];
     if (!changed.length || !doc) return;
-    await recordVersion(doc, changed);
+    // Callers without { new: true } receive the pre-update doc - re-read it
+    const fresh = this.getOptions().new ? doc : await this.model.findById(doc._id);
+    await recordVersion(fresh, changed);
 });
 
 module.exports = mongoose.model('Workflow', WorkflowSchema);

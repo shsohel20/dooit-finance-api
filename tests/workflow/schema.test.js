@@ -158,4 +158,14 @@ describe("Workflow version history", () => {
     expect(fresh.version).toBe(2);
     expect(await WorkflowVersion.countDocuments({ workflow: doc._id, version: 2 })).toBe(1);
   });
+
+  test("findOneAndUpdate without { new: true } still snapshots", async () => {
+    const doc = await Workflow.create(wf({ client: CLIENT_A }));
+    // No { new: true } — the post hook receives the PRE-update doc, so it must
+    // re-read before snapshotting or the version bumps with no history written.
+    await Workflow.findByIdAndUpdate(doc._id, { edges: [{ from: "n1", to: "n1" }] });
+    const fresh = await Workflow.findById(doc._id);
+    expect(fresh.version).toBe(2);
+    expect(await WorkflowVersion.countDocuments({ workflow: doc._id, version: 2 })).toBe(1);
+  });
 });
