@@ -13,6 +13,15 @@ const mongoose = require('mongoose');
 
 const { Schema } = mongoose;
 const { ConditionLeafSchema } = require('./RuleEngine');
+// Register the history model alongside this one. The version hooks below look
+// it up with mongoose.model('WorkflowVersion'), and that throws if nothing has
+// required the module — a throw the hooks swallow by design (a history write
+// must never fail a workflow write). The result was silent: seeds and scripts
+// that required only this file bumped `version` and wrote no snapshot at all,
+// losing exactly the audit trail the collection exists for. Requiring it here
+// makes the pair inseparable. Safe: WorkflowVersion requires only mongoose,
+// so there is no cycle.
+require('./WorkflowVersion');
 
 const NODE_TYPES = [
     'level',   // document / selfie / AML check

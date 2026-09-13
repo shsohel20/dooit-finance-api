@@ -45,6 +45,11 @@ const read = (...keys) => keys.map((k) => `${k}.GET`);
 // TRAINING.ADMIN (delete a module, grant module access) is deliberately not part
 // of the training bundle a manager gets — only the platform admin holds it.
 const TRAINING_NO_ADMIN = mod("TRAINING").filter((p) => p !== "TRAINING.ADMIN");
+// WORKFLOW.APPROVE is deliberately not part of the workflow bundle any role
+// gets by default — maker (WORKFLOW.ADD/EDIT) and checker (WORKFLOW.APPROVE)
+// must never come from the same grant, or maker-checker is decorative. It is
+// added back, alone, to the compliance officer role below.
+const WORKFLOW_NO_APPROVE = mod("WORKFLOW").filter((p) => p !== "WORKFLOW.APPROVE");
 
 // ── Default permission profiles, keyed by lower-cased Role.name ─────────────
 // Keep these aligned with the guards in api/routes/*.js. A profile is a
@@ -60,7 +65,7 @@ const PROFILES = {
     ...mod("USER"), ...mod("BRANCH"), ...mod("STAFF"), ...mod("CUSTOMER"),
     ...mod("CUSTOMER_ACCOUNT"), ...mod("ONBOARDING"), ...mod("SUMSUB"),
     ...mod("TRANSACTION"), ...mod("ALERT"), ...mod("CASE"), ...mod("RFI"),
-    ...mod("CLIENT_RULE"), ...mod("POLICY_HUB"), ...mod("RISK_ASSESSMENT"),
+    ...mod("CLIENT_RULE"), ...WORKFLOW_NO_APPROVE, ...mod("POLICY_HUB"), ...mod("RISK_ASSESSMENT"),
     ...mod("REPORT"), ...TRAINING_NO_ADMIN, ...mod("AML_DOC"), ...mod("AFC_DOC"),
     ...mod("NOTIFY"), ...mod("GRC"), ...mod("EWRA"), ...mod("REFERENCE"),
     ...mod("DEVICE"), ...mod("AUDIT"),
@@ -75,7 +80,7 @@ const PROFILES = {
     ...mod("ALERT"), ...mod("CASE"), ...mod("RFI"), ...mod("REPORT"),
     ...mod("NOTIFY"), "TRAINING.GET",
     ...read("CLIENT", "BRANCH", "POLICY_HUB", "RISK_ASSESSMENT", "CLIENT_RULE",
-            "GRC", "EWRA", "REFERENCE", "DEVICE", "AUDIT"),
+            "WORKFLOW", "GRC", "EWRA", "REFERENCE", "DEVICE", "AUDIT"),
     "PRIVACY.ENCRYPTVIEW",
   ],
 
@@ -92,7 +97,7 @@ const PROFILES = {
     "TRANSACTION.GET", "TRANSACTION.EDIT",
     "ONBOARDING.GET", "ONBOARDING.REVIEW",
     "SUMSUB.GET", "SUMSUB.EDIT",
-    "POLICY_HUB.GET", "AFC_DOC.GET", "CLIENT_RULE.GET",
+    "POLICY_HUB.GET", "AFC_DOC.GET", "CLIENT_RULE.GET", "WORKFLOW.GET",
     "STAFF.GET", "NOTIFY.GET", "TRAINING.GET",
     // Device intelligence + the who-did-what audit feed are core to
     // investigations: full device module (trust/risk flags), read-only audit.
@@ -100,6 +105,11 @@ const PROFILES = {
     // Authors the enterprise-wide risk assessment but does not sign it off —
     // EWRA.APPROVE sits with the senior manager and the governing body.
     "EWRA.GET", "EWRA.ADD", "EWRA.EDIT",
+    // The maker-checker control for workflows: compliance officer is the
+    // ONLY role granted WORKFLOW.APPROVE, and holds it alone — not the
+    // WORKFLOW.ADD/EDIT bundle (that belongs to "client", who builds and
+    // publishes workflows). One role holding both would make this decorative.
+    "WORKFLOW.APPROVE",
     // Seeing PII unredacted is inherent to the role; drop this line (or block
     // the user via RolePermission.restrictedUsers) where that is not wanted.
     "PRIVACY.ENCRYPTVIEW",
@@ -112,7 +122,7 @@ const PROFILES = {
     ...mod("RISK_ASSESSMENT"),
     "CUSTOMER.GET", "CUSTOMER.EDIT", "CUSTOMER_ACCOUNT.GET",
     "TRANSACTION.GET", "ONBOARDING.GET", "ONBOARDING.REVIEW",
-    "SUMSUB.GET", "CLIENT_RULE.GET", "AML_DOC.GET", "AFC_DOC.GET",
+    "SUMSUB.GET", "CLIENT_RULE.GET", "WORKFLOW.GET", "AML_DOC.GET", "AFC_DOC.GET",
     ...mod("GRC"), ...mod("EWRA"),
     ...read("USER", "CLIENT", "BRANCH", "REFERENCE", "DEVICE", "AUDIT"),
     "PRIVACY.ENCRYPTVIEW",
@@ -123,7 +133,7 @@ const PROFILES = {
   "governing body": [
     ...read(
       "USER", "CLIENT", "BRANCH", "STAFF", "CUSTOMER", "CUSTOMER_ACCOUNT",
-      "TRANSACTION", "ALERT", "CASE", "RFI", "CLIENT_RULE", "POLICY_HUB",
+      "TRANSACTION", "ALERT", "CASE", "RFI", "CLIENT_RULE", "WORKFLOW", "POLICY_HUB",
       "RISK_ASSESSMENT", "ONBOARDING", "SUMSUB", "AML_DOC", "AFC_DOC",
       "NOTIFY", "TRAINING", "GRC", "EWRA", "REFERENCE", "DEVICE", "AUDIT",
     ),
@@ -174,6 +184,7 @@ async function run() {
     process.exit(1);
   }
 
+  console.log(`Connected: ${process.env.MONGO_URI}`.gray);
   await mongoose.connect(process.env.MONGO_URI);
   console.log(`Connected: ${process.env.MONGO_URI.replace(/\/\/[^@]*@/, "//****@")}`.gray);
 

@@ -20,5 +20,6 @@
     "additionalDirectories": [
       "f:\\Fintech\\dooit-api\\.claude\\skills"
     ]
-  }
+  },
+  "prefersReducedMotion": true
 }

@@ -27,6 +27,7 @@ const SEEDS = [
   { name: "Monitoring Rules",         file: "seeds/seedMonitoringRules.js" },
   { name: "RAP Templates",            file: "seeds/seedRapTemplates.js" },
   { name: "Onboarding Questions",     file: "seeds/seedOnboardingQuestions.js" },
+  { name: "Workflow Templates",       file: "seeds/workflowTemplates.js" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
