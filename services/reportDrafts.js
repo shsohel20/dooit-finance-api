@@ -228,6 +228,57 @@ function buildSmrFacts({ caseDoc, analysis, alerts, client, user, previousReport
 
 /* ── GFS (docs/74 §4.3) ─────────────────────────────────────────────────── */
 
+const POI_ROLE_LABELS = {
+  subject: 'Subject',
+  associated_party: 'Associated party',
+  counterparty: 'Counterparty',
+  beneficiary: 'Beneficiary',
+  beneficial_owner: 'Beneficial owner',
+  director: 'Director',
+  third_party: 'Third party',
+  other: 'Other',
+};
+
+function gfsPois(caseDoc, analysis) {
+  const external = caseDoc.externalPois || [];
+  const byAccount = new Map(external.filter((p) => p.account).map((p) => [p.account, p]));
+  const matched = new Set();
+
+  const counterparties = analysis.counterparties.map((c) => {
+    const ext = c.account ? byAccount.get(c.account) : null;
+    if (ext) matched.add(String(ext._id));
+    return {
+      name: (ext && ext.name) || c.name || '',
+      relationship: ext ? POI_ROLE_LABELS[ext.role] || 'Counterparty' : 'Counterparty',
+      country: c.institutionCountry || '',
+      institution: c.institution || '',
+      account: c.account || '',
+      transactionCount: c.transactionCount,
+      totalAmountAUD: c.totalAmountAUD,
+    };
+  });
+
+  return [
+    ...analysis.pois.map((p) => ({
+      customer: p.customer,
+      name: p.name || p.uid || '',
+      relationship: p.role === 'subject' ? 'Subject' : 'Linked customer',
+      country: p.country || '',
+    })),
+    ...counterparties,
+    ...external
+      .filter((p) => !matched.has(String(p._id)))
+      .map((p) => ({
+        id: String(p._id),
+        name: p.name || '',
+        relationship: POI_ROLE_LABELS[p.role] || 'Associated party',
+        country: p.country || p.nationality || p.institutionCountry || '',
+        institution: p.institution || '',
+        account: p.account || '',
+      })),
+  ];
+}
+
 function buildGfsFacts({ caseDoc, analysis, linkedToSMR }) {
   const subject = subjectOf(analysis);
   const { totals, window } = analysis;
@@ -294,24 +345,11 @@ function buildGfsFacts({ caseDoc, analysis, linkedToSMR }) {
       transactionCount: i.transactionCount,
     })),
 
-    // POIs = the case's own customers plus the counterparties they dealt with.
-    pois: [
-      ...analysis.pois.map((p) => ({
-        customer: p.customer,
-        name: p.name || p.uid || '',
-        relationship: p.role === 'subject' ? 'Subject' : 'Linked customer',
-        country: p.country || '',
-      })),
-      ...analysis.counterparties.map((c) => ({
-        name: c.name || '',
-        relationship: 'Counterparty',
-        country: c.institutionCountry || '',
-        institution: c.institution || '',
-        account: c.account || '',
-        transactionCount: c.transactionCount,
-        totalAmountAUD: c.totalAmountAUD,
-      })),
-    ],
+    // POIs = the case's own customers, the counterparties they dealt with, and
+    // the non-customer POIs an analyst recorded (Case.externalPois). An
+    // external POI with a counterparty's account IS that counterparty — it
+    // lends its name and role to the row rather than appearing twice.
+    pois: gfsPois(caseDoc, analysis),
 
     cryptoAddresses: [...new Set(analysis.cryptoAddresses.map((c) => c.address).filter(Boolean))],
     cryptoLegs: analysis.cryptoAddresses,

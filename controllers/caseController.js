@@ -27,7 +27,12 @@ const {
   detachAlertFromCase,
   addCustomersToCase,
   removeCustomerFromCase,
+  addExternalPoi,
+  updateExternalPoi,
+  removeExternalPoi,
+  listAlertPoiCandidates,
 } = require('../services/caseLinking');
+const { searchCustomers } = require('../utils/customerSearch');
 const { analyseCase } = require('../services/caseAnalysis');
 const { draftReport, SUPPORTED_TYPES } = require('../services/reportDrafts');
 const { resolveCaseLinkage } = require('../utils/resolveCaseLinkage');
@@ -1172,6 +1177,93 @@ exports.unlinkCustomer = asyncHandler(async (req, res, next) => {
   if (accessErr) return next(accessErr);
 
   await removeCustomerFromCase(caseDoc, req.params.customerId, { user: req.user, req });
+
+  const updated = await populateCase(Case.findById(req.params.id)).lean();
+  res.status(200).json({ succeed: true, data: updated });
+});
+
+// ── GET /cases/:id/poi-candidates?q= ─────────────────────────────────────────
+// What the "Add person of interest" picker offers:
+//   customers   — tenant customers matching `q` (only searched when q is given)
+//   alerts      — every party on the case's linked alerts, grouped by alert
+// Each entry says whether it is already a POI so the picker can disable it.
+exports.getPoiCandidates = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } })
+    .select('client branch customer linkedCustomers linkedAlerts externalPois assignedTo')
+    .lean();
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  const q = String(req.query.q || '').trim();
+  const tenant = getTenant(req);
+  const poiIds = new Set(
+    [caseDoc.customer, ...(caseDoc.linkedCustomers || [])].filter(Boolean).map(String)
+  );
+
+  const [customers, alerts] = await Promise.all([
+    // Scope to the CASE's tenant (not a query param) so the picker can never
+    // list another tenant's customers; linkCustomers re-checks on write anyway.
+    q
+      ? searchCustomers({ q, limit: 20, clientId: caseDoc.client || tenant.client, branchId: tenant.branch })
+      : Promise.resolve([]),
+    listAlertPoiCandidates(caseDoc),
+  ]);
+
+  res.status(200).json({
+    succeed: true,
+    data: {
+      customers: customers.map((c) => ({ ...c, alreadyPoi: poiIds.has(String(c.id)) })),
+      alerts,
+    },
+  });
+});
+
+// ── POST /cases/:id/pois ─────────────────────────────────────────────────────
+// Add a person of interest who is not a customer: typed in, or taken off a
+// party slot on a linked alert's transaction (`fromAlert: { alertId, slot }`).
+// Customers are added through POST /cases/:id/customers instead.
+exports.addPoi = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  await addExternalPoi(caseDoc, req.body, { user: req.user, req });
+
+  const updated = await populateCase(Case.findById(req.params.id)).lean();
+  res.status(201).json({ succeed: true, data: updated });
+});
+
+// ── PATCH /cases/:id/pois/:poiId ─────────────────────────────────────────────
+exports.updatePoi = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  await updateExternalPoi(caseDoc, req.params.poiId, req.body, { user: req.user, req });
+
+  const updated = await populateCase(Case.findById(req.params.id)).lean();
+  res.status(200).json({ succeed: true, data: updated });
+});
+
+// ── DELETE /cases/:id/pois/:poiId ────────────────────────────────────────────
+exports.removePoi = asyncHandler(async (req, res, next) => {
+  const caseDoc = await Case.findOne({ _id: req.params.id, isDeleted: { $ne: true } });
+  if (!caseDoc) {
+    return next(new ErrorResponse(`Case not found with id ${req.params.id}`, 404));
+  }
+  const accessErr = checkCaseAccess(caseDoc, req);
+  if (accessErr) return next(accessErr);
+
+  await removeExternalPoi(caseDoc, req.params.poiId, { user: req.user, req });
 
   const updated = await populateCase(Case.findById(req.params.id)).lean();
   res.status(200).json({ succeed: true, data: updated });

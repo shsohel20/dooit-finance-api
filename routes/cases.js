@@ -20,6 +20,10 @@ const {
   unlinkAlert,
   linkCustomers,
   unlinkCustomer,
+  getPoiCandidates,
+  addPoi,
+  updatePoi,
+  removePoi,
   deleteCase,
   addNote,
   getCaseNotes,
@@ -40,6 +44,8 @@ const {
   validateAssignment,
   validateLinkAlerts,
   validateLinkCustomers,
+  validateAddPoi,
+  validateUpdatePoi,
   validateReviewWindow,
 } = require('../middleware/caseValidation');
 
@@ -110,6 +116,22 @@ router
 router
   .route('/:id/customers/:customerId')
   .delete(authorizePermission('CASE.EDIT'), unlinkCustomer);
+
+// ── Persons of interest who are not customers ────────────────────────────────
+// GET    → candidates for the picker: tenant customers matching ?q= + every
+//          party on the case's linked alerts, each flagged if already a POI
+// POST   → add a POI by manual entry, or off an alert party (fromAlert)
+// PATCH  → edit one;  DELETE → remove one
+router.route('/:id/poi-candidates').get(authorizePermission('CASE.GET'), getPoiCandidates);
+
+router
+  .route('/:id/pois')
+  .post(authorizePermission('CASE.EDIT'), validateAddPoi, addPoi);
+
+router
+  .route('/:id/pois/:poiId')
+  .patch(authorizePermission('CASE.EDIT'), validateUpdatePoi, updatePoi)
+  .delete(authorizePermission('CASE.EDIT'), removePoi);
 
 // ── Investigation Hub progress (the 12-step workflow's memory) ────────────────
 router

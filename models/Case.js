@@ -43,6 +43,83 @@ const CaseDocumentSchema = new Schema(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// External person of interest
+//
+// A POI who is NOT one of our customers — a counterparty on a flagged
+// transaction, a director or beneficial owner named in an RFI response, a third
+// party an analyst found in open sources. Customers who are POIs stay in
+// `customer` / `linkedCustomers` (the Customer record is the source of truth);
+// this array holds everyone else, with enough identifying detail to go into
+// an SMR (AUSTRAC Part C "other parties") without re-keying.
+//
+// `source` records how the analyst found them: picked off a party slot on a
+// linked alert's transaction ('alert'), or typed in ('manual'). For 'alert'
+// POIs the alert / transaction / party slot are kept so the same party cannot
+// be added twice and the SMR can cite where the name came from.
+// ─────────────────────────────────────────────────────────────────────────────
+const POI_ROLES = [
+    'subject',          // a subject of the suspicion in their own right
+    'associated_party', // connected to the subject, suspicion not yet established
+    'counterparty',     // the other side of a flagged transaction
+    'beneficiary',
+    'beneficial_owner',
+    'director',
+    'third_party',
+    'other',
+];
+const POI_PARTY_SLOTS = ['sender', 'receiver', 'beneficiary', 'intermediary'];
+
+const ExternalPoiSchema = new Schema(
+    {
+        kind:         { type: String, enum: ['individual', 'entity'], default: 'individual' },
+        name:         { type: String, trim: true, required: [true, 'POI name is required'], maxlength: 200 },
+        aliases:      [{ type: String, trim: true, maxlength: 200 }],
+        role:         { type: String, enum: POI_ROLES, default: 'associated_party' },
+        // Free text: "Brother of the subject", "Receiving account holder".
+        relationship: { type: String, trim: true, maxlength: 300, default: null },
+
+        // ── Identity (individual) ──────────────────────────────────────────
+        dateOfBirth:  { type: Date, default: null },
+        nationality:  { type: String, trim: true, maxlength: 100, default: null },
+        occupation:   { type: String, trim: true, maxlength: 200, default: null },
+        idDocument: {
+            type:    { type: String, trim: true, maxlength: 60, default: null }, // passport, driver_licence …
+            number:  { type: String, trim: true, maxlength: 100, default: null },
+            country: { type: String, trim: true, maxlength: 100, default: null },
+        },
+
+        // ── Identity (entity) ──────────────────────────────────────────────
+        registrationNumber: { type: String, trim: true, maxlength: 100, default: null }, // ABN / ACN / foreign reg.
+
+        // ── Contact / location ─────────────────────────────────────────────
+        country: { type: String, trim: true, maxlength: 100, default: null },
+        address: { type: String, trim: true, maxlength: 500, default: null },
+        email:   { type: String, trim: true, lowercase: true, maxlength: 200, default: null },
+        phone:   { type: String, trim: true, maxlength: 50, default: null },
+
+        // ── Financial identifiers (mirrors Transaction PartySchema) ────────
+        account:            { type: String, trim: true, maxlength: 100, default: null },
+        institution:        { type: String, trim: true, maxlength: 200, default: null },
+        institutionCountry: { type: String, trim: true, maxlength: 100, default: null },
+        bic:                { type: String, trim: true, maxlength: 20, default: null },
+
+        notes: { type: String, trim: true, maxlength: 2000, default: null },
+
+        // ── Provenance ─────────────────────────────────────────────────────
+        source:            { type: String, enum: ['manual', 'alert'], default: 'manual' },
+        sourceAlert:       { type: Schema.Types.ObjectId, ref: 'Alert', default: null },
+        sourceAlertUid:    { type: String, default: null }, // snapshot for display
+        sourceTransaction: { type: Schema.Types.ObjectId, ref: 'Transaction', default: null },
+        sourcePartySlot:   { type: String, enum: [...POI_PARTY_SLOTS, null], default: null },
+
+        addedBy:   { type: Schema.Types.ObjectId, ref: 'Users', default: null },
+        addedAt:   { type: Date, default: Date.now },
+        updatedBy: { type: Schema.Types.ObjectId, ref: 'Users', default: null },
+    },
+    { timestamps: false }
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Case schema
 //
 // Notes and audit trail are stored in separate collections:
@@ -131,7 +208,9 @@ const CaseSchema = new Schema(
 
         // ── Linked records ───────────────────────────────────────────────────
         customer:           { type: Schema.Types.ObjectId, ref: 'Customer', default: null }, // Primary customer (POI)
-        linkedCustomers:    [{ type: Schema.Types.ObjectId, ref: 'Customer' }], // POI 
+        linkedCustomers:    [{ type: Schema.Types.ObjectId, ref: 'Customer' }], // POI
+        // POIs who are not customers — see ExternalPoiSchema above.
+        externalPois:       { type: [ExternalPoiSchema], default: [] },
         linkedAlerts:       [{ type: Schema.Types.ObjectId, ref: 'Alert' }], // Should be same customer but income
         linkedTransactions: [{ type: Schema.Types.ObjectId, ref: 'Transaction' }],
 
@@ -275,3 +354,5 @@ CaseSchema.plugin(mongoosePaginate);
 // ─────────────────────────────────────────────────────────────────────────────
 
 module.exports = mongoose.model('Case', CaseSchema);
+module.exports.POI_ROLES = POI_ROLES;
+module.exports.POI_PARTY_SLOTS = POI_PARTY_SLOTS;

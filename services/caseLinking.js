@@ -409,6 +409,243 @@ async function removeCustomerFromCase(caseDoc, customerId, { user, req } = {}) {
   return { removedCustomerId: cid };
 }
 
+// ── External (non-customer) POIs ────────────────────────────────────────────
+// Customers are POIs via linkedCustomers; everyone else lives in
+// Case.externalPois. Two ways in: picked off a party slot on a linked alert's
+// transaction (source 'alert'), or typed in by the analyst (source 'manual').
+
+// Fields an analyst may write. Provenance (source*, added*) is set here, never
+// taken from the request body, so a POI cannot claim an alert it didn't come from.
+const EXTERNAL_POI_FIELDS = [
+  'kind', 'name', 'aliases', 'role', 'relationship',
+  'dateOfBirth', 'nationality', 'occupation', 'idDocument',
+  'registrationNumber',
+  'country', 'address', 'email', 'phone',
+  'account', 'institution', 'institutionCountry', 'bic',
+  'notes',
+];
+
+// Identifiers copied off the transaction party; fixed for alert-sourced POIs.
+const ALERT_LOCKED_FIELDS = ['account', 'institution', 'institutionCountry', 'bic'];
+
+const pickPoiFields = (input = {}) => {
+  const out = {};
+  for (const k of EXTERNAL_POI_FIELDS) {
+    if (input[k] === undefined) continue;
+    // '' from a cleared form field means "unset", not an empty string.
+    out[k] = input[k] === '' ? null : input[k];
+  }
+  if (out.idDocument && typeof out.idDocument === 'object') {
+    const { type, number, country } = out.idDocument;
+    out.idDocument = { type: type || null, number: number || null, country: country || null };
+  }
+  if (Array.isArray(out.aliases)) out.aliases = out.aliases.map((a) => String(a).trim()).filter(Boolean);
+  return out;
+};
+
+/**
+ * Resolve an alert-sourced POI: the alert must be linked to this case, the
+ * slot must be filled on its transaction, and the party must NOT be a customer
+ * (customers go through addCustomersToCase so the Customer stays the source of truth).
+ * @returns {Promise<{prefill:Object, provenance:Object}>}
+ */
+async function resolveAlertParty(caseDoc, { alertId, slot } = {}) {
+  if (!PARTY_PATHS.includes(slot)) throw new ErrorResponse('Invalid party slot', 400);
+  if (!includesId(caseDoc.linkedAlerts, alertId)) {
+    throw new ErrorResponse('Alert is not linked to this case', 400);
+  }
+  const alert = await Alert.findById(alertId).select('uid transaction').lean();
+  if (!alert || !alert.transaction) {
+    throw new ErrorResponse('Alert has no transaction to take a party from', 400);
+  }
+
+  const txn = await Transaction.findById(alert.transaction).select(slot).lean({ autopopulate: false });
+  const party = txn && txn[slot];
+  if (!party || (!party.name && !party.account)) {
+    throw new ErrorResponse(`The transaction has no ${slot} party`, 400);
+  }
+  if (party.customer) {
+    throw new ErrorResponse('This party is a customer — add them as a customer POI instead', 400);
+  }
+
+  const duplicate = (caseDoc.externalPois || []).find(
+    (p) => idStr(p.sourceTransaction) === idStr(alert.transaction) && p.sourcePartySlot === slot
+  );
+  if (duplicate) throw new ErrorResponse('This party is already a person of interest on the case', 409);
+
+  return {
+    prefill: {
+      name: party.name || party.account,
+      account: party.account || null,
+      institution: party.institution || null,
+      institutionCountry: party.institutionCountry || null,
+      bic: party.bic || null,
+      address: party.address || null,
+      role: slot === 'beneficiary' ? 'beneficiary' : 'counterparty',
+    },
+    provenance: {
+      source: 'alert',
+      sourceAlert: alert._id,
+      sourceAlertUid: alert.uid || null,
+      sourceTransaction: alert.transaction,
+      sourcePartySlot: slot,
+    },
+  };
+}
+
+/**
+ * Add a non-customer POI. `input.fromAlert = { alertId, slot }` takes the
+ * party off that alert's transaction; the analyst's own fields win over the prefill.
+ * @returns {Promise<Object>} the new subdocument
+ */
+async function addExternalPoi(caseDoc, input = {}, { user, req } = {}) {
+  let prefill = {};
+  let provenance = { source: 'manual' };
+  if (input.fromAlert) {
+    ({ prefill, provenance } = await resolveAlertParty(caseDoc, input.fromAlert));
+  }
+
+  const fields = { ...prefill, ...pickPoiFields(input) };
+  if (!fields.name || !String(fields.name).trim()) throw new ErrorResponse('POI name is required', 400);
+
+  caseDoc.externalPois.push({ ...fields, ...provenance, addedBy: user?._id || null, addedAt: new Date() });
+  const poi = caseDoc.externalPois[caseDoc.externalPois.length - 1];
+  await caseDoc.save();
+
+  const from =
+    provenance.source === 'alert'
+      ? ` from alert ${provenance.sourceAlertUid || idStr(provenance.sourceAlert)} (${provenance.sourcePartySlot})`
+      : ' (manual entry)';
+  await audit(caseDoc, user, 'poi_added', `Person of interest "${poi.name}" added${from}`, req);
+  return poi;
+}
+
+/** Edit a non-customer POI. Provenance is fixed at creation and cannot change. */
+async function updateExternalPoi(caseDoc, poiId, input = {}, { user, req } = {}) {
+  const poi = caseDoc.externalPois.id(poiId);
+  if (!poi) throw new ErrorResponse('Person of interest not found on this case', 404);
+
+  const fields = pickPoiFields(input);
+  // A POI taken off a transaction keeps that transaction's identifiers — they
+  // are how the SMR ties the person back to the payment.
+  if (poi.source === 'alert') {
+    for (const k of ALERT_LOCKED_FIELDS) delete fields[k];
+  }
+  if ('name' in fields && !String(fields.name || '').trim()) {
+    throw new ErrorResponse('POI name is required', 400);
+  }
+  poi.set({ ...fields, updatedBy: user?._id || null });
+  await caseDoc.save();
+
+  const changed = Object.keys(fields).join(', ') || 'no fields';
+  await audit(caseDoc, user, 'poi_updated', `Person of interest "${poi.name}" updated (${changed})`, req);
+  return poi;
+}
+
+async function removeExternalPoi(caseDoc, poiId, { user, req } = {}) {
+  const poi = caseDoc.externalPois.id(poiId);
+  if (!poi) throw new ErrorResponse('Person of interest not found on this case', 404);
+  const { name } = poi;
+  poi.deleteOne();
+  await caseDoc.save();
+
+  await audit(caseDoc, user, 'poi_removed', `Person of interest "${name}" removed`, req);
+  return { removedPoiId: idStr(poiId) };
+}
+
+/**
+ * Every party the case's alerts put in front of the analyst: for each linked
+ * alert, its customer and each filled party slot on its transaction, flagged
+ * with whether that person is already a POI. Read-only.
+ */
+async function listAlertPoiCandidates(caseDoc) {
+  const alerts = await Alert.find({ _id: { $in: caseDoc.linkedAlerts || [] } })
+    .select('uid ruleName ruleId createdAt customer transaction')
+    .sort({ createdAt: -1 })
+    .lean();
+  if (!alerts.length) return [];
+
+  const txns = await Transaction.find({ _id: { $in: uniqueIds(alerts.map((a) => a.transaction)) } })
+    .select(['uid', 'amount', 'currency', 'timestamp', ...PARTY_PATHS].join(' '))
+    .lean({ autopopulate: false });
+  const txnById = new Map(txns.map((t) => [idStr(t._id), t]));
+
+  // One lookup for every customer mentioned anywhere, for display names.
+  const customerIds = uniqueIds([
+    ...alerts.map((a) => a.customer),
+    ...txns.flatMap((t) => PARTY_PATHS.map((p) => t[p] && t[p].customer)),
+  ]);
+  const customers = await mongoose
+    .model('Customer')
+    .find({ _id: { $in: customerIds } })
+    .select('uid user kycStatus isPep sanction')
+    .populate('user', 'name')
+    .lean();
+  const custById = new Map(customers.map((c) => [idStr(c._id), c]));
+
+  const poiCustomerIds = new Set(uniqueIds([caseDoc.customer, ...(caseDoc.linkedCustomers || [])]));
+  const describeCustomer = (id) => {
+    const c = custById.get(idStr(id));
+    return {
+      id: idStr(id),
+      uid: c?.uid || null,
+      name: c?.user?.name || c?.uid || null,
+      kycStatus: c?.kycStatus || null,
+      isPep: !!c?.isPep,
+      sanction: !!c?.sanction,
+    };
+  };
+
+  return alerts.map((a) => {
+    const t = txnById.get(idStr(a.transaction)) || null;
+    const parties = [];
+    if (a.customer) {
+      const c = describeCustomer(a.customer);
+      parties.push({ slot: 'alert_subject', name: c.name, customer: c, alreadyPoi: poiCustomerIds.has(c.id) });
+    }
+    for (const slot of PARTY_PATHS) {
+      const p = t && t[slot];
+      if (!p || (!p.customer && !p.name && !p.account)) continue;
+      // The alert's customer is usually also the sender or receiver — list them once.
+      if (p.customer && idStr(p.customer) === idStr(a.customer)) continue;
+      const customer = p.customer ? describeCustomer(p.customer) : null;
+      const external = customer
+        ? null
+        : (caseDoc.externalPois || []).find(
+            (x) => idStr(x.sourceTransaction) === idStr(t._id) && x.sourcePartySlot === slot
+          );
+      parties.push({
+        slot,
+        name: customer ? customer.name : p.name || p.account,
+        account: p.account || null,
+        institution: p.institution || null,
+        institutionCountry: p.institutionCountry || null,
+        bic: p.bic || null,
+        address: p.address || null,
+        customer,
+        alreadyPoi: customer ? poiCustomerIds.has(customer.id) : !!external,
+        externalPoiId: external ? idStr(external._id) : null,
+      });
+    }
+    return {
+      alertId: idStr(a._id),
+      alertUid: a.uid || null,
+      rule: [a.ruleId, a.ruleName].filter(Boolean).join(': ') || null,
+      createdAt: a.createdAt || null,
+      transaction: t
+        ? {
+            id: idStr(t._id),
+            uid: t.uid || null,
+            amount: t.amount ?? null,
+            currency: t.currency || null,
+            timestamp: t.timestamp || null,
+          }
+        : null,
+      parties,
+    };
+  });
+}
+
 module.exports = {
   // helpers
   idStr,
@@ -428,4 +665,9 @@ module.exports = {
   detachAlertFromCase,
   addCustomersToCase,
   removeCustomerFromCase,
+  // external (non-customer) POIs
+  addExternalPoi,
+  updateExternalPoi,
+  removeExternalPoi,
+  listAlertPoiCandidates,
 };

@@ -113,6 +113,49 @@ exports.validateLinkCustomers = (req, res, next) => {
   next();
 };
 
+// POST /cases/:id/pois (isCreate) and PATCH /cases/:id/pois/:poiId.
+// Enum and length limits are enforced again by the schema; this catches the
+// shape errors early with a readable message.
+const POI_KINDS = ['individual', 'entity'];
+const POI_ROLE_VALUES = ['subject', 'associated_party', 'counterparty', 'beneficiary', 'beneficial_owner', 'director', 'third_party', 'other'];
+const POI_SLOTS = ['sender', 'receiver', 'beneficiary', 'intermediary'];
+
+const validateExternalPoi = (isCreate) => (req, res, next) => {
+  const b = req.body || {};
+  const errors = [];
+
+  if (isCreate && !b.fromAlert && !(typeof b.name === 'string' && b.name.trim()))
+    errors.push('name is required');
+  if (!isCreate && 'name' in b && !(typeof b.name === 'string' && b.name.trim()))
+    errors.push('name cannot be empty');
+  if (!isCreate && b.fromAlert) errors.push('fromAlert can only be set when adding a POI');
+
+  if (b.fromAlert) {
+    if (!isObjectIdLike(b.fromAlert.alertId)) errors.push('fromAlert.alertId must be a valid ID');
+    if (!POI_SLOTS.includes(b.fromAlert.slot))
+      errors.push(`fromAlert.slot must be one of: ${POI_SLOTS.join(', ')}`);
+  }
+  if (b.kind !== undefined && !POI_KINDS.includes(b.kind))
+    errors.push(`kind must be one of: ${POI_KINDS.join(', ')}`);
+  if (b.role !== undefined && !POI_ROLE_VALUES.includes(b.role))
+    errors.push(`role must be one of: ${POI_ROLE_VALUES.join(', ')}`);
+  if (b.dateOfBirth) {
+    const dob = new Date(b.dateOfBirth);
+    if (Number.isNaN(dob.getTime())) errors.push('dateOfBirth must be a valid date');
+    else if (dob > new Date()) errors.push('dateOfBirth cannot be in the future');
+  }
+  if (b.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(b.email)) errors.push('email must be a valid email address');
+  if (b.aliases !== undefined && !Array.isArray(b.aliases)) errors.push('aliases must be an array');
+  if (b.idDocument !== undefined && b.idDocument !== null && typeof b.idDocument !== 'object')
+    errors.push('idDocument must be an object');
+
+  if (errors.length) return next(new ErrorResponse(errors.join('; '), 400));
+  next();
+};
+
+exports.validateAddPoi = validateExternalPoi(true);
+exports.validateUpdatePoi = validateExternalPoi(false);
+
 exports.validateReviewWindow = (req, res, next) => {
   const { start, end } = req.body;
   const errors = [];
