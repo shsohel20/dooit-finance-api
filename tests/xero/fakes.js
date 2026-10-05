@@ -22,6 +22,7 @@ const makeStore = (uniqueKeys = []) => {
     reset: () => { rows.length = 0; },
     findOne: (f) => { const r = rows.find((x) => match(x, f)); const p = Promise.resolve(wrap(r)); p.select = () => p; p.lean = () => Promise.resolve(r ? { ...r } : null); return p; },
     findById: (id) => store.findOne({ _id: id }),
+    find: async (f) => rows.filter((x) => match(x, f)).map(wrap),
     create: async (doc) => {
       for (const keys of uniqueKeys) {
         if (rows.some((r) => keys.every((k) => String(r[k]) === String(doc[k])))) {
@@ -33,13 +34,13 @@ const makeStore = (uniqueKeys = []) => {
     updateOne: async (f, u) => {
       const r = rows.find((x) => match(x, f));
       if (!r) return { modifiedCount: 0 };
-      Object.assign(r, u.$set || {}); return { modifiedCount: 1 };
+      Object.assign(r, u.$set || {}); Object.keys(u.$unset || {}).forEach((k) => delete r[k]); return { modifiedCount: 1 };
     },
     deleteOne: async (f) => { const i = rows.findIndex((x) => match(x, f)); if (i >= 0) rows.splice(i, 1); },
     findOneAndUpdate: async (f, u, o = {}) => {
       let r = rows.find((x) => match(x, f));
       if (!r && o.upsert) { r = { _id: `id${++seq}`, ...Object.fromEntries(Object.entries(f).filter(([, v]) => typeof v !== "object")) }; rows.push(r); }
-      if (r) Object.assign(r, u.$set || {});
+      if (r) { Object.assign(r, u.$set || {}); Object.keys(u.$unset || {}).forEach((k) => delete r[k]); }
       return wrap(r);
     },
     findOneAndDelete: (f) => {

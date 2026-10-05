@@ -16,6 +16,11 @@ const {
   signupPrefill,
   signupComplete,
   signupSession,
+  signupPending,
+  signupPendingContinue,
+  connectionRequestDetails,
+  connectionRequestApprove,
+  connectionRequestReject,
   requireEnabled,
 } = require("../controllers/xeroController");
 const { protect, authorize, authorizeUserType } = require("../middleware/auth");
@@ -44,7 +49,27 @@ signupRouter.get("/start", signupStart);
 signupRouter.get("/prefill", signupPrefill);
 signupRouter.post("/complete", signupComplete);
 signupRouter.post("/session", signupSession);
+signupRouter.get("/pending", signupPending);
+signupRouter.post("/pending/continue", signupPendingContinue);
 router.use("/signup", signupRouter);
+
+// ── Existing-client approval. The emailed token identifies the request; approving
+// additionally requires the caller to be that client's administrator. Tighter
+// limit than the OAuth endpoints: these take a secret in the URL.
+const approvalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
+const requestRouter = express.Router();
+requestRouter.use(express.json({ limit: "10kb" }));
+requestRouter.use(approvalLimiter, requireEnabled);
+requestRouter.get("/:token", connectionRequestDetails);
+requestRouter.post("/:token/reject", connectionRequestReject);
+requestRouter.post(
+  "/:token/approve",
+  protect,
+  authorizeUserType("client"),
+  authorize("admin"),
+  connectionRequestApprove
+);
+router.use("/connection-requests", requestRouter);
 
 // ── Everything below: authenticated, admin of a client/branch (or dooit) ─────
 router.use(express.json({ limit: "100kb" }));

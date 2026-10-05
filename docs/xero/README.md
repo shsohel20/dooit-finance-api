@@ -5,9 +5,9 @@ Backend implementation (Express + Mongoose). Code map:
 | Concern | Location |
 |---|---|
 | Config + startup validation | `config/xero.js` |
-| Models | `models/Xero{Connection,SyncLog,EntityLink,Job,OAuthState,Signup}.js` |
+| Models | `models/Xero{Connection,SyncLog,EntityLink,Job,OAuthState,Signup,ConnectionRequest}.js` |
 | OAuth / tokens / API client | `services/xero/{oauth,tokenService,client}.js` |
-| Mapping / sync / queue / webhook | `services/xero/{mappers,syncService,jobQueue,webhook,signupService}.js` |
+| Mapping / sync / queue / webhook | `services/xero/{mappers,syncService,jobQueue,webhook,signupService,connectionRequestService,loginCode}.js` |
 | HTTP surface | `controllers/xeroController.js`, `routes/xero.js` |
 | Tests | `tests/xero/` — `npm run test:xero` (no MongoDB needed) |
 
@@ -32,7 +32,9 @@ Backend implementation (Express + Mongoose). Code map:
 | `XERO_WEBHOOK_KEY` | for webhooks | Without it every webhook delivery is rejected (401) |
 | `ENCRYPTION_KEY` | yes | Existing 64-hex key; encrypts refresh tokens (AES-256-GCM) |
 | `XERO_POST_CONNECT_URL` | recommended | Settings page URL the callback redirects to (`?xero=connected\|denied\|invalid_state\|error`). If unset the callback answers JSON |
-| `XERO_SIGNUP_URL` | for Sign up with Xero | Web page that finishes signup, e.g. `https://<web-host>/auth/xero`. The API callback redirects there with `?ticket=` / `?loginCode=` / `?error=` |
+| `FRONTEND_URL` | for approval emails | Web base URL used in the emailed approval link (already used elsewhere in the API). Falls back to the origin of `XERO_SIGNUP_URL` |
+| `XERO_CONNECTION_REQUEST_TTL_MIN` | no | Minutes a client has to approve (default 30) |
+| `XERO_SIGNUP_URL` | for Sign up with Xero | Web page that finishes signup, e.g. `https://<web-host>/auth/xero`. The API callback redirects there with `?ticket=` / `?pending=` / `?loginCode=` / `?error=` |
 | `XERO_SCOPES` | no | Space/comma list. Default `offline_access accounting.contacts accounting.transactions accounting.settings`. `offline_access` is always enforced. **Apps created after Xero's granular-scope cut-over may need `accounting.invoices accounting.payments` instead of `accounting.transactions` — check your app's scope list.** |
 | `XERO_SALES_ACCOUNT_CODE` | no | Revenue account for invoice lines (default `200`) |
 | `XERO_PAYMENT_ACCOUNT_CODE` | for payments | Bank account code payments are applied to. Unset ⇒ outbound payments are skipped (logged) |
@@ -62,6 +64,10 @@ Settings ─GET /xero/auth──────────────▶ API  cre
 | `GET /auth` | admin | Returns `{ data: { url } }` (`?redirect=true` → 302) |
 | `GET /callback` | public (state) | OAuth redirect target (connect and signup) |
 | `GET /signup/start`, `GET /signup/prefill`, `POST /signup/complete`, `POST /signup/session` | public (one-time secrets) | Sign up with Xero |
+| `GET /signup/pending?token`, `POST /signup/pending/continue` | public (requester handle) | Requester polls approval / continues once approved |
+| `GET /connection-requests/:token` | public (emailed token) | Approval page data (organisation + requester only) |
+| `POST /connection-requests/:token/approve` | emailed token **+** signed-in client admin | Approve and link the organisation |
+| `POST /connection-requests/:token/reject` | emailed token | Reject the request |
 | `POST /refresh` | admin | Force a token refresh |
 | `POST /disconnect` | admin | Revoke at Xero, wipe tokens locally |
 | `GET /status` | admin | Org name, connected date, last sync, status, error |
@@ -73,28 +79,35 @@ RBAC: `protect` + `authorizeUserType(client, branch, dooit)` + `authorize("admin
 
 ### Sign up with Xero
 
-A new client can start from Xero instead of filling the registration form by hand.
+A client can start from Xero (the App Store "Get this app" link → web `/auth/xero`) instead of filling the registration form by hand. What happens depends on whether the Xero **organisation** already belongs to a Dooit client.
 
 ```
-/auth/xero (or "Continue with Xero" on login, or the Xero App Store launch link)
-  └─ GET /xero/signup/start ─▶ consent at Xero (openid profile email + accounting scopes, nonce)
-        ◀─ /xero/callback ── exchange code → verify id_token (iss/aud/exp/nonce)
-                              → pick org → GET /Organisation → pre-fill
-     ├─ new visitor     → /auth/xero?ticket=…   (nothing created yet)
-     │     GET  /xero/signup/prefill?ticket   → org details + entity types for the form
-     │     POST /xero/signup/complete         → creates User + Client + UserType(client/admin)
-     │                                           + XeroConnection, returns one-time loginCode
-     └─ returning admin → /auth/xero?loginCode=…  (client re-connected, no form)
-  web: signIn("xero", { loginCode }) ─▶ POST /xero/signup/session ─▶ JWT (same shape as /auth/login)
+/auth/xero ─▶ GET /xero/signup/start ─▶ consent at Xero (openid profile email + accounting scopes)
+   ◀─ /xero/callback: verify id_token → org → GET /Organisation
+        │
+        ├─ organisation NOT known ─▶ /auth/xero?ticket=…  (nothing created yet)
+        │     GET  /signup/prefill   → org details + entity types (pre-filled form)
+        │     POST /signup/complete  → User + Client + UserType(client/admin) + XeroConnection
+        │     → one-time loginCode → web signIn("xero") → dashboard
+        │
+        └─ organisation ALREADY belongs to a client ─▶ /auth/xero?pending=…
+              approval request created, email sent to the client's REGISTERED address
+              ── admin approves ──▶ Xero org linked to that client ─▶ requester continues
+              ── admin rejects / link expires ──▶ nothing connected
 ```
 
-* **Pre-filled from Xero:** legal/trading name, ABN/registration number, tax number, phone, website, street address, signed-in user as legal representative. Entity type is chosen by the user (Xero has no equivalent).
-* **Identity policy (product decision):** the Xero-asserted email is trusted and the account is activated immediately. The new account's email is always the Xero one — the form cannot change it. Trade-off: no separate email-OTP step; if you later want one, gate `isActive` in `completeSignup`.
-* **Takeover guard:** if the Xero email matches an existing Dooit user who is *not* a client admin with a client record, signup is refused (409) rather than signing them in.
-* **Secrets:** ticket (30 min) and loginCode (2 min) are random 256-bit, stored only as SHA-256, single-use, and the Xero tokens held meanwhile are AES-256-GCM encrypted with a 1 h TTL. Creation failures roll back and release the ticket for a retry.
-* **Xero app settings:** add `openid profile email` to the app's scopes; set the App Store launch/sign-up URL to the web `/auth/xero`. The redirect URI is unchanged.
-* **Whitelisted form fields only:** name, clientType(Id), registrationNumber, taxId, phone, website, address, legalRepresentative. Client `status` stays at its default (`Pending`) so Dooit's normal review still applies.
-* Public endpoints (`/xero/signup/*`, `/xero/callback`) are rate-limited (60 / 15 min / IP).
+**Security rule:** a Xero email, or an organisation name, can never claim an existing client. Only the client's own administrator approving a request does.
+
+* **How an existing client is detected** (`findExistingClient`): (1) the Xero `tenantId` — any `XeroConnection` row, even revoked; (2) ABN/registration number; (3) exact organisation name. (2) and (3) only ever lead to an approval *email*, never to access.
+* **Approval request** (`XeroConnectionRequest`): status `PENDING_CONFIRMATION → APPROVED | REJECTED | EXPIRED`, expires after `XERO_CONNECTION_REQUEST_TTL_MIN` (default 30). One live request per client + organisation; the same person retrying within 5 minutes reuses it (no second email), anyone else supersedes it.
+* **The email** goes to `Client.email` (else the owning user's email) with *Approve Xero Connection* / *Reject Request* links to `<FRONTEND_URL>/auth/xero/confirm/<token>`. Token: random 256-bit, stored only as SHA-256, single-use, expiring, never in the audit log. Opening the link changes nothing (GET is read-only).
+* **Approve** needs **both** the emailed token **and** a signed-in administrator of that client (`userType client` + `role admin` + that `clientId`). On approval the API re-verifies the Xero authorisation (refresh token still valid, tenant still authorised), links the organisation with fresh tokens, and emails the requester. **Reject** needs only the token (the safe direction).
+* **What the requester gets after approval:** the *organisation* is linked — the requester is **not** made an admin or anything else. They continue into the app only if their email already belongs to a Dooit user with an active membership on that client, and then with exactly that membership (once, within 30 min). Otherwise they are sent to sign in / ask their administrator for access.
+* **Requester screen** shows the masked registered address (`a***@abc.com`), never the full one; the approval page shows only the organisation and who asked, nothing about the client.
+* **Brand-new organisations** keep the original flow: identity trusted, account activated immediately, email always the Xero one, whitelisted form fields only, client `status` left at `Pending`. If the Xero email already belongs to a Dooit user (and the org is new) signup is refused (409) — it never signs them in.
+* Public endpoints are rate-limited (60 / 15 min for OAuth/signup, 30 / 15 min for the token-in-URL approval endpoints).
+* **Audit** (`XeroSyncLog.action`): `XERO_CONNECTION_REQUEST_CREATED / _EMAIL_SENT / _APPROVED / _REJECTED / _EXPIRED`, `XERO_TENANT_LINKED`, with request id, client id, tenant id, requester email, masked target and actor in `meta`.
+* **Xero app settings:** add `openid profile email` to the app's scopes; set the App Store "Get this app"/sign-up URL to the web `/auth/xero`. The redirect URI is unchanged.
 
 ## 4. Sync behaviour
 
@@ -128,6 +141,8 @@ A new client can start from Xero instead of filling the registration form by han
 | Xero error "redirect_uri mismatch" | `XERO_REDIRECT_URI` ≠ the URI registered in the Xero app (scheme, host, path, trailing slash) |
 | `?xero=invalid_state` | State expired (10 min), reused, or the flow was started on another server instance with a different DB |
 | Status `revoked` / "please reconnect" | Refresh token expired (60 days unused) or user removed the app in Xero → Connect again |
+| Requester stuck on "Waiting for confirmation" | The client admin hasn't approved; the email goes to the client's *registered* address (`Client.email`). It expires after `XERO_CONNECTION_REQUEST_TTL_MIN`; the requester can start again. Check `xeroconnectionrequests` and the `XERO_CONNECTION_REQUEST_*` rows in `xerosynclogs` |
+| Approval email not received | `XERO_CONNECTION_REQUEST_EMAIL_SENT` with status `failed` in the sync log (SMTP). The request is closed so a retry works |
 | "already connected to another company" | That Xero org is bound to a different Dooit company; disconnect there first |
 | Webhook intent-to-receive fails | Wrong `XERO_WEBHOOK_KEY`, or a proxy altering the body/dropping `x-xero-signature` |
 | Payments never appear in Xero | `XERO_PAYMENT_ACCOUNT_CODE` unset, or invoice not yet synced — check `GET /logs?status=skipped` |

@@ -13,6 +13,7 @@ const tokens = require("../services/xero/tokenService");
 const queue = require("../services/xero/jobQueue");
 const webhook = require("../services/xero/webhook");
 const signup = require("../services/xero/signupService");
+const requests = require("../services/xero/connectionRequestService");
 const { logSync } = require("../services/xero/syncLog");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -125,7 +126,7 @@ const signupCallback = async ({ saved, code, error, res, next }) => {
   if (!code) return fail("Missing authorisation code", 400, "error");
   try {
     const out = await signup.handleSignupCallback({ code: String(code), state: saved });
-    const params = out.kind === "signup" ? { ticket: out.ticket } : { loginCode: out.loginCode };
+    const params = out.kind === "signup" ? { ticket: out.ticket } : { pending: out.requesterToken };
     if (redirectToSignup(res, params)) return;
     return res.status(200).json({ success: true, data: params });
   } catch (err) {
@@ -158,6 +159,34 @@ exports.signupComplete = asyncHandler(async (req, res) => {
 exports.signupSession = asyncHandler(async (req, res) => {
   const token = await signup.redeemLoginCode(req.body?.loginCode);
   res.status(200).json({ success: true, token });
+});
+
+// ── Existing-client approval (organisation already belongs to a client) ──────
+
+// @route GET /xero/connection-requests/:token — public; token is the credential.
+// Shows only the organisation and who asked.
+exports.connectionRequestDetails = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await requests.getForApprover(req.params.token) });
+});
+
+// @route POST /xero/connection-requests/:token/approve — client administrator only
+exports.connectionRequestApprove = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await requests.approve({ token: req.params.token, user: req.user }) });
+});
+
+// @route POST /xero/connection-requests/:token/reject — the emailed token suffices
+exports.connectionRequestReject = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await requests.reject({ token: req.params.token }) });
+});
+
+// @route GET /xero/signup/pending?token=… — requester polls approval status
+exports.signupPending = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await requests.getRequesterStatus(req.query.token) });
+});
+
+// @route POST /xero/signup/pending/continue — { token } once approved
+exports.signupPendingContinue = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await requests.continueAsRequester(req.body?.token) });
 });
 
 // @route POST /xero/refresh

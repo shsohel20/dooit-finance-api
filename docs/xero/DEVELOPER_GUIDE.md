@@ -65,7 +65,10 @@ Tokens are the sensitive part: refresh tokens are **single-use** at Xero, stored
 | `services/xero/syncService.js` | `pushContact/pushInvoice/pushPayment`, `runOutbound`, `runInbound`, `runSync` |
 | `services/xero/jobQueue.js` | `enqueue`, `processNext`, scheduler, `startXeroWorker` |
 | `services/xero/webhook.js` | Signature verification + event → job intake |
-| `services/xero/signupService.js` | Sign up / sign in with Xero |
+| `services/xero/signupService.js` | Sign up with Xero for a NEW organisation (ticket → prefilled form → account) |
+| `services/xero/connectionRequestService.js` | EXISTING client: match, approval request, email, approve/reject, requester continue, expiry |
+| `services/xero/loginCode.js` | One-time login codes handed to NextAuth |
+| `utils/email-template/xeroEmailTemplate.js` | Approval + decision emails (all Xero-sourced text is HTML-escaped) |
 | `services/xero/syncLog.js` | `logSync()` (audit rows) and `hashPayload()` |
 | `models/Xero*.js` | See §3 |
 | `tests/xero/` | Jest suites, no MongoDB needed |
@@ -92,6 +95,7 @@ Client (tenant) 1 ──── 0..1 XeroConnection ──── tenantId ──�
 User ── UserType(client/admin, clientBelongs) ──┘            ├── * XeroJob
                                                               └── * XeroSyncLog
 XeroOAuthState (10 min) ── XeroSignup (1 h)         ← short-lived OAuth / signup plumbing
+XeroConnectionRequest ── Client                      ← "link this org to an existing client?" approvals
 ```
 
 | Collection | Purpose | Key facts |
@@ -102,6 +106,7 @@ XeroOAuthState (10 min) ── XeroSignup (1 h)         ← short-lived OAuth / 
 | `XeroJob` | Work queue | `status: queued→running→done\|dead`. Partial-unique `dedupeKey` while queued/running. `done` rows expire after 30 days |
 | `XeroOAuthState` | One-time CSRF state | Stores SHA-256 of state. `purpose: connect\|signup`, `nonce` for signup. 10-min TTL |
 | `XeroSignup` | Sign-up bridge | Hashed ticket + login code, encrypted Xero tokens, `prefill`. 1-h TTL |
+| `XeroConnectionRequest` | Approval to link an org to an existing client | `status PENDING_CONFIRMATION→APPROVED\|REJECTED\|EXPIRED`. `tokenHash` (emailed) + `requesterTokenHash` (requester's browser), both SHA-256 + `select:false`; Xero tokens encrypted and **wiped on any final state**. Partial-unique `(clientId, xeroTenantId)` while pending. 30-day TTL |
 
 Existing Dooit models are **read** (Client, Customer, Invoice, Payment) and, for inbound changes, narrowly **written** (see §8 rules 6–7). `Customer` PII is role-encrypted; sync code must treat `"***"`/ciphertext as "absent".
 
@@ -185,7 +190,7 @@ POST /xero/webhook  (express.raw → Buffer)
 worker: inbound_event → fetch resource → applyInboundContact | applyInboundInvoice
 ```
 
-### 4.5 Sign up with Xero
+### 4.5 Sign up with Xero — new organisation
 
 ```mermaid
 sequenceDiagram
@@ -193,24 +198,60 @@ sequenceDiagram
   participant API
   participant X as Xero
   W->>API: GET /xero/signup/start
-  API-->>W: { url }  (state purpose=signup + nonce, openid profile email + accounting scopes)
+  API-->>W: { url }  (state purpose=signup + nonce; openid profile email + accounting scopes)
   W->>X: consent
   X->>API: /xero/callback?code&state
   API->>X: token → id_token (verify iss/aud/exp/nonce), /connections, GET /Organisation
-  alt email matches a client admin
-    API-->>W: 302 /auth/xero?loginCode=…   (client re-connected)
-  else email matches any other user
-    API-->>W: 302 /auth/xero?error=exists   (no takeover)
-  else new
-    API-->>W: 302 /auth/xero?ticket=…       (nothing created yet)
-    W->>API: GET /signup/prefill?ticket → org details + entity types
-    W->>API: POST /signup/complete {ticket, form}
-    API->>API: User + Client + UserType(client/admin) + XeroConnection (rollback on failure)
-    API-->>W: { loginCode }
-  end
+  API->>API: findExistingClient(tenantId, org)  → none
+  API-->>W: 302 /auth/xero?ticket=…    (nothing created yet)
+  W->>API: GET /signup/prefill?ticket → org details + entity types
+  W->>API: POST /signup/complete {ticket, form}
+  API->>API: re-check no client owns the org → User + Client + UserType(client/admin) + XeroConnection (rollback on failure)
+  API-->>W: { loginCode }
   W->>API: signIn("xero",{loginCode}) → POST /signup/session → JWT
 ```
-Why a ticket/loginCode instead of creating the account in the callback: the user gets to review the pre-filled form, and the browser never sees tokens. Both are 256-bit, hashed at rest, single-use (30 min / 2 min).
+Ticket and loginCode are 256-bit, hashed at rest, single-use (30 min / 2 min). The ticket exists so the user can review the pre-filled form and the browser never sees Xero tokens.
+
+### 4.6 Sign up with Xero — organisation already belongs to a client
+
+**The security boundary.** The Xero email proves who the user is *at Xero*; the organisation name is not unique; neither proves they may act for an existing client. So nothing is connected and nobody is signed in until that client's administrator approves.
+
+```mermaid
+sequenceDiagram
+  participant R as Requester (Xero user)
+  participant API
+  participant A as Client admin (registered email)
+  R->>API: …callback (as 4.5)
+  API->>API: findExistingClient → client C   (tenantId ▸ ABN ▸ exact name)
+  API->>API: createRequest: PENDING_CONFIRMATION, tokens hashed, Xero tokens encrypted
+  API-->>A: email: Approve / Reject  → /auth/xero/confirm/<token>
+  API-->>R: 302 /auth/xero?pending=<requesterHandle>   (screen: "sent to a***@abc.com")
+  loop every 4 s
+    R->>API: GET /signup/pending?token
+  end
+  A->>API: GET /connection-requests/:token       (page data: org + requester only)
+  alt approve  (token AND signed-in admin of C)
+    A->>API: POST /connection-requests/:token/approve
+    API->>API: refresh stored Xero token, confirm tenant still authorised
+    API->>API: atomic claim PENDING→APPROVED, upsertConnection(C), wipe stored tokens, audit, email requester
+  else reject (token only)
+    A->>API: POST …/reject → REJECTED, tokens wiped, audit, email requester
+  end
+  R->>API: POST /signup/pending/continue   (once, ≤30 min after approval)
+  API-->>R: existing member of C → loginCode (their OWN membership)  |  otherwise → "sign in"
+```
+
+Key points when changing this code:
+
+* **Matching** lives in `findExistingClient`. `tenantId` is authoritative; ABN and name only ever trigger an *email*. Don't make a weaker signal grant anything.
+* **State machine:** every transition is one `findOneAndUpdate` guarded on `status: PENDING` (and unexpired / unused), so replays and races apply at most once. `approve` claims *before* linking; if the link then fails the request is parked `EXPIRED` (the requester restarts) rather than left half-done.
+* **Duplicate protection:** partial-unique `(clientId, xeroTenantId)` while pending. Same requester within `RESEND_COOLDOWN_MS` (5 min) → reuse (new status handle, **no new email**); otherwise supersede the old request (it becomes `EXPIRED`, its link dies).
+* **Approver authorisation:** `routes/xero.js` runs `protect → authorizeUserType("client") → authorize("admin")`; the service additionally requires `req.user.clientBelongs === request.clientId`. (Note `protect` derives `clientBelongs` from the `Client.user` link — same convention as the rest of the Xero routes.)
+* **No privilege grant:** approval links the *organisation*. `continueAsRequester` never creates a `UserType`; it only reuses an existing active membership on that client.
+* **Secrets:** approver token only ever appears in the email; requester handle only in the requester's tab (the web view moves it to `sessionStorage` and strips it from the URL). Neither is stored or logged in plaintext.
+* **Privacy:** the requester sees a masked address (`maskEmail`); the approval page shows no client details; unknown/expired/forged tokens all return the same generic 404.
+* **Audit events** are the `EVENTS` constants (`XERO_CONNECTION_REQUEST_*`, `XERO_TENANT_LINKED`); `meta` carries ids and a *masked* target — never tokens.
+* **Expiry** is enforced lazily on every read and by `expireDue()` in the worker tick (so the audit row appears even if nobody looks).
 
 ---
 
@@ -299,14 +340,16 @@ In `signupService.completeSignup` set `isActive:false` on the new `User`, send t
 9. **`asyncHandler` doesn't return its promise** — in controller unit tests wait on `res`/`next`, not on the handler (see `oauth.test.js`).
 10. **One `connected` row per company and per org** is enforced by partial-unique indexes; `upsertConnection` also pre-checks to give a friendly 409.
 11. **Dedupe keys are your idempotency.** Use them for anything that can be redelivered/double-clicked (`full:<tenant>`, `wh:<tenant>:<cat>:<id>:<ts>`, `incr:<tenant>:<window>`).
-12. **Signup identity policy:** the account email is always the Xero email; the form can't change it. Don't widen `FORM_FIELDS` to include `email`, `status`, `user`.
+12. **Signup identity policy:** for a NEW organisation the account email is always the Xero email; the form can't change it. Don't widen `FORM_FIELDS` to include `email`, `status`, `user`.
+13. **Never let a Xero email or org name connect/sign in an existing client.** That path is `connectionRequestService` only. Don't add "if the email matches an admin, log them in" shortcuts — it was removed on purpose.
+14. **Never log or return the approver token / requester handle**, and keep Xero-sourced text escaped in emails (`escapeHtml`).
 
 ---
 
 ## 9. Testing
 
 ```bash
-npm run test:xero        # 72 tests, ~2 s, no MongoDB
+npm run test:xero        # 122 tests, ~2 s, no MongoDB
 ```
 Approach: external boundaries are mocked, not the code under test —
 `services/xero/http` (axios) and the Mongoose models via the in-memory `tests/xero/fakes.js`. Env is set in `tests/xero/setup.js`.
@@ -318,7 +361,9 @@ Approach: external boundaries are mocked, not the code under test —
 | `mappers.test.js` | Customer/company/invoice/payment mapping, masked-PII, totals parity |
 | `webhook.test.js` | Signature (good/bad/missing), 401/200 behaviour, dedupe, unsupported events |
 | `sync.test.js` | Duplicate prevention, adopt-on-duplicate, no payment echo |
-| `signup.test.js` | id_token checks, prefill, ticket/loginCode single-use & expiry, rollback, takeover guard |
+| `signup.test.js` | id_token checks, prefill, ticket/loginCode single-use & expiry, rollback; known org → pending request (never auto sign-in) |
+| `connectionRequest.test.js` | Matching priority, request + email, hashed secrets, duplicate protection, approve/reject/expiry/replay, unauthorised approvers, tenant mismatch, requester continue, email escaping |
+| `connectionRequestRoutes.test.js` | Route auth: approve needs a signed-in user, reject/details/pending are token-based |
 
 Not covered (needs a real DB / Xero): index behaviour, the worker loop timing, real Xero payload acceptance. Before a release, run one connect → Sync Now → webhook → disconnect pass against a demo company.
 
@@ -336,7 +381,8 @@ Adding a test: mock `http.send` with `mockResolvedValueOnce({status, data, heade
 | Same item re-sent every sync | Mapper output isn't deterministic (e.g. a timestamp inside the payload). Hash must be stable |
 | Webhook intent-to-receive fails | Wrong `XERO_WEBHOOK_KEY`, or a proxy rewrote the body / dropped the header |
 | `?xero=invalid_state` | State consumed/expired (10 min) or API and web point at different databases |
-| Signup `exists` error | Email already belongs to a non-client-admin user — they should log in and use *Settings → Xero → Connect* |
+| Signup `exists` error | A brand-new org whose Xero email already belongs to a Dooit user — they should log in and use *Settings → Xero → Connect* |
+| Requester "Waiting for confirmation" forever | Admin hasn't acted; check `db.xeroconnectionrequests.find({status:"PENDING_CONFIRMATION"})` and the sync log for `XERO_CONNECTION_REQUEST_EMAIL_SENT` (`failed` = SMTP problem). Requests expire after `XERO_CONNECTION_REQUEST_TTL_MIN` |
 | 403 from Xero | Scope missing on this connection → reconnect (see Change scopes) |
 | 429 storms | Lower sync frequency (`XERO_SYNC_INTERVAL_MIN`); the client already backs off on `Retry-After` |
 
@@ -360,8 +406,8 @@ To force a clean re-push of one entity: delete its `XeroEntityLink` **only if** 
 | OIDC | id_token `iss`, `aud`, `exp`, `nonce` enforced (signature check skipped per OIDC Core §3.1.3.7 because the token comes direct from Xero's token endpoint over TLS) |
 | Webhook auth | HMAC-SHA256 over raw bytes, constant-time compare, 401 on failure |
 | RBAC | `protect` + `authorizeUserType(client,branch,dooit)` + `authorize("admin")`; tenant pinned to the caller's company (dooit staff pass `companyId`) |
-| Public endpoints | rate-limited (60/15 min/IP); each step needs a one-time secret |
-| Account takeover | signup refuses emails belonging to non-client-admin users; account email = Xero email |
+| Public endpoints | rate-limited (60/15 min/IP; 30/15 min for token-in-URL approval routes); each step needs a one-time secret |
+| Account takeover | A Xero email or org name can never claim an existing client: it needs the client's own admin to approve (emailed single-use token **and** signed-in client admin). Existing users are never signed in by Xero email alone; new account email = Xero email |
 | Caching/headers | `Cache-Control: no-store` on all Xero routes; `helmet` global |
 | Audit | every connect/refresh/disconnect/sync/webhook/signup → `XeroSyncLog` with actor |
 | Transport | https redirect/webhook URLs required (config validation rejects non-https except localhost) |
@@ -373,7 +419,7 @@ To force a clean re-push of one entity: delete its `XeroEntityLink` **only if** 
 Repo: `dooit-finance-web`. Patterns used: server actions over `fetchWithAuth` (so the JWT never reaches client JS), thin `page.js` + `views/` component, shadcn/`sonner`.
 
 * **Settings card** (`/dashboard/client/system-settings/xero`): polls `GET /xero/status` every 2.5 s while `syncing`; disables Sync Now while a sync is queued/running; shows org, connected date, last sync, per-entity counts, errors; Disconnect behind a confirm dialog; reconnect button on `revoked`. Reads `?xero=` after the OAuth callback and toasts the result.
-* **Sign up page** (`/auth/xero`, public via the `/auth` prefix in `middleware.js`): no params → starts the flow (works as the App Store launch link); `?ticket` → pre-filled form; `?loginCode` → `signIn("xero", {loginCode})` then `/dashboard/client`; `?error` → message + retry.
+* **Sign up page** (`/auth/xero`, public via the `/auth` prefix in `middleware.js`): no params → starts the flow (works as the App Store launch link); `?ticket` → pre-filled form; `?pending` → "waiting for confirmation" screen (polls; handle kept in `sessionStorage`, stripped from the URL); `?loginCode` → `signIn("xero", {loginCode})` then `/dashboard/client`; `?error` → message + retry. The approver's page is `/auth/xero/confirm/[token]` (public to read/reject; approve needs a signed-in client admin).
 * **NextAuth:** `auth.js` has a second Credentials provider `xero` that redeems the login code at `POST /xero/signup/session` and returns the same user shape as password login, so the rest of the app can't tell the difference.
 * Single-use secrets and React StrictMode: the views guard their on-mount calls with a `useRef` so a dev double-render doesn't burn a ticket/login code.
 

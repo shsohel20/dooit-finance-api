@@ -45,11 +45,13 @@ jest.mock("../../services/xero/oauth", () => ({
   exchangeCode: jest.fn(), fetchConnections: jest.fn(),
 }));
 jest.mock("../../services/xero/client", () => ({ getOrganisationWithToken: jest.fn(), upsertConnection: jest.fn() }));
+jest.mock("../../services/xero/connectionRequestService", () => ({ findExistingClient: jest.fn(), createRequest: jest.fn() }));
 
 const oauth = require("../../services/xero/oauth");
 const xero = require("../../services/xero/client");
 const m = require("../../services/xero/mappers");
 const svc = require("../../services/xero/signupService");
+const requests = require("../../services/xero/connectionRequestService");
 
 const idToken = (over = {}) =>
   jwt.sign({ iss: "https://identity.xero.com", aud: "test-client-id", sub: "s1", xero_userid: "xu1", email: "Owner@Acme.com", given_name: "Olive", family_name: "Owner", nonce: "N1", ...over }, "x", { expiresIn: "5m" });
@@ -71,6 +73,7 @@ const runCallback = async (claims = {}) => {
 beforeEach(() => {
   [mockSignups, mockUsers, mockClients, mockTypes, mockStates].forEach((s) => s.reset());
   jest.clearAllMocks();
+  requests.findExistingClient.mockResolvedValue(null);
   xero.upsertConnection.mockImplementation(async ({ companyId }) => ({ companyId, deleteOne: jest.fn() }));
 });
 
@@ -164,7 +167,7 @@ describe("new visitor: callback -> prefill -> complete -> sign-in", () => {
     const { ticket } = await runCallback();
     await expect(svc.completeSignup({ ticket, form: {} })).rejects.toMatchObject({ statusCode: 400, message: expect.stringMatching(/entity type/i) });
     await mockClients.create({ name: "Acme Pty Ltd" }); // name taken
-    await expect(svc.completeSignup({ ticket, form: { clientType: "Accountants" } })).rejects.toThrow(/already exists/);
+    await expect(svc.completeSignup({ ticket, form: { clientType: "Accountants" } })).rejects.toThrow(/already registered with Dooit/);
     expect(mockUsers.rows).toHaveLength(0);
     await expect(svc.getPrefill(ticket)).resolves.toBeDefined(); // still usable
     await svc.completeSignup({ ticket, form: { clientType: "Accountants", name: "Acme Pty Ltd 2" } });
@@ -198,27 +201,59 @@ describe("new visitor: callback -> prefill -> complete -> sign-in", () => {
   });
 });
 
-describe("returning users", () => {
-  const seedUser = async (withAdmin) => {
-    const u = await mockUsers.create({ email: "owner@acme.com", emailHash: mockCreateEmailKey("owner@acme.com"), getSignedJwtToken: (mm) => `jwt-for-${mm.userType}` });
-    const c = await mockClients.create({ name: "Existing Co", user: u._id });
-    if (withAdmin) await mockTypes.create({ user: u._id, userType: "client", role: "admin", clientBelongs: c._id, isActive: true });
-    return { u, c };
-  };
+describe("organisation already known to Dooit", () => {
+  const existingMatch = { client: { _id: "c-existing", name: "Existing Co" }, matchedBy: "tenant" };
 
-  it("signs a returning client admin straight in and (re)connects their client", async () => {
-    const { u, c } = await seedUser(true);
+  it("opens an approval request instead of signing in or connecting", async () => {
+    requests.findExistingClient.mockResolvedValue(existingMatch);
+    requests.createRequest.mockResolvedValue({ requesterToken: "R-TOKEN", maskedEmail: "a***@abc.com" });
     const out = await runCallback();
-    expect(out.kind).toBe("login");
-    expect(xero.upsertConnection).toHaveBeenCalledWith(expect.objectContaining({ companyId: c._id, userId: u._id }));
-    expect(await svc.redeemLoginCode(out.loginCode)).toBe("jwt-for-client");
-    expect(mockUsers.rows).toHaveLength(1); // nothing new created
+
+    expect(out).toEqual({ kind: "pending", requesterToken: "R-TOKEN", maskedEmail: "a***@abc.com" });
+    expect(requests.findExistingClient).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "t1" }));
+    expect(requests.createRequest).toHaveBeenCalledWith(expect.objectContaining({
+      match: existingMatch, identity: expect.objectContaining({ email: "owner@acme.com" }),
+    }));
+    // Nothing is connected, no account/ticket/login code is created.
+    expect(xero.upsertConnection).not.toHaveBeenCalled();
+    expect(mockSignups.rows).toHaveLength(0);
+    expect(mockUsers.rows).toHaveLength(0);
   });
 
-  it("refuses to sign in an existing account that is not a client admin (no takeover)", async () => {
-    await seedUser(false);
+  it("does NOT sign in a client admin just because the Xero email matches theirs", async () => {
+    const u = await mockUsers.create({ email: "owner@acme.com", emailHash: mockCreateEmailKey("owner@acme.com") });
+    const c = await mockClients.create({ name: "Existing Co", user: u._id });
+    await mockTypes.create({ user: u._id, userType: "client", role: "admin", clientBelongs: c._id, isActive: true });
+    requests.findExistingClient.mockResolvedValue({ client: c, matchedBy: "tenant" });
+    requests.createRequest.mockResolvedValue({ requesterToken: "R", maskedEmail: "o***@acme.com" });
+
+    const out = await runCallback();
+    expect(out.kind).toBe("pending");
+    expect(out.loginCode).toBeUndefined();
+    expect(xero.upsertConnection).not.toHaveBeenCalled();
+  });
+
+  it("a new organisation whose Xero email already belongs to a user is refused (409), never signed in", async () => {
+    await mockUsers.create({ email: "owner@acme.com", emailHash: mockCreateEmailKey("owner@acme.com") });
     await expect(runCallback()).rejects.toMatchObject({ statusCode: 409 });
     expect(xero.upsertConnection).not.toHaveBeenCalled();
-    expect(mockSignups.rows).toHaveLength(0); // tokens discarded
+    expect(mockSignups.rows).toHaveLength(0);
+  });
+
+  it("completeSignup refuses if the organisation became a known client after the ticket was issued", async () => {
+    const { ticket } = await runCallback();
+    requests.findExistingClient.mockResolvedValue(existingMatch);
+    await expect(svc.completeSignup({ ticket, form: { clientType: "Accountants" } })).rejects.toMatchObject({ statusCode: 409 });
+    expect(mockUsers.rows).toHaveLength(0);
+    expect(mockClients.rows).toHaveLength(0);
+  });
+
+  it("shows a friendly message (not the raw validation error) when details clash with a registered client", async () => {
+    const { ticket } = await runCallback();
+    await mockClients.create({ name: "Acme Pty Ltd" });
+    await expect(svc.completeSignup({ ticket, form: { clientType: "Accountants" } })).rejects.toMatchObject({
+      statusCode: 400, message: expect.stringMatching(/already registered with Dooit/i),
+    });
+    await expect(svc.completeSignup({ ticket, form: { clientType: "Accountants" } })).rejects.not.toThrow(/Client with this name/);
   });
 });

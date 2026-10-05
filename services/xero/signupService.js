@@ -8,10 +8,13 @@
 // pre-filled from the Xero organisation; on submit it creates the user, client,
 // membership and Xero connection and signs them in.
 //
-// Identity policy (product decision): the Xero-asserted email is trusted and the
-// account is activated immediately. The email on the new account is ALWAYS the
-// Xero one — the form cannot change it — so the identity that signed in is the
-// identity that is stored.
+// Identity policy (product decision): for a NEW organisation the Xero-asserted
+// email is trusted and the account is activated immediately. The email on the
+// new account is ALWAYS the Xero one — the form cannot change it.
+//
+// An organisation that already belongs to a Dooit client is different: neither
+// the Xero email nor the organisation name may claim it. That case is handed to
+// connectionRequestService, which needs the client's own approval.
 
 const crypto = require("crypto");
 const User = require("../../models/User");
@@ -26,12 +29,12 @@ const oauth = require("./oauth");
 const xero = require("./client");
 const { organisationToClientPrefill } = require("./mappers");
 const { logSync } = require("./syncLog");
+const requests = require("./connectionRequestService");
+const { randomToken, issueLoginCode } = require("./loginCode");
 
 const TICKET_TTL_MS = 30 * 60 * 1000;
-const LOGIN_CODE_TTL_MS = 2 * 60 * 1000;
 
 const sha256 = oauth.sha256;
-const randomToken = () => crypto.randomBytes(32).toString("hex");
 
 // Fields the registration form may set. Everything else is ignored, so a crafted
 // request cannot write status, user links, risk answers etc.
@@ -51,27 +54,14 @@ const startSignup = async () => {
 
 const findUserByEmail = (email) => User.findOne({ emailHash: hashForSearch(email) });
 
-const issueLoginCode = async (signup, { userId, clientId, membershipId }) => {
-  const loginCode = randomToken();
-  await XeroSignup.updateOne(
-    { _id: signup._id },
-    {
-      $set: {
-        loginCodeHash: sha256(loginCode),
-        loginCodeExpiresAt: new Date(Date.now() + LOGIN_CODE_TTL_MS),
-        loginCodeUsed: false,
-        userId,
-        clientId,
-        membershipId,
-      },
-    }
-  );
-  return loginCode;
-};
-
 /**
  * OAuth callback for a signup-purpose state.
- * @returns {Promise<{ kind: "signup", ticket: string } | { kind: "login", loginCode: string }>}
+ *
+ *  • organisation already belongs to a client → open an approval request
+ *  • otherwise                                → ticket for the pre-filled form
+ *
+ * @returns {Promise<{ kind: "signup", ticket: string }
+ *                 | { kind: "pending", requesterToken: string, maskedEmail: string }>}
  */
 const handleSignupCallback = async ({ code, state }) => {
   const tk = await oauth.exchangeCode(code);
@@ -89,7 +79,27 @@ const handleSignupCallback = async ({ code, state }) => {
     xeroUserId: claims.xero_userid || claims.sub,
   };
 
-  const signup = await XeroSignup.create({
+  // ── Organisation already known to Dooit → needs the client's approval ─────
+  const match = await requests.findExistingClient({ tenantId: tenant.tenantId, org });
+  if (match) {
+    const out = await requests.createRequest({ match, tenant, org, identity, tokens: tk });
+    return { kind: "pending", requesterToken: out.requesterToken, maskedEmail: out.maskedEmail };
+  }
+
+  // ── New organisation ──────────────────────────────────────────────────────
+  // The Xero email is the identity of the account we are about to create, so it
+  // must be free. (If it belongs to an existing user they should sign in and
+  // connect Xero from Settings — it never signs them in here.)
+  if (await findUserByEmail(email)) {
+    throw new ErrorResponse(
+      "An account with this email already exists. Sign in to Dooit and connect Xero from System Settings.",
+      409
+    );
+  }
+
+  const ticket = randomToken();
+  await XeroSignup.create({
+    ticketHash: sha256(ticket),
     identity,
     tenant: { tenantId: tenant.tenantId, connectionId: tenant.id, tenantName: tenant.tenantName },
     prefill: organisationToClientPrefill(org, identity),
@@ -97,37 +107,7 @@ const handleSignupCallback = async ({ code, state }) => {
     refreshToken: encrypt(tk.refreshToken),
     tokenExpiresAt: tk.expiresAt,
     scopes: tk.scopes,
-    ticketHash: undefined,
   });
-
-  // ── Returning client admin → sign in directly ─────────────────────────────
-  const existing = await findUserByEmail(email);
-  if (existing) {
-    const client = await Client.findOne({ user: existing._id });
-    const membership = client
-      ? await UserType.findOne({ user: existing._id, userType: "client", role: "admin", clientBelongs: client._id, isActive: true })
-      : null;
-    if (!client || !membership) {
-      await XeroSignup.deleteOne({ _id: signup._id });
-      throw new ErrorResponse(
-        "An account with this email already exists. Sign in to Dooit and connect Xero from System Settings.",
-        409
-      );
-    }
-    await xero.upsertConnection({
-      tokens: { accessToken: tk.accessToken, refreshToken: tk.refreshToken, expiresAt: tk.expiresAt, scopes: tk.scopes },
-      tenant,
-      userId: existing._id,
-      companyId: client._id,
-    });
-    const loginCode = await issueLoginCode(signup, { userId: existing._id, clientId: client._id, membershipId: membership._id });
-    await logSync({ tenantId: tenant.tenantId, companyId: client._id, entity: "connection", action: "xero_login", status: "success", actor: existing._id });
-    return { kind: "login", loginCode };
-  }
-
-  // ── New visitor → hand back a ticket for the pre-filled form ──────────────
-  const ticket = randomToken();
-  await XeroSignup.updateOne({ _id: signup._id }, { $set: { ticketHash: sha256(ticket) } });
   await logSync({ tenantId: tenant.tenantId, entity: "connection", action: "xero_signup_started", status: "success" });
   return { kind: "signup", ticket };
 };
@@ -180,10 +160,24 @@ const completeSignup = async ({ ticket, form = {} }) => {
   if (!input.clientType) throw new ErrorResponse("Please choose your entity type", 400);
   if (await findUserByEmail(email)) throw new ErrorResponse("An account with this email already exists", 409);
 
+  // The organisation may have been registered since the ticket was issued (or the
+  // ticket replayed against another org). Never create a second client for it.
+  if (await requests.findExistingClient({ tenantId: row.tenant.tenantId, org: { LegalName: row.prefill.name, RegistrationNumber: row.prefill.registrationNumber } })) {
+    throw new ErrorResponse(
+      "This organisation is already registered with Dooit. Please start again from Xero to request access.",
+      409
+    );
+  }
+
   // Reuse the standard client uniqueness rules (name / email / reg no / tax id…).
   let validationError = null;
   await validateClientCreation({ ...input, email }, (err) => { validationError = err; });
-  if (validationError) throw validationError;
+  if (validationError) {
+    // Don't surface the raw "Client with this … already exists!" message.
+    throw /already exists/i.test(validationError.message)
+      ? new ErrorResponse("Some of these details match an organisation that is already registered with Dooit. Please review them or contact support.", 400)
+      : validationError;
+  }
 
   // Claim the ticket atomically — a double-click or replay loses here.
   const claimed = await XeroSignup.findOneAndUpdate({ _id: row._id, ticketUsed: false }, { $set: { ticketUsed: true } });

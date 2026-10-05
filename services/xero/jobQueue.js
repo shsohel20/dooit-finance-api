@@ -13,6 +13,7 @@ const { getConfig, isXeroEnabled } = require("../../config/xero");
 const { logSync } = require("./syncLog");
 const sync = require("./syncService");
 const xero = require("./client");
+const connectionRequests = require("./connectionRequestService");
 
 const POLL_MS = 15 * 1000;
 const LOCK_TIMEOUT_MS = 15 * 60 * 1000;
@@ -143,6 +144,7 @@ const startXeroWorker = () => {
     busy = true;
     try {
       await recoverStale();
+      await connectionRequests.expireDue();
       for (let i = 0; i < 20 && (await processNext()); i += 1);
     } catch (err) {
       console.error("[xero] worker error:", err.message);

@@ -33,6 +33,7 @@ const logSync = async ({
   payload,
   payloadHash = null,
   actor = null,
+  meta = null,
 }) => {
   try {
     await XeroSyncLog.create({
@@ -46,6 +47,7 @@ const logSync = async ({
       error: error ? String(error).slice(0, 1000) : null,
       payloadHash: payloadHash || (payload !== undefined ? hashPayload(payload) : null),
       actor,
+      meta,
       timestamp: new Date(),
     });
   } catch (err) {

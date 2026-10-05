@@ -20,6 +20,14 @@ const REQUIRED = ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET", "XERO_REDIRECT_URI"];
 
 const env = () => process.env;
 
+const originOf = (url) => {
+  try {
+    return url ? new URL(url).origin : "";
+  } catch {
+    return "";
+  }
+};
+
 const getConfig = () => {
   const e = env();
   const scopes = (e.XERO_SCOPES || "")
@@ -39,6 +47,10 @@ const getConfig = () => {
     postConnectUrl: e.XERO_POST_CONNECT_URL || "",
     // Web page that finishes "Sign up with Xero" (receives ?ticket / ?loginCode / ?error).
     signupUrl: e.XERO_SIGNUP_URL || "",
+    // Base URL of the web app, used for links in approval emails.
+    webBaseUrl: (e.FRONTEND_URL || originOf(e.XERO_SIGNUP_URL) || "").replace(/\/+$/, ""),
+    // How long a client has to approve a Xero connection request.
+    connectionRequestTtlMs: (Number(e.XERO_CONNECTION_REQUEST_TTL_MIN) || 30) * 60 * 1000,
     // Chart-of-accounts codes Xero needs on invoice lines and payments.
     salesAccountCode: e.XERO_SALES_ACCOUNT_CODE || "200",
     paymentAccountCode: e.XERO_PAYMENT_ACCOUNT_CODE || "",
@@ -86,6 +98,9 @@ const validateXeroConfig = () => {
 
   if (!e.XERO_WEBHOOK_KEY) {
     warnings.push("XERO_WEBHOOK_KEY not set — POST /xero/webhook will reject all deliveries");
+  }
+  if (!e.FRONTEND_URL && !originOf(e.XERO_SIGNUP_URL)) {
+    warnings.push("FRONTEND_URL (or XERO_SIGNUP_URL) not set — Xero connection approval emails will have no usable link");
   }
   if (!e.XERO_PAYMENT_ACCOUNT_CODE) {
     warnings.push("XERO_PAYMENT_ACCOUNT_CODE not set — outbound payments will be skipped");

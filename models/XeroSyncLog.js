@@ -21,6 +21,8 @@ const XeroSyncLogSchema = new Schema(
     error: { type: String, default: null },
     payloadHash: { type: String, default: null },
     actor: { type: Schema.Types.ObjectId, ref: "Users", default: null },
+    // Small, non-secret context (request id, masked emails…). Never tokens.
+    meta: { type: Schema.Types.Mixed, default: null },
     timestamp: { type: Date, default: Date.now },
   },
   { collection: "xerosynclogs", versionKey: false }

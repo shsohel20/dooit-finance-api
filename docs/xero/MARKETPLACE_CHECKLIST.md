@@ -17,6 +17,7 @@ Legend: ✅ implemented & covered · 🟡 implemented, needs verification agains
 - 🟡 Only use Xero data for the stated purpose; document data retention (sync-log TTL is 1 year)
 
 - ✅ "Sign up with Xero" (OpenID Connect) — id_token issuer/audience/nonce/expiry checked
+- ✅ Existing-client protection: a Xero email or organisation name can never claim an existing Dooit client; the client's own admin must approve via an emailed single-use token (audited, rate-limited)
 
 ## Certification-process items
 - ⬜ Connect/disconnect UI in the Next.js Settings page (contract in README §7) with the official "Connect to Xero" button + Xero branding rules
@@ -28,6 +29,8 @@ Legend: ✅ implemented & covered · 🟡 implemented, needs verification agains
 - ⬜ Pen-test / vulnerability-management evidence if requested for the partner tier
 
 ## Known limitations
+- A signed-out client admin who follows the approval email must sign in and then reopen the link (the login page doesn't honour `callbackUrl`).
+- Approval links the organisation only; the requester gets no access unless they already have a membership on that client.
 - Single Xero organisation per Dooit company.
 - Refunds (credit notes), inbound voids and deletions are not auto-applied.
 - Customer sync covers individual-KYC customers; company-type KYC records sync via the owning company contact.
