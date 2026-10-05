@@ -139,4 +139,6 @@ A new client can start from Xero instead of filling the registration form by han
 
 Settings → Xero card: `GET /xero/status` (poll every 2–3 s while `syncing`), **Connect** → `GET /xero/auth` then `window.location = data.url`, **Sync Now** → `POST /xero/sync` (disable while `syncing`), **Disconnect** → `POST /xero/disconnect`. Show `tenantName`, `connectedAt`, `lastSyncAt`, `lastSyncStatus`, `lastSyncError`, `lastSyncSummary`; on `status: "revoked"` show *Reconnect*. Handle `?xero=` on return from the callback.
 
+Developer deep-dive (architecture, recipes, runbook): [DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md).
+
 Marketplace readiness: see [MARKETPLACE_CHECKLIST.md](./MARKETPLACE_CHECKLIST.md).
