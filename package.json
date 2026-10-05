@@ -11,6 +11,7 @@
     "test": "jest --testPathPatterns=tests/training --runInBand --forceExit",
     "test:watch": "jest --testPathPatterns=tests/training --runInBand --watch",
     "test:staff": "jest --testPathPatterns=tests/staff --runInBand --forceExit",
+    "test:xero": "jest --testPathPatterns=tests/xero --runInBand --forceExit",
     "test:billing": "jest --testPathPatterns=tests/billing --runInBand --forceExit"
   },
   "jest": {

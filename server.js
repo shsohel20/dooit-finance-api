@@ -71,6 +71,8 @@ app.use(helmet());
 app.use(hpp());
 ///Mount File Upload Route
 app.use("/api/v1", routes);
+// Xero is also reachable at /api/xero (the path registered with Xero's app).
+app.use("/api/xero", require("./routes/xero"));
 
 //SwaggerUI Docs
 
@@ -98,6 +100,14 @@ startCraReviewNotificationJob();
 // Produces DRAFTS only unless BILLING_AUTO_ISSUE=true.
 const { startBillingCycleJob } = require("./services/billing/billingCycleJob");
 startBillingCycleJob();
+
+// Xero integration — validate config, then start the sync/queue worker.
+// A missing or partial config disables the integration; it never stops the API.
+const { validateXeroConfig } = require("./config/xero");
+const xeroConfig = validateXeroConfig();
+xeroConfig.errors.forEach((m) => console.error(`[xero] config error: ${m}`.red));
+xeroConfig.warnings.forEach((m) => console.warn(`[xero] ${m}`.yellow));
+if (xeroConfig.enabled) require("./services/xero/jobQueue").startXeroWorker();
 
 //Handle unhandled promise rejection
 process.on("unhandledRejection", (err, promise) => {

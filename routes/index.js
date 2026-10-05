@@ -100,6 +100,7 @@ const subscription = require("./subscription");
 const usage = require("./usage");
 const invoice = require("./invoice");
 const payment = require("./payment");
+const xero = require("./xero");
 
 // Mount routes
 router.use("/fileupload", fileUpload);
@@ -206,5 +207,8 @@ router.use("/subscription", subscription);
 router.use("/usage", usage);
 router.use("/invoice", invoice);
 router.use("/payment", payment);
+
+// ── Xero accounting integration ──────────────────────────────────────────────
+router.use("/xero", xero);
 
 module.exports = router;
