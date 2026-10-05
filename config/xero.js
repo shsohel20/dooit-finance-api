@@ -13,6 +13,9 @@ const DEFAULT_SCOPES = [
   "accounting.settings",
 ];
 
+// OpenID Connect scopes added for "Sign up with Xero" (identity + email).
+const SIGNUP_IDENTITY_SCOPES = ["openid", "profile", "email"];
+
 const REQUIRED = ["XERO_CLIENT_ID", "XERO_CLIENT_SECRET", "XERO_REDIRECT_URI"];
 
 const env = () => process.env;
@@ -34,6 +37,8 @@ const getConfig = () => {
     scopes: finalScopes,
     // Where the browser lands after the OAuth callback (the Settings page).
     postConnectUrl: e.XERO_POST_CONNECT_URL || "",
+    // Web page that finishes "Sign up with Xero" (receives ?ticket / ?loginCode / ?error).
+    signupUrl: e.XERO_SIGNUP_URL || "",
     // Chart-of-accounts codes Xero needs on invoice lines and payments.
     salesAccountCode: e.XERO_SALES_ACCOUNT_CODE || "200",
     paymentAccountCode: e.XERO_PAYMENT_ACCOUNT_CODE || "",
@@ -91,4 +96,4 @@ const validateXeroConfig = () => {
 
 const isXeroEnabled = () => validateXeroConfig().enabled;
 
-module.exports = { getConfig, validateXeroConfig, isXeroEnabled, DEFAULT_SCOPES };
+module.exports = { SIGNUP_IDENTITY_SCOPES, getConfig, validateXeroConfig, isXeroEnabled, DEFAULT_SCOPES };

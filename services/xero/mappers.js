@@ -151,7 +151,47 @@ const parseXeroDate = (v) => {
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
+/**
+ * Xero Organisation (+ the signed-in Xero user) -> pre-filled Dooit client form.
+ * Only fills what Xero actually knows; `clientType` is left for the user, as it
+ * is a regulated-sector choice Xero has no equivalent of.
+ */
+const organisationToClientPrefill = (org = {}, identity = {}) => {
+  const addresses = org.Addresses || [];
+  const a = addresses.find((x) => x.AddressType === "STREET") || addresses.find((x) => x.AddressType === "POBOX") || {};
+  const street = [a.AddressLine1, a.AddressLine2, a.AddressLine3, a.AddressLine4].map(clean).filter(Boolean).join(", ");
+
+  const ph = (org.Phones || []).find((p) => p.PhoneNumber && ["DEFAULT", "OFFICE"].includes(p.PhoneType)) || (org.Phones || []).find((p) => p.PhoneNumber);
+  const phone = ph ? [ph.PhoneCountryCode && `+${ph.PhoneCountryCode}`, ph.PhoneAreaCode, ph.PhoneNumber].filter(Boolean).join(" ") : undefined;
+
+  const site = (org.ExternalLinks || []).find((l) => l.LinkType === "Website" && l.Url)?.Url;
+  const fullName = [identity.givenName, identity.familyName].filter(Boolean).join(" ");
+
+  return compact({
+    name: clean(org.LegalName) || clean(org.Name),
+    tradingName: clean(org.Name),
+    registrationNumber: clean(org.RegistrationNumber),
+    taxId: clean(org.TaxNumber),
+    email: clean(identity.email)?.toLowerCase(),
+    phone,
+    website: clean(site),
+    address: compact({
+      street: clean(street),
+      city: clean(a.City),
+      state: clean(a.Region),
+      zipcode: clean(a.PostalCode),
+      country: clean(a.Country) || clean(org.CountryCode),
+    }),
+    legalRepresentative: compact({
+      name: clean(fullName),
+      email: clean(identity.email)?.toLowerCase(),
+    }),
+    xeroOrganisationType: clean(org.OrganisationType),
+  });
+};
+
 module.exports = {
+  organisationToClientPrefill,
   customerToContact,
   companyToContact,
   invoiceToXero,

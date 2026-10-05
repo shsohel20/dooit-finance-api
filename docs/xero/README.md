@@ -5,9 +5,9 @@ Backend implementation (Express + Mongoose). Code map:
 | Concern | Location |
 |---|---|
 | Config + startup validation | `config/xero.js` |
-| Models | `models/Xero{Connection,SyncLog,EntityLink,Job,OAuthState}.js` |
+| Models | `models/Xero{Connection,SyncLog,EntityLink,Job,OAuthState,Signup}.js` |
 | OAuth / tokens / API client | `services/xero/{oauth,tokenService,client}.js` |
-| Mapping / sync / queue / webhook | `services/xero/{mappers,syncService,jobQueue,webhook}.js` |
+| Mapping / sync / queue / webhook | `services/xero/{mappers,syncService,jobQueue,webhook,signupService}.js` |
 | HTTP surface | `controllers/xeroController.js`, `routes/xero.js` |
 | Tests | `tests/xero/` — `npm run test:xero` (no MongoDB needed) |
 
@@ -32,6 +32,7 @@ Backend implementation (Express + Mongoose). Code map:
 | `XERO_WEBHOOK_KEY` | for webhooks | Without it every webhook delivery is rejected (401) |
 | `ENCRYPTION_KEY` | yes | Existing 64-hex key; encrypts refresh tokens (AES-256-GCM) |
 | `XERO_POST_CONNECT_URL` | recommended | Settings page URL the callback redirects to (`?xero=connected\|denied\|invalid_state\|error`). If unset the callback answers JSON |
+| `XERO_SIGNUP_URL` | for Sign up with Xero | Web page that finishes signup, e.g. `https://<web-host>/auth/xero`. The API callback redirects there with `?ticket=` / `?loginCode=` / `?error=` |
 | `XERO_SCOPES` | no | Space/comma list. Default `offline_access accounting.contacts accounting.transactions accounting.settings`. `offline_access` is always enforced. **Apps created after Xero's granular-scope cut-over may need `accounting.invoices accounting.payments` instead of `accounting.transactions` — check your app's scope list.** |
 | `XERO_SALES_ACCOUNT_CODE` | no | Revenue account for invoice lines (default `200`) |
 | `XERO_PAYMENT_ACCOUNT_CODE` | for payments | Bank account code payments are applied to. Unset ⇒ outbound payments are skipped (logged) |
@@ -59,7 +60,8 @@ Settings ─GET /xero/auth──────────────▶ API  cre
 | Route (under `/api/v1/xero`) | Auth | Purpose |
 |---|---|---|
 | `GET /auth` | admin | Returns `{ data: { url } }` (`?redirect=true` → 302) |
-| `GET /callback` | public (state) | OAuth redirect target |
+| `GET /callback` | public (state) | OAuth redirect target (connect and signup) |
+| `GET /signup/start`, `GET /signup/prefill`, `POST /signup/complete`, `POST /signup/session` | public (one-time secrets) | Sign up with Xero |
 | `POST /refresh` | admin | Force a token refresh |
 | `POST /disconnect` | admin | Revoke at Xero, wipe tokens locally |
 | `GET /status` | admin | Org name, connected date, last sync, status, error |
@@ -68,6 +70,31 @@ Settings ─GET /xero/auth──────────────▶ API  cre
 | `POST /webhook` | public (HMAC) | Xero webhook intake |
 
 RBAC: `protect` + `authorizeUserType(client, branch, dooit)` + `authorize("admin")`. Client/branch users act on their own company; dooit staff pass `?companyId=`. Tokens are never serialised (`select:false` + `toJSON` strip). All responses are `Cache-Control: no-store`; `helmet` is global.
+
+### Sign up with Xero
+
+A new client can start from Xero instead of filling the registration form by hand.
+
+```
+/auth/xero (or "Continue with Xero" on login, or the Xero App Store launch link)
+  └─ GET /xero/signup/start ─▶ consent at Xero (openid profile email + accounting scopes, nonce)
+        ◀─ /xero/callback ── exchange code → verify id_token (iss/aud/exp/nonce)
+                              → pick org → GET /Organisation → pre-fill
+     ├─ new visitor     → /auth/xero?ticket=…   (nothing created yet)
+     │     GET  /xero/signup/prefill?ticket   → org details + entity types for the form
+     │     POST /xero/signup/complete         → creates User + Client + UserType(client/admin)
+     │                                           + XeroConnection, returns one-time loginCode
+     └─ returning admin → /auth/xero?loginCode=…  (client re-connected, no form)
+  web: signIn("xero", { loginCode }) ─▶ POST /xero/signup/session ─▶ JWT (same shape as /auth/login)
+```
+
+* **Pre-filled from Xero:** legal/trading name, ABN/registration number, tax number, phone, website, street address, signed-in user as legal representative. Entity type is chosen by the user (Xero has no equivalent).
+* **Identity policy (product decision):** the Xero-asserted email is trusted and the account is activated immediately. The new account's email is always the Xero one — the form cannot change it. Trade-off: no separate email-OTP step; if you later want one, gate `isActive` in `completeSignup`.
+* **Takeover guard:** if the Xero email matches an existing Dooit user who is *not* a client admin with a client record, signup is refused (409) rather than signing them in.
+* **Secrets:** ticket (30 min) and loginCode (2 min) are random 256-bit, stored only as SHA-256, single-use, and the Xero tokens held meanwhile are AES-256-GCM encrypted with a 1 h TTL. Creation failures roll back and release the ticket for a retry.
+* **Xero app settings:** add `openid profile email` to the app's scopes; set the App Store launch/sign-up URL to the web `/auth/xero`. The redirect URI is unchanged.
+* **Whitelisted form fields only:** name, clientType(Id), registrationNumber, taxId, phone, website, address, legalRepresentative. Client `status` stays at its default (`Pending`) so Dooit's normal review still applies.
+* Public endpoints (`/xero/signup/*`, `/xero/callback`) are rate-limited (60 / 15 min / IP).
 
 ## 4. Sync behaviour
 

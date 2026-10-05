@@ -16,6 +16,8 @@ Legend: ✅ implemented & covered · 🟡 implemented, needs verification agains
 - 🟡 Contact/Invoice/Payment payload acceptance (tax types, account codes) — run against a Xero demo company
 - 🟡 Only use Xero data for the stated purpose; document data retention (sync-log TTL is 1 year)
 
+- ✅ "Sign up with Xero" (OpenID Connect) — id_token issuer/audience/nonce/expiry checked
+
 ## Certification-process items
 - ⬜ Connect/disconnect UI in the Next.js Settings page (contract in README §7) with the official "Connect to Xero" button + Xero branding rules
 - ⬜ Connection shown with org name; **disconnect** clearly available

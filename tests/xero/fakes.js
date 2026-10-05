@@ -7,6 +7,7 @@ const match = (doc, filter) =>
       if ("$in" in v) return v.$in.map(String).includes(String(doc[k]));
       if ("$ne" in v) return String(doc[k]) !== String(v.$ne);
       if ("$lte" in v) return doc[k] <= v.$lte;
+      if ("$gt" in v) return doc[k] > v.$gt;
       return true;
     }
     return String(doc[k]) === String(v);
@@ -34,6 +35,7 @@ const makeStore = (uniqueKeys = []) => {
       if (!r) return { modifiedCount: 0 };
       Object.assign(r, u.$set || {}); return { modifiedCount: 1 };
     },
+    deleteOne: async (f) => { const i = rows.findIndex((x) => match(x, f)); if (i >= 0) rows.splice(i, 1); },
     findOneAndUpdate: async (f, u, o = {}) => {
       let r = rows.find((x) => match(x, f));
       if (!r && o.upsert) { r = { _id: `id${++seq}`, ...Object.fromEntries(Object.entries(f).filter(([, v]) => typeof v !== "object")) }; rows.push(r); }

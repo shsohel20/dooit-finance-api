@@ -189,15 +189,10 @@ const createPayment = async (conn, payment) => {
 // ── Connection lifecycle ─────────────────────────────────────────────────────
 
 /**
- * Complete the OAuth handshake: exchange the code, resolve the organisation and
- * persist an encrypted connection for `companyId`. (Used by the callback route.)
+ * Persist (or refresh) the company's connection from a token set + chosen
+ * organisation. Shared by the in-app connect flow and Sign up with Xero.
  */
-const connect = async ({ code, userId, companyId }) => {
-  const tk = await oauth.exchangeCode(code);
-  const connections = await oauth.fetchConnections(tk.accessToken);
-  const tenant = oauth.pickNewestTenant(connections);
-  if (!tenant) throw new ErrorResponse("No Xero organisation was authorised", 400);
-
+const upsertConnection = async ({ tokens: tk, tenant, userId, companyId }) => {
   const taken = await XeroConnection.findOne({
     tenantId: tenant.tenantId,
     status: "connected",
@@ -242,6 +237,41 @@ const connect = async ({ code, userId, companyId }) => {
     status: "success",
     actor: userId,
   });
+  return conn;
+};
+
+/** Organisation profile using a raw access token (before a connection exists). */
+const getOrganisationWithToken = async (accessToken, tenantId) => {
+  const cfg = getConfig();
+  const res = await http.send({
+    method: "GET",
+    url: `${cfg.apiUrl}/api.xro/2.0/Organisation`,
+    headers: { Authorization: `Bearer ${accessToken}`, "xero-tenant-id": tenantId, Accept: "application/json" },
+  });
+  if (res.status !== 200) throw toError(res.status, res.data);
+  return res.data?.Organisations?.[0] || null;
+};
+
+/**
+ * Complete the OAuth handshake: exchange the code, resolve the organisation and
+ * persist an encrypted connection for `companyId`. (Used by the callback route.)
+ */
+const connect = async ({ code, userId, companyId }) => {
+  const tk = await oauth.exchangeCode(code);
+  const connections = await oauth.fetchConnections(tk.accessToken);
+  const tenant = oauth.pickNewestTenant(connections);
+  if (!tenant) throw new ErrorResponse("No Xero organisation was authorised", 400);
+
+  const taken = await XeroConnection.findOne({
+    tenantId: tenant.tenantId,
+    status: "connected",
+    companyId: { $ne: companyId },
+  }).lean();
+  if (taken) {
+    throw new ErrorResponse("This Xero organisation is already connected to another company", 409);
+  }
+
+  const conn = await upsertConnection({ tokens: tk, tenant, userId, companyId });
   return conn;
 };
 
@@ -295,6 +325,8 @@ const disconnect = async (conn, { actor = null } = {}) => {
 module.exports = {
   request,
   connect,
+  upsertConnection,
+  getOrganisationWithToken,
   disconnect,
   getContacts,
   createContact,

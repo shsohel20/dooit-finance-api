@@ -5,7 +5,8 @@
 const crypto = require("crypto");
 const XeroOAuthState = require("../../models/XeroOAuthState");
 const ErrorResponse = require("../../utils/errorResponse");
-const { getConfig } = require("../../config/xero");
+const jwt = require("jsonwebtoken");
+const { getConfig, SIGNUP_IDENTITY_SCOPES } = require("../../config/xero");
 const http = require("./http");
 
 const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
@@ -20,20 +21,30 @@ const createState = async (userId, companyId) => {
   return state;
 };
 
+/** State for an anonymous "Sign up with Xero". Returns { state, nonce }. */
+const createSignupState = async () => {
+  const state = crypto.randomBytes(32).toString("hex");
+  const nonce = crypto.randomBytes(16).toString("hex");
+  await XeroOAuthState.create({ stateHash: sha256(state), purpose: "signup", nonce });
+  return { state, nonce };
+};
+
 /** Atomically consume a state. Returns the stored row, or null if unknown/expired/replayed. */
 const consumeState = async (state) => {
   if (!state || typeof state !== "string" || state.length > 256) return null;
   return XeroOAuthState.findOneAndDelete({ stateHash: sha256(state) }).lean();
 };
 
-const buildAuthUrl = (state) => {
+const buildAuthUrl = (state, { signup = false, nonce } = {}) => {
   const cfg = getConfig();
+  const scopes = signup ? [...new Set([...SIGNUP_IDENTITY_SCOPES, ...cfg.scopes])] : cfg.scopes;
   const params = new URLSearchParams({
     response_type: "code",
     client_id: cfg.clientId,
     redirect_uri: cfg.redirectUri,
-    scope: cfg.scopes.join(" "),
+    scope: scopes.join(" "),
     state,
+    ...(signup && nonce ? { nonce } : {}),
   });
   return `${cfg.loginUrl}/identity/connect/authorize?${params.toString()}`;
 };
@@ -59,7 +70,30 @@ const normaliseTokens = (data) => ({
   refreshToken: data.refresh_token,
   expiresAt: new Date(Date.now() + (Number(data.expires_in) || 1800) * 1000),
   scopes: typeof data.scope === "string" ? data.scope.split(" ").filter(Boolean) : [],
+  idToken: data.id_token || null,
 });
+
+/**
+ * Read the OpenID Connect id_token claims.
+ *
+ * The token is obtained straight from Xero's token endpoint over TLS with our
+ * client secret, which OIDC Core §3.1.3.7 accepts in place of signature
+ * verification. We still enforce issuer, audience, expiry and the nonce we
+ * issued, so a token minted for another app or flow is rejected.
+ */
+const readIdToken = (idToken, expectedNonce) => {
+  const cfg = getConfig();
+  const claims = idToken ? jwt.decode(idToken) : null;
+  const bad = (why) => new ErrorResponse(`Invalid Xero identity token (${why})`, 400);
+  if (!claims || typeof claims !== "object") throw bad("missing");
+  if (claims.iss !== "https://identity.xero.com") throw bad("issuer");
+  const aud = [].concat(claims.aud || []);
+  if (!aud.includes(cfg.clientId)) throw bad("audience");
+  if (!claims.exp || claims.exp * 1000 < Date.now()) throw bad("expired");
+  if (expectedNonce && claims.nonce !== expectedNonce) throw bad("nonce");
+  if (!claims.email) throw bad("no email");
+  return claims;
+};
 
 const exchangeCode = async (code) => {
   const cfg = getConfig();
@@ -101,6 +135,8 @@ const pickNewestTenant = (connections) =>
 
 module.exports = {
   createState,
+  createSignupState,
+  readIdToken,
   consumeState,
   buildAuthUrl,
   tokenRequest,

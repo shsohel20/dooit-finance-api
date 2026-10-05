@@ -12,6 +12,7 @@ const oauth = require("../services/xero/oauth");
 const tokens = require("../services/xero/tokenService");
 const queue = require("../services/xero/jobQueue");
 const webhook = require("../services/xero/webhook");
+const signup = require("../services/xero/signupService");
 const { logSync } = require("../services/xero/syncLog");
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -87,6 +88,10 @@ exports.callback = asyncHandler(async (req, res, next) => {
 
   const saved = await oauth.consumeState(state);
   if (!saved) return fail("Invalid or expired authorisation state", 400, "invalid_state");
+
+  // "Sign up with Xero" — anonymous; resolved by the signup service.
+  if (saved.purpose === "signup") return signupCallback({ saved, code, error, res, next });
+
   if (error) return fail("Xero authorisation was cancelled", 400, "denied");
   if (!code) return fail("Missing authorisation code", 400);
 
@@ -98,6 +103,61 @@ exports.callback = asyncHandler(async (req, res, next) => {
     await logSync({ companyId: saved.companyId, entity: "connection", action: "connect", status: "failed", error: err.message, actor: saved.userId });
     return fail(err.statusCode && err.statusCode < 500 ? err.message : "Could not complete the Xero connection", err.statusCode || 502);
   }
+});
+
+// ── Sign up with Xero ────────────────────────────────────────────────────────
+
+const redirectToSignup = (res, params) => {
+  const { signupUrl } = getConfig();
+  if (!signupUrl) return false;
+  const url = new URL(signupUrl);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  res.redirect(url.toString());
+  return true;
+};
+
+const signupCallback = async ({ saved, code, error, res, next }) => {
+  const fail = (message, status, reason) => {
+    if (redirectToSignup(res, { error: reason, message })) return;
+    return next(new ErrorResponse(message, status));
+  };
+  if (error) return fail("Xero sign-up was cancelled", 400, "denied");
+  if (!code) return fail("Missing authorisation code", 400, "error");
+  try {
+    const out = await signup.handleSignupCallback({ code: String(code), state: saved });
+    const params = out.kind === "signup" ? { ticket: out.ticket } : { loginCode: out.loginCode };
+    if (redirectToSignup(res, params)) return;
+    return res.status(200).json({ success: true, data: params });
+  } catch (err) {
+    await logSync({ entity: "connection", action: "xero_signup", status: "failed", error: err.message });
+    const safe = err.statusCode && err.statusCode < 500 ? err.message : "Could not sign up with Xero";
+    return fail(safe, err.statusCode || 502, err.statusCode === 409 ? "exists" : "error");
+  }
+};
+
+// @route GET /xero/signup/start — public; returns { url } (or 302 with ?redirect=true)
+exports.signupStart = asyncHandler(async (req, res) => {
+  const url = await signup.startSignup();
+  if (req.query.redirect === "true") return res.redirect(url);
+  res.status(200).json({ success: true, data: { url } });
+});
+
+// @route GET /xero/signup/prefill?ticket=… — public; ticket is the credential
+exports.signupPrefill = asyncHandler(async (req, res) => {
+  res.status(200).json({ success: true, data: await signup.getPrefill(req.query.ticket) });
+});
+
+// @route POST /xero/signup/complete — { ticket, ...form }
+exports.signupComplete = asyncHandler(async (req, res) => {
+  const { ticket, ...form } = req.body || {};
+  const data = await signup.completeSignup({ ticket, form });
+  res.status(201).json({ success: true, data });
+});
+
+// @route POST /xero/signup/session — { loginCode } → { token } (same shape as /auth/login)
+exports.signupSession = asyncHandler(async (req, res) => {
+  const token = await signup.redeemLoginCode(req.body?.loginCode);
+  res.status(200).json({ success: true, token });
 });
 
 // @route POST /xero/refresh
